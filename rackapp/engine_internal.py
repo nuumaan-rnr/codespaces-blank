@@ -1,17 +1,23 @@
-"""Built-in 2D frame FEA engine.
+"""Built-in 3D frame FEA engine.
 
-Capabilities (the subset EN 15512 needs for the down-aisle spine model):
-  * Euler-Bernoulli beam-column elements in the XZ plane
-  * semi-rigid member ends: rotational springs condensed into the element
-    (internal end-rotation DOFs eliminated by static condensation)
-  * semi-rigid supports: rotational spring to ground at base nodes
-  * second-order (P-Delta) analysis: geometric stiffness, iterated until
-    the displacement increment converges
+Capabilities (what EN 15512 needs for the full rack model):
+  * 12-DOF Euler-Bernoulli space beam-column elements (axial, torsion,
+    biaxial bending) -> My AND Mz internal moments for biaxial checks
+  * truss members (axial only) for the cross-aisle frame bracing
+  * semi-rigid member ends: rotational springs about local y and/or z,
+    condensed into the element (internal end-rotation DOFs eliminated)
+  * semi-rigid supports: rotational springs to ground about global X / Y
+  * second-order (P-Delta) analysis: geometric stiffness in both bending
+    planes, iterated until the displacement increment converges
   * line loads (consistent, condensed fixed-end forces) and nodal loads
 
-DOFs per node: [ux, uz, ry]   (X right, Z up, ry counter-clockwise)
+DOFs per node: [ux, uy, uz, rx, ry, rz]  (global; X down-aisle, Z up).
 
-Sign conventions for results follow `results.MemberResult`.
+Member local axes: local x from node i to j; for non-vertical members the
+local y axis is horizontal (z_g x x_l) so local z points "up"; for vertical
+members local y = global Y, local z = -global X. Hence for uprights, section
+Iy governs down-aisle bending and Iz cross-aisle bending; for beams, Iy is
+the major (vertical-plane) axis.
 """
 
 from __future__ import annotations
@@ -22,123 +28,202 @@ from .model import RackModel, Member, RIGID
 from .loads import LoadCase, Combination
 from .results import AnalysisResults, ComboResult, MemberResult, NodeResult, Reaction
 
-NDOF = 3  # per node
+NDOF = 6  # per node
+
+# local DOF indices of the end rotations that can be released
+REL_RY1, REL_RZ1, REL_RY2, REL_RZ2 = 4, 5, 10, 11
 
 
 class SingularModelError(RuntimeError):
     pass
 
 
-def _beam_k6(E: float, A: float, I: float, L: float) -> np.ndarray:
-    """Local elastic stiffness, DOFs [u1, w1, r1, u2, w2, r2]."""
-    k = np.zeros((6, 6))
-    ea, ei = E * A / L, E * I
-    k[0, 0] = k[3, 3] = ea
-    k[0, 3] = k[3, 0] = -ea
-    c1, c2, c3, c4 = 12 * ei / L**3, 6 * ei / L**2, 4 * ei / L, 2 * ei / L
-    k[1, 1] = k[4, 4] = c1
-    k[1, 4] = k[4, 1] = -c1
-    k[1, 2] = k[2, 1] = k[1, 5] = k[5, 1] = c2
-    k[2, 4] = k[4, 2] = k[4, 5] = k[5, 4] = -c2
-    k[2, 2] = k[5, 5] = c3
-    k[2, 5] = k[5, 2] = c4
-    return k
+def _bend_block(EI: float, L: float, sign: float) -> np.ndarray:
+    """4x4 bending block for (v1, r1, v2, r2).
+    sign=+1: (uy, rz) plane (about local z); sign=-1: (uz, ry) plane."""
+    a = 12 * EI / L**3
+    b = sign * 6 * EI / L**2
+    c = 4 * EI / L
+    d = 2 * EI / L
+    return np.array([
+        [a, b, -a, b],
+        [b, c, -b, d],
+        [-a, -b, a, -b],
+        [b, d, -b, c],
+    ])
 
 
-def _beam_kg6(N: float, L: float) -> np.ndarray:
-    """Local geometric stiffness for axial force N (tension positive)."""
-    kg = np.zeros((6, 6))
-    c = N / L
-    kg[1, 1] = kg[4, 4] = 1.2 * c
-    kg[1, 4] = kg[4, 1] = -1.2 * c
-    s = c * L / 10.0
-    kg[1, 2] = kg[2, 1] = kg[1, 5] = kg[5, 1] = s
-    kg[2, 4] = kg[4, 2] = kg[4, 5] = kg[5, 4] = -s
-    kg[2, 2] = kg[5, 5] = 2.0 * c * L**2 / 15.0
-    kg[2, 5] = kg[5, 2] = -c * L**2 / 30.0
-    return kg
+def _geo_block(N: float, L: float, sign: float) -> np.ndarray:
+    """Geometric stiffness bending block, same DOF ordering as _bend_block."""
+    a = 1.2 * N / L
+    b = sign * N / 10.0
+    c = 2.0 * N * L / 15.0
+    d = -N * L / 30.0
+    return np.array([
+        [a, b, -a, b],
+        [b, c, -b, d],
+        [-a, -b, a, -b],
+        [b, d, -b, c],
+    ])
+
+
+# local DOF indices of the two bending planes
+PLANE_Z = [1, 5, 7, 11]    # (uy1, rz1, uy2, rz2), bending about local z
+PLANE_Y = [2, 4, 8, 10]    # (uz1, ry1, uz2, ry2), bending about local y
+
+
+def _rotation(dx: float, dy: float, dz: float, L: float) -> np.ndarray:
+    """3x3 matrix with rows = local x, y, z axes in global coordinates."""
+    x = np.array([dx, dy, dz]) / L
+    if abs(x[2]) > 0.9999:                  # vertical member
+        y = np.array([0.0, 1.0, 0.0])
+    else:
+        y = np.cross([0.0, 0.0, 1.0], x)
+        y /= np.linalg.norm(y)
+    z = np.cross(x, y)
+    return np.vstack([x, y, z])
 
 
 class _Element:
-    """Beam element with optional rotational end springs.
+    """Space frame element with optional rotational end springs.
 
-    Internal 8-DOF vector: [ux1, uz1, rn1, ux2, uz2, rn2, ri1, ri2]
-    where rn = nodal rotation, ri = beam-end rotation. The springs connect
-    rn<->ri; rigid ends tie them with a large penalty stiffness.
-    The two internal rotations (indices 6, 7) are condensed out.
+    Full DOF vector: 12 nodal DOFs + one internal DOF per released end
+    rotation (about local y/z at either end). The spring couples the nodal
+    rotation to the internal beam-end rotation; the internal DOFs are
+    condensed out before assembly.
     """
 
-    A_IDX = [0, 1, 2, 3, 4, 5]
-    B_IDX = [6, 7]
-    BEAM_MAP = [0, 1, 6, 3, 4, 7]   # beam k6 acts on these 8-DOF positions
-
-    def __init__(self, member: Member, model: RackModel, E: float):
+    def __init__(self, member: Member, model: RackModel):
         self.member = member
-        xi, zi = model.node_coords(member.node_i)
-        xj, zj = model.node_coords(member.node_j)
-        self.L = float(np.hypot(xj - xi, zj - zi))
-        self.c = (xj - xi) / self.L
-        self.s = (zj - zi) / self.L
-        self.E = E
-        sec = member.section
-        self.k6 = _beam_k6(E, sec.A, sec.Iy, self.L)
-        k_rigid = 1e6 * 4.0 * E * sec.Iy / self.L
-        self.k_spring = [
-            k_rigid if (h is None or h.stiffness is RIGID) else max(h.stiffness, 1e-9)
-            for h in (member.hinge_i, member.hinge_j)
-        ]
-        self.q_local = 0.0      # transverse line load, negative = "downwards"
-        self.qa_local = 0.0     # axial line load (local x direction)
-        self.N = 0.0            # axial force for geometric stiffness
+        xi, yi, zi = model.node_coords(member.node_i)
+        xj, yj, zj = model.node_coords(member.node_j)
+        self.L = float(np.sqrt((xj - xi) ** 2 + (yj - yi) ** 2 + (zj - zi) ** 2))
+        self.R = _rotation(xj - xi, yj - yi, zj - zi, self.L)
+        self.E, self.G = model.E, model.G
+        self.sec = member.section
+        self.is_truss = member.behavior == "truss"
 
-    # -- 8x8 assembly ---------------------------------------------------------
-    def _k8(self, geometric: bool) -> np.ndarray:
-        k8 = np.zeros((8, 8))
-        k6 = self.k6.copy()
-        if geometric and self.N != 0.0:
-            k6 = k6 + _beam_kg6(self.N, self.L)
-        for a, ia in enumerate(self.BEAM_MAP):
-            for b, ib in enumerate(self.BEAM_MAP):
-                k8[ia, ib] += k6[a, b]
-        for end, (rn, ri) in enumerate(((2, 6), (5, 7))):
-            ks = self.k_spring[end]
-            k8[rn, rn] += ks
-            k8[ri, ri] += ks
-            k8[rn, ri] -= ks
-            k8[ri, rn] -= ks
-        return k8
+        # releases: (local dof index, spring stiffness)
+        self.releases: list[tuple[int, float]] = []
+        if not self.is_truss:
+            for hinge, ry_idx, rz_idx in (
+                (member.hinge_i, REL_RY1, REL_RZ1),
+                (member.hinge_j, REL_RY2, REL_RZ2),
+            ):
+                if hinge is None:
+                    continue
+                if hinge.my is not RIGID:
+                    self.releases.append((ry_idx, max(hinge.my, 0.0)))
+                if hinge.mz is not RIGID:
+                    self.releases.append((rz_idx, max(hinge.mz, 0.0)))
+        self.n_int = len(self.releases)
+        # beam matrix DOF -> full-vector position (released rotations are
+        # redirected to the internal DOFs appended after the 12 nodal ones)
+        self.beam_map = list(range(12))
+        for k, (dof, _) in enumerate(self.releases):
+            self.beam_map[dof] = 12 + k
 
-    def _f8(self) -> np.ndarray:
-        """Consistent (clamped) equivalent nodal forces for the line load,
-        applied at the *beam* DOFs (rotations go to the internal DOFs)."""
-        f8 = np.zeros(8)
-        q, qa, L = self.q_local, self.qa_local, self.L
-        if q != 0.0 or qa != 0.0:
-            f6 = np.array([qa * L / 2, q * L / 2, q * L**2 / 12,
-                           qa * L / 2, q * L / 2, -q * L**2 / 12])
-            for a, ia in enumerate(self.BEAM_MAP):
-                f8[ia] += f6[a]
-        return f8
+        self.k12 = self._k12_elastic()
+        self.qy = 0.0       # local y line load (N/m)
+        self.qz = 0.0       # local z line load (N/m)
+        self.qa = 0.0       # local axial line load (N/m)
+        self.N = 0.0        # axial force for geometric stiffness (tension +)
+
+    # -- local matrices --------------------------------------------------------
+    def _k12_elastic(self) -> np.ndarray:
+        k = np.zeros((12, 12))
+        L, E, sec = self.L, self.E, self.sec
+        ea = E * sec.A / L
+        k[0, 0] = k[6, 6] = ea
+        k[0, 6] = k[6, 0] = -ea
+        if self.is_truss:
+            return k
+        gj = self.G * sec.J / L
+        k[3, 3] = k[9, 9] = gj
+        k[3, 9] = k[9, 3] = -gj
+        k[np.ix_(PLANE_Z, PLANE_Z)] += _bend_block(E * sec.Iz, L, +1.0)
+        k[np.ix_(PLANE_Y, PLANE_Y)] += _bend_block(E * sec.Iy, L, -1.0)
+        return k
+
+    def _kg12(self) -> np.ndarray:
+        kg = np.zeros((12, 12))
+        if self.N == 0.0:
+            return kg
+        if self.is_truss:
+            c = self.N / self.L
+            for i, j in ((1, 7), (2, 8)):
+                kg[i, i] += c
+                kg[j, j] += c
+                kg[i, j] -= c
+                kg[j, i] -= c
+            return kg
+        kg[np.ix_(PLANE_Z, PLANE_Z)] += _geo_block(self.N, self.L, +1.0)
+        kg[np.ix_(PLANE_Y, PLANE_Y)] += _geo_block(self.N, self.L, -1.0)
+        return kg
+
+    # -- full (12 + n_int) system ----------------------------------------------
+    def _k_full(self, geometric: bool) -> np.ndarray:
+        n = 12 + self.n_int
+        K = np.zeros((n, n))
+        k12 = self.k12 + self._kg12() if geometric else self.k12
+        bm = self.beam_map
+        for a in range(12):
+            for b in range(12):
+                K[bm[a], bm[b]] += k12[a, b]
+        for k_idx, (dof, ks) in enumerate(self.releases):
+            i, j = dof, 12 + k_idx
+            K[i, i] += ks
+            K[j, j] += ks
+            K[i, j] -= ks
+            K[j, i] -= ks
+        return K
+
+    def _f_full(self) -> np.ndarray:
+        """Consistent (clamped) equivalent nodal forces for the line loads.
+        Rotational components go to the beam DOFs (internal when released)."""
+        n = 12 + self.n_int
+        f = np.zeros(n)
+        L, bm = self.L, self.beam_map
+        if self.is_truss:
+            # lumped: half of everything to each end, translations only
+            for comp, q in ((0, self.qa), (1, self.qy), (2, self.qz)):
+                f[comp] += q * L / 2
+                f[comp + 6] += q * L / 2
+            return f
+        f12 = np.zeros(12)
+        f12[0] += self.qa * L / 2
+        f12[6] += self.qa * L / 2
+        # local y load -> bending about z: (uy, rz) plane, +6L sign pattern
+        f12[1] += self.qy * L / 2
+        f12[7] += self.qy * L / 2
+        f12[5] += self.qy * L**2 / 12
+        f12[11] -= self.qy * L**2 / 12
+        # local z load -> bending about y: theta_y = -dw/dx, signs flip
+        f12[2] += self.qz * L / 2
+        f12[8] += self.qz * L / 2
+        f12[4] -= self.qz * L**2 / 12
+        f12[10] += self.qz * L**2 / 12
+        for a in range(12):
+            f[bm[a]] += f12[a]
+        return f
 
     def condensed(self, geometric: bool) -> tuple[np.ndarray, np.ndarray]:
-        """6x6 condensed stiffness and 6-vector condensed load, in local axes."""
-        k8 = self._k8(geometric)
-        f8 = self._f8()
-        a, b = self.A_IDX, self.B_IDX
-        kaa, kab = k8[np.ix_(a, a)], k8[np.ix_(a, b)]
-        kba, kbb = k8[np.ix_(b, a)], k8[np.ix_(b, b)]
+        """12x12 condensed stiffness and 12-vector condensed load, local."""
+        K = self._k_full(geometric)
+        f = self._f_full()
+        if self.n_int == 0:
+            return K, f
+        a = list(range(12))
+        b = list(range(12, 12 + self.n_int))
+        kaa, kab = K[np.ix_(a, a)], K[np.ix_(a, b)]
+        kba, kbb = K[np.ix_(b, a)], K[np.ix_(b, b)]
         kbb_inv = np.linalg.inv(kbb)
-        kc = kaa - kab @ kbb_inv @ kba
-        fc = f8[a] - kab @ kbb_inv @ f8[b]
-        return kc, fc
+        return kaa - kab @ kbb_inv @ kba, f[a] - kab @ kbb_inv @ f[b]
 
     def transform(self) -> np.ndarray:
-        """Local -> global rotation for the 6 nodal DOFs."""
-        c, s = self.c, self.s
-        t = np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
-        T = np.zeros((6, 6))
-        T[:3, :3] = t
-        T[3:, 3:] = t
+        T = np.zeros((12, 12))
+        for blk in range(4):
+            T[3 * blk:3 * blk + 3, 3 * blk:3 * blk + 3] = self.R
         return T
 
     def k_global(self, geometric: bool) -> tuple[np.ndarray, np.ndarray]:
@@ -146,43 +231,54 @@ class _Element:
         T = self.transform()
         return T.T @ kc @ T, T.T @ fc
 
-    # -- result recovery ------------------------------------------------------
-    def end_forces(self, u_nodal_global: np.ndarray, geometric: bool) -> tuple[np.ndarray, np.ndarray]:
-        """Return (local end forces on the 6 nodal DOFs, internal rotations).
+    # -- result recovery ---------------------------------------------------------
+    def recover(self, u_nodal_global: np.ndarray, geometric: bool
+                ) -> tuple[np.ndarray, np.ndarray]:
+        """Return (local end forces on the 12 nodal DOFs, beam-DOF vector).
 
-        Local end forces f = [Fx1, Fy1, M1, Fx2, Fy2, M2] acting ON the member.
+        End forces f = [Fx1, Fy1, Fz1, Mx1, My1, Mz1, Fx2, ...] acting ON the
+        member. The beam-DOF vector holds the 12 displacements/rotations of
+        the beam proper (internal values where ends are released).
         """
         T = self.transform()
         ua = T @ u_nodal_global
-        k8 = self._k8(geometric)
-        f8 = self._f8()
-        a, b = self.A_IDX, self.B_IDX
-        kba, kbb = k8[np.ix_(b, a)], k8[np.ix_(b, b)]
-        ub = np.linalg.solve(kbb, f8[b] - kba @ ua)
-        u8 = np.concatenate([ua, ub])
-        f_full = k8 @ u8 - np.concatenate([f8[a], f8[b]])
-        return f_full[a], ub
+        K = self._k_full(geometric)
+        f = self._f_full()
+        if self.n_int:
+            a = list(range(12))
+            b = list(range(12, 12 + self.n_int))
+            kba, kbb = K[np.ix_(b, a)], K[np.ix_(b, b)]
+            ub = np.linalg.solve(kbb, f[b] - kba @ ua)
+            u_full = np.concatenate([ua, ub])
+        else:
+            u_full = ua
+        f_all = K @ u_full - f
+        u_beam = np.array([u_full[self.beam_map[a]] for a in range(12)])
+        return f_all[:12], u_beam
 
-    def span_results(self, f_local: np.ndarray, ua_local: np.ndarray,
-                     ub: np.ndarray) -> tuple[float, float]:
-        """(max |M| along span, max transverse deflection relative to chord).
+    def span_results(self, f_loc: np.ndarray, u_beam: np.ndarray
+                     ) -> tuple[float, float]:
+        """(max |My| along span, max local-z deflection relative to chord).
 
-        Internal moment, sagging positive:
-            M(x) = -M1 + Fy1*x - qd*x^2/2,  qd = downward load intensity
+        Vertical-plane internal moment, sagging positive:
+            My(x) = My1 + Fz1*x - qd*x^2/2,  qd = -qz (downward intensity),
+        with My1, Fz1 the on-member end-1 local forces.
         """
-        L, EI = self.L, self.E * self.member.section.Iy
-        qd = -self.q_local                      # downward positive
-        Fy1, M1 = f_local[1], f_local[2]
+        if self.is_truss:
+            return 0.0, 0.0
+        L, EI = self.L, self.E * self.sec.Iy
+        qd = -self.qz
+        Fz1, My1 = f_loc[2], f_loc[4]
 
         xs = [0.0, L / 2.0, L]
-        if qd != 0.0 and 0.0 < Fy1 / qd < L:
-            xs.append(Fy1 / qd)                 # shear zero -> moment extremum
-        m_max = max(abs(-M1 + Fy1 * x - qd * x**2 / 2.0) for x in xs)
+        if qd != 0.0 and 0.0 < Fz1 / qd < L:
+            xs.append(Fz1 / qd)             # shear zero -> moment extremum
+        m_max = max(abs(My1 + Fz1 * x - qd * x**2 / 2.0) for x in xs)
 
-        # transverse deflection: hermite interpolation of the beam-proper end
-        # values + clamped particular solution for the UDL
-        w1, w2 = ua_local[1], ua_local[4]
-        r1, r2 = ub[0], ub[1]
+        # transverse deflection in local z: hermite interpolation of the
+        # beam-proper end values (slope = -theta_y) + clamped UDL solution
+        w1, w2 = u_beam[2], u_beam[8]
+        r1, r2 = -u_beam[4], -u_beam[10]
         d_max = 0.0
         for i in range(1, 10):
             x = L * i / 10.0
@@ -200,7 +296,7 @@ class _Element:
 
 
 class InternalEngine:
-    """Direct-stiffness 2D frame solver with P-Delta iteration."""
+    """Direct-stiffness 3D frame solver with P-Delta iteration."""
 
     name = "internal"
 
@@ -222,7 +318,7 @@ class InternalEngine:
         index = {nid: i for i, nid in enumerate(node_ids)}
         n_dof = NDOF * len(node_ids)
 
-        elements = {mid: _Element(m, model, model.E) for mid, m in model.members.items()}
+        elements = {mid: _Element(m, model) for mid, m in model.members.items()}
 
         # factored loads
         F = np.zeros(n_dof)
@@ -233,26 +329,29 @@ class InternalEngine:
             for pl in lc.point_loads:
                 i = index[pl.node] * NDOF
                 F[i] += gamma * pl.fx
-                F[i + 1] += gamma * pl.fz
+                F[i + 1] += gamma * pl.fy
+                F[i + 2] += gamma * pl.fz
             for ll in lc.line_loads:
                 el = elements[ll.member]
-                # global Z line load -> local transverse / axial components
-                el.q_local += gamma * ll.q * el.c
-                el.qa_local += gamma * ll.q * el.s
+                # global Z line load -> local components via rotation matrix
+                q_loc = el.R @ np.array([0.0, 0.0, gamma * ll.q])
+                el.qa += q_loc[0]
+                el.qy += q_loc[1]
+                el.qz += q_loc[2]
 
-        # boundary conditions: fixed DOF list + ground springs
+        # boundary conditions: translations + torsion (rz) fixed at the base,
+        # rotations about the horizontal axes on ground springs
         fixed: set[int] = set()
         springs: dict[int, float] = {}
         for sup in model.supports:
             i = index[sup.node] * NDOF
-            fixed.update((i, i + 1))
-            if sup.ry_stiffness is RIGID:
-                fixed.add(i + 2)
-            else:
-                springs[i + 2] = springs.get(i + 2, 0.0) + sup.ry_stiffness
+            fixed.update((i, i + 1, i + 2, i + 5))
+            for off, ks in ((3, sup.rx_stiffness), (4, sup.ry_stiffness)):
+                if ks is RIGID:
+                    fixed.add(i + off)
+                else:
+                    springs[i + off] = springs.get(i + off, 0.0) + ks
 
-        # fully restrained models (all nodal DOFs fixed) are still valid:
-        # forces then come purely from the condensed fixed-end actions
         free = np.array([d for d in range(n_dof) if d not in fixed], dtype=int)
 
         # P-Delta iteration
@@ -275,23 +374,20 @@ class InternalEngine:
 
             u_new = np.zeros(n_dof)
             if free.size:
-                Kff = K[np.ix_(free, free)]
-                rhs = (F + Feq)[free]
                 try:
-                    uf = np.linalg.solve(Kff, rhs)
+                    u_new[free] = np.linalg.solve(
+                        K[np.ix_(free, free)], (F + Feq)[free])
                 except np.linalg.LinAlgError as exc:
                     raise SingularModelError(
                         f"combination {combo.id}: stiffness matrix singular "
                         f"(structure unstable or buckled)"
                     ) from exc
-                u_new[free] = uf
 
             if combo.second_order:
-                # update element axial forces for the geometric stiffness
                 for el in elements.values():
                     dofs = _element_dofs(el.member, index)
-                    f_loc, _ = el.end_forces(u_new[dofs], geometric=False)
-                    el.N = f_loc[3]     # axial force at end 2, tension positive
+                    f_loc, _ = el.recover(u_new[dofs], geometric=False)
+                    el.N = f_loc[6]     # axial at end 2, tension positive
                 du = np.linalg.norm(u_new - u)
                 ref = max(np.linalg.norm(u_new), 1e-12)
                 u = u_new
@@ -304,33 +400,39 @@ class InternalEngine:
             # loop exhausted without break: only possible for 2nd-order runs
             converged = False
 
-        # sanity: amplification should not explode
         if not np.all(np.isfinite(u)):
             raise SingularModelError(f"combination {combo.id}: divergence (buckling)")
 
-        return self._collect(model, elements, index, u, F, combo, iterations, converged)
+        return self._collect(model, elements, index, u, F, combo,
+                             iterations, converged)
 
     # -------------------------------------------------------------------------
     def _collect(self, model: RackModel, elements: dict[int, "_Element"],
                  index: dict[int, int], u: np.ndarray, F: np.ndarray,
-                 combo: Combination, iterations: int, converged: bool) -> ComboResult:
+                 combo: Combination, iterations: int,
+                 converged: bool) -> ComboResult:
         res = ComboResult(combo_id=combo.id, second_order=combo.second_order,
                           converged=converged, iterations=iterations)
         for nid, i in index.items():
             d = i * NDOF
-            res.nodes[nid] = NodeResult(ux=float(u[d]), uz=float(u[d + 1]),
-                                        ry=float(u[d + 2]))
+            res.nodes[nid] = NodeResult(
+                ux=float(u[d]), uy=float(u[d + 1]), uz=float(u[d + 2]),
+                rx=float(u[d + 3]), ry=float(u[d + 4]), rz=float(u[d + 5]),
+            )
 
         geometric = combo.second_order
         for mid, el in elements.items():
             dofs = _element_dofs(el.member, index)
-            f_loc, ub = el.end_forces(u[dofs], geometric)
-            ua_local = el.transform() @ u[dofs]
-            m_max, d_max = el.span_results(f_loc, ua_local, ub)
+            f, u_beam = el.recover(u[dofs], geometric)
+            my_max, d_max = el.span_results(f, u_beam)
             res.members[mid] = MemberResult(
-                N1=float(-f_loc[0]), V1=float(f_loc[1]), M1=float(f_loc[2]),
-                N2=float(f_loc[3]), V2=float(-f_loc[4]), M2=float(-f_loc[5]),
-                M_span_max=float(m_max), defl_rel_max=float(d_max),
+                # internal-force convention: end 1 components negated where
+                # the on-member force opposes the internal force direction
+                N1=float(-f[0]), Vy1=float(f[1]), Vz1=float(f[2]),
+                Mt1=float(-f[3]), My1=float(f[4]), Mz1=float(f[5]),
+                N2=float(f[6]), Vy2=float(-f[7]), Vz2=float(-f[8]),
+                Mt2=float(f[9]), My2=float(-f[10]), Mz2=float(-f[11]),
+                My_span_max=float(my_max), defl_rel_max=float(d_max),
             )
 
         # support reactions from equilibrium of the supported nodes
@@ -342,14 +444,18 @@ class InternalEngine:
                 if sup.node not in (m.node_i, m.node_j):
                     continue
                 dofs = _element_dofs(m, index)
-                f_loc, _ = el.end_forces(u[dofs], geometric)
+                f_loc, _ = el.recover(u[dofs], geometric)
                 fg = el.transform().T @ f_loc
-                off = 0 if m.node_i == sup.node else 3
+                off = 0 if m.node_i == sup.node else 6
                 r.fx += fg[off]
-                r.fz += fg[off + 1]
-                r.my += fg[off + 2]
+                r.fy += fg[off + 1]
+                r.fz += fg[off + 2]
+                r.mx += fg[off + 3]
+                r.my += fg[off + 4]
             r.fx = float(r.fx - F[i])
-            r.fz = float(r.fz - F[i + 1])
+            r.fy = float(r.fy - F[i + 1])
+            r.fz = float(r.fz - F[i + 2])
+            r.mx = float(r.mx)
             r.my = float(r.my)
             res.reactions[sup.node] = r
         return res
@@ -357,4 +463,4 @@ class InternalEngine:
 
 def _element_dofs(member: Member, index: dict[int, int]) -> list[int]:
     i, j = index[member.node_i] * NDOF, index[member.node_j] * NDOF
-    return [i, i + 1, i + 2, j, j + 1, j + 2]
+    return list(range(i, i + 6)) + list(range(j, j + 6))

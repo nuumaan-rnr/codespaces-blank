@@ -1,35 +1,59 @@
-# Example pallet rack - down-aisle spine model per EN 15512.
+# Example pallet rack - full 3D model per EN 15512.
 #
 # Units: m, kN, kN/m, kNm/rad, MPa, GPa (see rackapp/config.py).
+# Axes: X = down-aisle, Y = cross-aisle (depth), Z = vertical.
 # Section/connection values for perforated cold-formed rack components must be
 # the EFFECTIVE values derived from EN 15512 component tests.
+# Section axes: Iy/Wy = down-aisle bending for uprights (major axis for
+# beams); Iz/Wz = cross-aisle (minor) bending.
 
-name: "Demo pallet rack 3x4"
+name: "Demo pallet rack 3x4 (3D)"
 
 geometry:
   n_bays: 3
   bay_width: 2.7            # m
+  depth: 1.1                # m, upright frame depth
   level_heights: [1.5, 1.5, 1.5, 1.5]   # m, floor->lvl1, lvl1->lvl2, ...
+  bracing:
+    pattern: z              # alternating diagonals + horizontal struts
+    panel_height: 1.0       # m
 
 sections:
   upright:
     name: "Upright 100x70x2.0 (effective)"
     rfem_section: "SHS 100x100x4"   # RFEM library proxy (engine: rfem only)
     A: 6.5e-4                # m2  effective area
-    Iy: 1.10e-6              # m4  (down-aisle bending)
+    Iy: 1.10e-6              # m4  down-aisle bending
     Wy: 2.2e-5               # m3  effective modulus
+    Iz: 6.0e-7               # m4  cross-aisle bending
+    Wz: 1.4e-5               # m3
+    J: 2.0e-9                # m4  St Venant torsion
     self_weight: 5.1         # kg/m
   beam:
     name: "Box beam 110x45x1.5"
     rfem_section: "SHS 100x100x3"
     A: 4.6e-4
-    Iy: 8.0e-7
+    Iy: 8.0e-7               # m4  major (vertical) bending
     Wy: 1.45e-5
+    Iz: 3.0e-7
+    Wz: 8.0e-6
+    J: 6.0e-7                # box section: high torsion constant
     self_weight: 3.8
+  brace:
+    name: "C-brace 40x40x1.5"
+    rfem_section: "SHS 40x40x3"
+    A: 2.0e-4
+    Iy: 2.0e-8
+    Wy: 1.0e-6
+    Iz: 2.0e-8
+    Wz: 1.0e-6
+    J: 1.0e-9
+    self_weight: 1.6
 
 material:
   name: "S355"
   E: 210.0                   # GPa
+  G: 81.0                    # GPa
   fy: 355.0                  # MPa
   gamma_M0: 1.0              # EN 15512 7.5
   gamma_M1: 1.0
@@ -38,17 +62,21 @@ connections:
   beam_end_stiffness: 110.0          # kNm/rad, from EN 15512 connector tests
   beam_end_looseness: 0.005          # rad, connector looseness phi_l
   beam_end_moment_resistance: 2.4    # kNm, connector M_Rd
-  base_stiffness: 150.0              # kNm/rad, floor connection
+  beam_end_mz: pinned                # horizontal-plane end fixity
+  base_stiffness: 150.0              # kNm/rad, floor connection, down-aisle
+  base_stiffness_cross: 150.0        # kNm/rad, cross-aisle (defaults to above)
 
 loads:
-  unit_load_per_beam: 10.0   # kN, total pallet load carried by one beam
+  unit_load_per_beam: 5.0    # kN carried by ONE beam (a 10 kN/level bay
+                             # has front+rear beams -> 5 kN per beam)
   beam_dead_load: 0.05       # kN/m
   placement_load: 0.5        # kN horizontal (EN 15512 placement load)
   placement_level: -1        # -1 = top level
 
 imperfections:
-  out_of_plumb: 0.00286      # phi_s = 1/350 (erection tolerance class)
-  include_looseness: true    # adds connector looseness to phi
+  out_of_plumb: 0.00286      # phi_s = 1/350, down-aisle erection tolerance
+  out_of_plumb_cross: 0.002  # 1/500, cross-aisle (braced direction)
+  include_looseness: true    # adds connector looseness to phi_x
   min_phi: 0.002             # lower bound 1/500
 
 factors:                     # EN 15512:2009 Table 2
@@ -64,6 +92,8 @@ analysis:
 
 checks:
   beam_deflection_limit: 200 # L/200
-  sway_limit: 200            # H/200 at SLS
-  buckling_alpha: 0.34       # EC3 curve b (or per upright test data)
-  K_upright: 1.0             # system length with 2nd-order + imperfections
+  sway_limit: 200            # H/200 at SLS, both directions
+  buckling_alpha_y: 0.34     # EC3 curve b (or per upright test data)
+  buckling_alpha_z: 0.34
+  K_upright_y: 1.0           # segment length with 2nd-order + imperfections
+  K_upright_z: 1.0

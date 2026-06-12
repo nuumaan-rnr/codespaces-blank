@@ -46,11 +46,13 @@ def main(argv: list[str] | None = None) -> int:
         from .viz import plot_deformed, plot_model, plot_utilization
         plot_model(out.model).savefig(
             os.path.join(args.out, "model.png"), dpi=150, bbox_inches="tight")
-        gov_uls = next((c for c in out.results.combos.values()
-                        if c.combo_id.startswith("ULS")), None)
-        if gov_uls:
-            plot_deformed(out.model, gov_uls).savefig(
-                os.path.join(args.out, "deformed.png"), dpi=150, bbox_inches="tight")
+        for cid, suffix in (("ULS_DA1", "deformed_down_aisle"),
+                            ("ULS_CA", "deformed_cross_aisle")):
+            combo = out.results.combos.get(cid)
+            if combo:
+                plot_deformed(out.model, combo).savefig(
+                    os.path.join(args.out, f"{suffix}.png"),
+                    dpi=150, bbox_inches="tight")
         plot_utilization(out.model, out.report).savefig(
             os.path.join(args.out, "utilization.png"), dpi=150, bbox_inches="tight")
 

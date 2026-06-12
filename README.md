@@ -1,45 +1,57 @@
-# rackapp — Storage rack analysis & EN 15512 checks
+# rackapp — Storage rack 3D analysis & EN 15512 checks
 
-Parametric app that builds a storage-rack (pallet rack) structural model from
-user inputs, runs a **second-order (P-Delta) analysis** with **semi-rigid
-connections** and **sway imperfections**, and performs **EN 15512** design
-checks (stress, buckling, connector, beam deflection, sway).
+Parametric app that builds a **full 3D** storage-rack (pallet rack) structural
+model from user inputs, runs a **second-order (P-Delta) analysis** with
+**semi-rigid connections** and **sway imperfections in both directions**, and
+performs **EN 15512** design checks with **biaxial (My + Mz) interaction**:
+stress, buckling, connector, beam deflection, sway.
 
 ```
 inputs (YAML / Streamlit UI)
-   └─> nodes, members (uprights + pallet beams), member sets
+   └─> 3D model: upright frames (front + rear uprights, truss bracing),
+       pallet beams on both faces, member sets
        semi-rigid beam-end connector hinges (rotational stiffness from tests)
-       semi-rigid base supports (floor-connection stiffness)
-       steel material + effective cross-section properties
-       load cases (dead, unit/pallet, placement, imperfection forces)
-       EN 15512 load combinations (γG = 1.3, γQ = 1.4 defaults)
-          └─> FEA engine (RFEM 6 or built-in solver), 2nd-order at ULS
-                 └─> results (forces, displacements, reactions)
-                        └─> EN 15512 checks ──> report.md / results.json / plots
+       semi-rigid base supports (floor-connection stiffness, both axes)
+       steel material + effective cross-section properties (Iy/Wy, Iz/Wz, J)
+       load cases (dead, unit/pallet, placement X/Y, imperfection forces X/Y)
+       EN 15512 load combinations: down-aisle + cross-aisle ULS, SLS
+          └─> FEA engine (RFEM 6 or built-in 3D solver), 2nd-order at ULS
+                 └─> results (N, Vy, Vz, Mt, My, Mz, displacements, reactions)
+                        └─> EN 15512 biaxial checks ──> report / JSON / plots
 ```
+
+## Why 3D
+
+A 2D down-aisle spine model only produces moments about one axis, so the
+upright buckling interaction can never include the cross-aisle terms. The 3D
+model gives, for every upright segment and every combination, the simultaneous
+`N + My + Mz` set from one consistent second-order analysis, plus the braced
+upright-frame behaviour (brace forces, cross-aisle sway) that a 2D model
+cannot represent at all.
 
 ## FEA engine choice
 
 | | **RFEM 6 (recommended for production)** | **Built-in solver** |
 |---|---|---|
+| Element types | 3D members, truss members for bracing | 12-DOF space frame + truss elements |
 | Semi-rigid beam-end connectors | member hinges with rotational spring constants | rotational end springs (static condensation) |
-| Semi-rigid base plates | nodal supports with rotational springs | rotational ground springs |
-| Second-order analysis | P-Delta / large deformation per combination | geometric-stiffness P-Delta iteration |
-| Imperfections | imperfection cases or equivalent forces | equivalent horizontal forces |
+| Semi-rigid base plates | nodal supports with rotational springs (both axes) | rotational ground springs (both axes) |
+| Second-order analysis | P-Delta / large deformation per combination | geometric-stiffness P-Delta iteration, both bending planes |
+| Imperfections | imperfection cases or equivalent forces | equivalent horizontal forces (X and Y) |
 | EN 15512 extras | Steel Design add-on incl. rack design per EN 15512 | checks implemented in `rackapp/checks.py` |
 | Licence / availability | commercial, WebServices API (`pip install RFEM`) | none — runs anywhere (numpy) |
 
 **Why RFEM 6:** of the mainstream engines it has the most direct support for
 the EN 15512 modelling rules — member hinges and nodal supports defined by
 *spring constants* (the standard's semi-rigid connector and floor-connection
-models map 1:1), second-order analysis per load combination, imperfection
-cases, member sets, and an official Python API to automate everything,
-plus an EN 15512 rack-design add-on. The **built-in engine** implements the
-same mechanics for the 2D down-aisle spine model, is verified against
-closed-form solutions (see `tests/test_solver.py`) and lets you run the whole
-pipeline with zero licences — useful for CI, previews and sanity checks.
-Both engines return the same neutral result structures, so the EN 15512
-checks and reports are identical.
+models map 1:1), truss bracing members, second-order analysis per load
+combination, imperfection cases, member sets, and an official Python API to
+automate everything, plus an EN 15512 rack-design add-on. The **built-in
+engine** implements the same mechanics for the full 3D model, is verified
+against closed-form solutions in both bending planes (see
+`tests/test_solver.py`) and lets you run the whole pipeline with zero licences
+— useful for CI, previews and sanity checks. Both engines return the same
+neutral result structures, so the EN 15512 checks and reports are identical.
 
 ## Install & run
 
@@ -63,45 +75,54 @@ To use RFEM 6: start RFEM with WebServices enabled (default port 8081),
 
 ## Inputs (see `examples/rack_example.yaml`)
 
-* **Geometry** — number of bays, bay width, beam-level heights.
-* **Sections** — *effective* properties (A, Iy, Wy, self weight) for upright
-  and beam. For perforated cold-formed uprights these must come from
-  EN 15512 component tests (stub column, bending); an RFEM library section
-  name can be given as analysis proxy for the RFEM engine.
-* **Material** — E, fy, γM0, γM1.
+* **Geometry** — bays, bay width, frame depth, beam-level heights, frame
+  bracing pattern and panel height.
+* **Sections** — *effective* properties (A, Iy/Wy, Iz/Wz, J, self weight) for
+  upright, beam and brace. For perforated cold-formed uprights these must
+  come from EN 15512 component tests (stub column, bending); an RFEM library
+  section name can be given as analysis proxy for the RFEM engine.
+  Axis convention: Iy = down-aisle bending for uprights / major (vertical)
+  axis for beams; Iz = cross-aisle / minor axis.
+* **Material** — E, G, fy, γM0, γM1.
 * **Connections** — beam-end connector rotational stiffness, looseness φℓ and
-  M_Rd (from EN 15512 connector tests); base/floor rotational stiffness.
-* **Loads** — unit (pallet) load per beam, beam dead load, horizontal
-  placement load.
-* **Imperfections** — out-of-plumb φs, optional connector looseness, minimum
-  φ. Applied as equivalent horizontal forces `H = φ·V` per level (as the
-  standard permits).
-* **Combinations** — EN 15512:2009 Table 2 defaults: `1.3·DL + 1.4·UL +
-  1.4·IMP (+1.4·PL)` at ULS (second order), `1.0·DL + 1.0·UL` at SLS.
+  M_Rd (from EN 15512 connector tests), horizontal-plane end fixity;
+  base/floor rotational stiffness about both horizontal axes.
+* **Loads** — unit (pallet) load per beam (front + rear beams share the bay
+  load), beam dead load, horizontal placement load (applied down-aisle and
+  cross-aisle in separate cases).
+* **Imperfections** — out-of-plumb φs per direction, optional connector
+  looseness (down-aisle), minimum φ. Applied as equivalent horizontal forces
+  `H = φ·V` per level (as the standard permits).
+* **Combinations** — EN 15512:2009 Table 2 defaults, directions treated as
+  separate design situations: `ULS_DA1/2` (down-aisle ± placement), `ULS_CA`
+  (cross-aisle) at 1.3·G + 1.4·Q second order; `SLS` (deflection) and
+  `SLS_SWX/Y` (sway) at characteristic level.
 
 ## EN 15512 checks performed
 
 | Check | Criterion |
 |---|---|
-| Cross-section resistance | `N/(A_eff·fy/γM0) + M/(W_eff·fy/γM0) ≤ 1` |
-| Upright flexural buckling | `N/(χ·A_eff·fy/γM1) + M/(W_eff·fy/γM1) ≤ 1`, χ per buckling curve, `Lcr = K·(level height)` |
-| Beam-end connector | `M_connector ≤ M_Rd` (test value) |
+| Cross-section resistance (biaxial) | `N/(A·fy/γM0) + My/(Wy·fy/γM0) + Mz/(Wz·fy/γM0) ≤ 1` |
+| Upright flexural buckling (biaxial) | `N/(χmin·A·fy/γM1) + My/(Wy·fy/γM1) + Mz/(Wz·fy/γM1) ≤ 1`, χ per axis from EC3 curves, `Lcr = K·segment` |
+| Frame brace buckling | `N ≤ χ·A·fy/γM1` (pin-ended, Lcr = L) |
+| Beam-end connector | `My,connector ≤ M_Rd` (test value) |
 | Pallet beam deflection (SLS) | `δ ≤ L/200` (configurable) |
-| Down-aisle sway (SLS) | `u_top ≤ H/200` (configurable) |
+| Sway, down-aisle and cross-aisle (SLS) | `u_top ≤ H/200` (configurable), on the SLS sway combinations |
 
-Because the ULS analysis is second order **with** sway imperfections, the
-sway-buckling effect is contained in the member forces and the member checks
-use the system length (`K = 1.0` default), i.e. the design-by-second-order
-route of EN 15512.
+Because the ULS analysis is second order **with** sway imperfections in each
+direction, the sway-buckling effect is contained in the member forces and the
+member checks use the system (segment) length (`K = 1.0` default), i.e. the
+design-by-second-order route of EN 15512. Upright segments end at beam and
+brace nodes, so the buckling lengths per axis follow the actual restraint
+spacing.
 
 ## Scope & engineering notes
 
-* The model is the **2D down-aisle spine frame** — the configuration
-  EN 15512 uses for sway stability/second-order effects. Cross-aisle (braced
-  upright frame) verification is a separate model.
 * Distortional/torsional-flexural buckling of perforated uprights is covered
   by the *test-based effective properties* you supply, per the standard's
   test-driven philosophy; it is not computed from geometry.
+* Pallet loads are applied as UDL on the beams; `unit_load_per_beam` is the
+  load carried by ONE beam (a bay storing Q per level → Q/2 per beam).
 * Verify imperfection values, partial factors and limits against the
   EN 15512 edition (2009 vs 2020) and national requirements applicable to
   your project. This tool automates the mechanics; the responsible engineer
