@@ -87,6 +87,20 @@ def main(argv: List[str] | None = None) -> int:
     ps.add_argument("--master", help="section master CSV/JSON/XLSX")
     ps.add_argument("--role", help="filter by role (upright/beam/bracing/...)")
 
+    pf = sub.add_parser("rfem", help="import an RFEM data export, analyse it "
+                                     "and (optionally) compare results")
+    pf.add_argument("data", help="RFEM export .xlsx (1.1 Nodes, 1.7 Members, ...)")
+    pf.add_argument("--master", help="section master .xlsx; recovers the "
+                                     "load-dependent base springs that RFEM "
+                                     "does not export")
+    pf.add_argument("--fy", type=float, default=250.0,
+                    help="design yield strength [MPa] (default 250)")
+    pf.add_argument("--outdir", default="out_rfem")
+    pf.add_argument("--compare", action="store_true",
+                    help="compare member forces against the export's "
+                         "'CO - 4.1' result sheets (validation.md)")
+    pf.add_argument("--save-json", help="also save the imported model as JSON")
+
     a = p.parse_args(argv)
     if a.cmd == "run":
         model = io_json.load(a.model)
@@ -98,6 +112,31 @@ def main(argv: List[str] | None = None) -> int:
         os.makedirs(a.outdir, exist_ok=True)
         io_json.save(model, os.path.join(a.outdir, "example_model.json"))
         return _run(model, a.outdir)
+    if a.cmd == "rfem":
+        from .master_xlsx import load_master
+        from .rfem_import import load_rfem
+        master = load_master(a.master) if a.master else None
+        model = load_rfem(a.data, fy=a.fy, master=master)
+        os.makedirs(a.outdir, exist_ok=True)
+        if a.save_json:
+            io_json.save(model, a.save_json)
+        if not a.compare:
+            return _run(model, a.outdir)
+        from .analysis import run_all as _run_all
+        from .rfem_compare import (compare_results, read_rfem_results,
+                                   summarize)
+        cases = _run_all(model)
+        checks = run_checks(model, cases)
+        with open(os.path.join(a.outdir, "report.md"), "w") as f:
+            f.write(write_report(model, cases, checks))
+        rfem_ref = read_rfem_results(a.data)
+        comps = compare_results(model, cases, rfem_ref)
+        with open(os.path.join(a.outdir, "validation.md"), "w") as f:
+            f.write(summarize(comps))
+        plot_model(model, os.path.join(a.outdir, "model.png"))
+        plot_utilization(model, checks, os.path.join(a.outdir, "utilization.png"))
+        print(f"Validation written to {a.outdir}/validation.md")
+        return 0
     if a.cmd == "sections":
         lib = _load_library(a.master)
         for name in lib.names(a.role):

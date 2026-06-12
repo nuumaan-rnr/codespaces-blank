@@ -24,8 +24,12 @@ def run_all(model: RackModel) -> List[CaseResult]:
 
     for combo in model.combinations:
         base_loads = assemble(model, combo)
-        apply_imp = combo.imperfection and combo.kind == "ULS"
-        directions = model.imperfection.directions if apply_imp else [""]
+        apply_imp = combo.imperfection and (combo.kind == "ULS"
+                                            or combo.imp_directions)
+        if apply_imp:
+            directions = combo.imp_directions or model.imperfection.directions
+        else:
+            directions = [""]
 
         for direction in directions:
             loads = base_loads

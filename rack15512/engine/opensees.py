@@ -35,9 +35,9 @@ from ..model import Member, RackModel
 from ..results import CaseResult, MemberResult, Station
 
 # penalty stiffness for 'continuous' rotation axes at hinged ends
-# [N*mm/rad]; ~4-6 orders above typical member EI/L, well within double
-# precision conditioning
-RIGID_ROT = 1.0e14
+# [N*mm/rad]; ~4 orders above typical member EI/L - rigid for practical
+# purposes while keeping the tangent well-conditioned for Newton iteration
+RIGID_ROT = 1.0e12
 
 
 @dataclass

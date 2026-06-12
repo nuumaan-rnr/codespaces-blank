@@ -263,19 +263,24 @@ class Combination:
     EN 15512 defaults (verify for your edition / national annex):
       ULS:  1.3 * permanent + 1.4 * variable (unit loads)
       SLS:  1.0 * all
-    Imperfections are applied to ULS combinations by default."""
+    Imperfections are applied to ULS combinations by default.
+    imp_directions overrides the model-level imperfection directions for
+    this combination (e.g. ['+x'] when the combination represents one
+    specific sway sense)."""
 
     name: str
     kind: str                      # 'ULS' or 'SLS'
     factors: Dict[str, float]
     imperfection: bool = True
+    imp_directions: Optional[List[str]] = None
 
 
 @dataclass
 class AnalysisSettings:
     order: int = 2                 # 1 = linear, 2 = geometrically nonlinear
     n_steps: int = 10              # load increments for second order
-    tolerance: float = 1.0e-6
+    tolerance: float = 1.0e-5      # NormDispIncr [mm]; tighter values can
+    #                                stall on penalty-spring round-off
     max_iter: int = 50
 
 
@@ -392,6 +397,10 @@ class RackModel:
             for case in c.factors:
                 if case not in self.load_cases:
                     errors.append(f"Combination '{c.name}': unknown case '{case}'")
+            for d in c.imp_directions or []:
+                if d not in DIRECTION_VECTORS:
+                    errors.append(f"Combination '{c.name}': bad imperfection "
+                                  f"direction '{d}'")
         for d in self.imperfection.directions:
             if d not in DIRECTION_VECTORS:
                 errors.append(f"Imperfection direction '{d}' not in "

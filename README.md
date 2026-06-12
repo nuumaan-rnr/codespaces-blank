@@ -232,6 +232,46 @@ direct visual comparison with the CAD drawing. See
 - **Combinations**: explicit factors per load case. Builder defaults:
   ULS `1.3·G + 1.4·Q`, SLS `1.0·G + 1.0·Q`.
 
+## RFEM import & cross-validation
+
+Existing RFEM (Dlubal) models can be imported from their .xlsx data export
+(`1.1 Nodes` ... `2.5 Load Combinations` sheets) and re-analysed here:
+
+```bash
+python -m rack15512 rfem SPR_CHECK_Data.xlsx --master Master.xlsx \
+       --compare --outdir out_rfem
+```
+
+The importer handles RFEM's Z-down axes, kN/cm units, the My/Mz local-axis
+convention (RFEM bends about local y under gravity), member hinges
+(connector springs), nodal supports, self-weight rebuilt from material
+density, UDL / nodal / concentrated loads (members are split at
+concentrated-load positions), EN 1993 imperfection load cases (mapped to
+the sway imperfection with per-combination directions), and the load
+combinations.  `--compare` checks our member forces against the export's
+own `CO - 4.1` result sheets and writes `validation.md`.
+
+**Important quirk found while validating**: RFEM does not export
+nonlinear, load-dependent floor-connection springs - they appear as free
+rotations in the support table.  Passing `--master` restores them from the
+BASE_STIFFNESS sheet (interpolated at the estimated upright load, matched
+via the support comment, e.g. 'UP0016').
+
+Cross-validation against the SPR reference rack (back-to-back double
+rack, 296 nodes / 528 members, braced frames, 65.7 kNm/rad connectors,
+phi = 1/300):
+
+| comparison | result |
+|---|---|
+| linear LC1 self-weight | total 12.08 vs 12.09 kN; member N median 0.4% |
+| linear LC2 pallet loads (441 kN) | member forces median 0.0%, p95 0.7% |
+| linear LC3 lateral load | moments median 0.1% (sway stiffness identical) |
+| 2nd-order CO1 (with recovered base springs) | axials median 0.3%, moments median 0.9% (member 1: 9.44 vs 9.42 kNcm) |
+
+Without the base springs the model has alpha_cr ~ 1 under CO1 - the
+second-order analysis correctly diverges, which is itself the validation
+of the sway-instability detection.
+
 ## Validation
 
 `tests/` validates the engine against closed-form solutions: cantilever
