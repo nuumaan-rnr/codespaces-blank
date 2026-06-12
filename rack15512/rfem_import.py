@@ -309,6 +309,13 @@ def load_rfem(path: str, fy: float = 250.0, master=None) -> RackModel:
             imperfection=bool(imp_dirs),
             imp_directions=imp_dirs or None))
 
+    # ---- buckling on uprights only (EN 15512) --------------------------------
+    upright_sets = sorted({mm.member_set for mm in model.members.values()
+                           if "UP" in mm.member_set.upper()
+                           and mm.mtype == "beam"})
+    if upright_sets:
+        model.checks.buckling_sets = upright_sets
+
     # ---- load-dependent base springs from the master (see docstring) ---------
     if master is not None and model.supports:
         N_est = _estimate_support_axial(model)

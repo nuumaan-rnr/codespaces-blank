@@ -101,6 +101,56 @@ def test_full_pipeline_and_json_roundtrip(tmp_path):
     assert isinstance(all_ok(checks), bool)
 
 
+def test_back_to_back_module_and_buckling_rules():
+    cfg = RackConfig(module="back-to-back", n_bays=1, depth=1000.0,
+                     b2b_gap=250.0, beam_levels=[1500.0, 3000.0],
+                     frame_height=3300.0, bracing_type="D",
+                     bracing_start=150.0, bracing_pitch=600.0)
+    model = build_rack(cfg)
+    # four upright lines across the CA direction
+    assert {round(n.y) for n in model.nodes.values()} == {0, 1000, 1250, 2250}
+    spacers = [m for m in model.members.values()
+               if m.member_set == "row spacers"]
+    assert len(spacers) == 2 * 2            # 2 levels x 2 frame lines
+    assert all(m.mtype == "truss" for m in spacers)
+    # 4 upright lines get supports
+    assert len(model.supports) == 2 * 4
+    # buckling restricted to the uprights
+    assert model.checks.buckling_sets == ["uprights"]
+    # major-axis buckling length = beam gap of the level band
+    ups = [m for m in model.members.values() if m.member_set == "uprights"]
+    def mid_z(m):
+        return (model.nodes[m.node_i].z + model.nodes[m.node_j].z) / 2
+    seg_low = next(m for m in ups if mid_z(m) < 1500)
+    seg_up = next(m for m in ups if 1500 < mid_z(m) < 3000)
+    assert seg_low.L_buckling_z == pytest.approx(1500.0)
+    assert seg_up.L_buckling_z == pytest.approx(1500.0)
+    # minor-axis = max unsupported between diagonal connections; D-pattern
+    # touches each upright every other pitch -> 2 x 600
+    assert seg_low.L_buckling_y == pytest.approx(1200.0)
+    # X-pattern braces every pitch -> 600 (plus base/top gaps may govern)
+    xmod = build_rack(RackConfig(module="single", n_bays=1,
+                                 beam_levels=[1500.0, 3000.0],
+                                 frame_height=3300.0, bracing_type="X",
+                                 bracing_start=150.0, bracing_pitch=600.0))
+    xups = [m for m in xmod.members.values() if m.member_set == "uprights"]
+    assert xups[0].L_buckling_y == pytest.approx(600.0)
+
+
+def test_buckling_only_on_uprights():
+    model = build_rack(RackConfig(n_bays=1, beam_levels=[1800.0]))
+    cases = run_all(model)
+    checks = run_checks(model, cases)
+    buckling = [c for c in checks if c.check == "BUCKLING"]
+    assert buckling
+    assert all(c.member_set == "uprights" for c in buckling)
+    # beams still get stress + deflection
+    assert any(c.check == "STRESS" and c.member_set == "pallet beams"
+               for c in checks)
+    assert any(c.check == "DEFLECTION" and c.member_set == "pallet beams"
+               for c in checks)
+
+
 def test_overloaded_rack_fails_checks():
     cfg = RackConfig(n_bays=2, beam_levels=[2500.0, 5000.0, 7500.0, 10000.0],
                      upright_section="UP-90x70x1.8",

@@ -71,9 +71,14 @@ with st.sidebar:
     brace_sec = pick("Bracing", "bracing")
 
     st.header("Geometry")
+    module = st.radio("Module type", ["Single", "Back-to-back"],
+                      horizontal=True)
     n_bays = st.number_input("Bays (down-aisle)", 1, 12, 3)
-    bay_width = st.number_input("Bay width [mm]", 1000.0, 4500.0, 2700.0, 50.0)
+    bay_width = st.number_input("Beam span / bay width [mm]",
+                                1000.0, 4500.0, 2700.0, 50.0)
     depth = st.number_input("Frame depth [mm]", 600.0, 2000.0, 1100.0, 50.0)
+    b2b_gap = st.number_input("Back-to-back gap [mm]", 50.0, 600.0, 250.0,
+                              10.0, disabled=module == "Single")
 
     st.subheader("Beam levels (each level individually)")
     n_levels = int(st.number_input("Number of beam levels", 1, 12, 3))
@@ -130,6 +135,8 @@ with st.sidebar:
     go = st.button("Run analysis", type="primary", use_container_width=True)
 
 cfg = RackConfig(
+    module="back-to-back" if module.startswith("Back") else "single",
+    b2b_gap=b2b_gap,
     n_bays=int(n_bays), bay_width=bay_width, depth=depth,
     beam_levels=beam_levels, frame_height=frame_h,
     bracing_type="X" if btype.startswith("X") else "D",

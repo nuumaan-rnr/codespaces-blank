@@ -1,34 +1,45 @@
-"""Parametric generator for a complete 3D pallet-rack block:
+"""Parametric generator for selective pallet racking (SPR) modules -
+single-deep or back-to-back, within a row:
 
-  * upright frames (front + rear upright per frame line) braced in the
-    cross-aisle plane with a D- or X-pattern:
-      - horizontal strut at `bracing_start` (default 150 mm) above floor,
-      - truss diagonals at `bracing_pitch` (default 600 mm) panels above it
-        (zigzag for 'D', crossed pairs for 'X'),
-      - no intermediate horizontals; one closing horizontal at the last
-        diagonal position that fits below the frame top,
+  * upright frames braced in the cross-aisle (CA) plane with a D- or
+    X-pattern: horizontal strut at `bracing_start` (default 150 mm) above
+    the floor, truss diagonals in `bracing_pitch` panels (default 600 mm),
+    no intermediate horizontals, one closing horizontal at the last
+    diagonal position that fits below the frame top,
   * pallet-beam pairs in the down-aisle direction with semi-rigid
     beam-to-upright connectors, at individually specified beam levels,
+  * back-to-back modules: two racks separated by `b2b_gap`, tied with
+    row-spacer trusses at every beam level,
   * semi-rigid floor connections - fixed stiffness, or interpolated from
     the master workbook's BASE_STIFFNESS table at the estimated upright
     axial load,
-  * pallet loads as UDL on the beam pairs, placement load, EN 15512
-    combinations and sway imperfections.
+  * pallet loads as UDL on the beam pairs (per module), placement load,
+    EN 15512 combinations and sway imperfections.
+
+EN 15512 buckling lengths are assigned automatically to the uprights:
+  * major axis (down-aisle bending, local z): the beam gap of the level
+    band the segment lies in (floor -> level 1, level 1 -> level 2, ...),
+  * minor axis (cross-aisle, local y): the largest unsupported length
+    between bracing connection points on that specific upright (for a
+    D-pattern the diagonals meet each upright only every other pitch).
+Buckling checks are restricted to the uprights (CheckSettings.
+buckling_sets); beams are verified for stress / moments / deflection.
 
 Sections are selected by NAME from the section master (CSV/JSON
 `SectionLibrary` or .xlsx `MasterWorkbook`), which supplies the full
 solver-ready property set; per-section fy values from an .xlsx master are
 honoured via dedicated material entries.
 
-Axes: X = down-aisle, Y = cross-aisle (depth), Z = up.
-Node ids: frame line i (0..n_bays), side s (0 = front y=0, 1 = rear
-y=depth), elevation index j (0 = floor): id = i*1000 + s*100 + j.
+Axes: X = down-aisle, Y = cross-aisle, Z = up.
+Node ids: frame line i (0..n_bays), upright line s across the CA direction
+(single: 0 front / 1 rear; back-to-back: 0..3), elevation index j
+(0 = floor): id = i*1000 + s*100 + j.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from .library import SectionLibrary
 from .master_xlsx import MasterWorkbook
@@ -42,9 +53,11 @@ _TOL = 1.0     # mm: merge coincident elevations
 class RackConfig:
     name: str = "pallet rack"
     # geometry
+    module: str = "single"             # 'single' | 'back-to-back'
     n_bays: int = 3
-    bay_width: float = 2700.0          # mm (upright centrelines, X)
-    depth: float = 1100.0              # mm (front/rear upright lines, Y)
+    bay_width: float = 2700.0          # mm beam span (upright centrelines, X)
+    depth: float = 1100.0              # mm frame depth (per rack, Y)
+    b2b_gap: float = 250.0             # mm gap between back-to-back racks
     beam_levels: List[float] = field(
         default_factory=lambda: [2000.0, 4000.0, 6000.0])   # elevations [mm]
     frame_height: Optional[float] = None     # default: top beam level
@@ -70,7 +83,7 @@ class RackConfig:
     # upright axial load (requires `master`)
     base_stiffness: Union[float, str] = 5.0e8
     # loads
-    pallet_load_per_level: float = 20000.0  # N per bay per level (total)
+    pallet_load_per_level: float = 20000.0  # N per bay per level PER MODULE
     dead_load_beam: float = 0.05            # N/mm per beam
     placement_load: float = 500.0           # N horizontal at top (EN 15512)
     # design
@@ -122,6 +135,21 @@ def build_rack(cfg: RackConfig) -> RackModel:
             sec.material = "steel"
         m.sections[sec.name] = sec
 
+    # ---- upright lines across the CA direction -----------------------------
+    if cfg.module == "back-to-back":
+        y_of_side = {0: 0.0, 1: cfg.depth,
+                     2: cfg.depth + cfg.b2b_gap,
+                     3: 2.0 * cfg.depth + cfg.b2b_gap}
+        rack_pairs: List[Tuple[int, int]] = [(0, 1), (2, 3)]
+        spacer_pair: Optional[Tuple[int, int]] = (1, 2)
+    elif cfg.module == "single":
+        y_of_side = {0: 0.0, 1: cfg.depth}
+        rack_pairs = [(0, 1)]
+        spacer_pair = None
+    else:
+        raise ValueError("RackConfig.module must be 'single' or 'back-to-back'")
+    sides = sorted(y_of_side)
+
     # ---- elevations --------------------------------------------------------
     beam_levels = sorted(cfg.beam_levels)
     if not beam_levels:
@@ -150,26 +178,30 @@ def build_rack(cfg: RackConfig) -> RackModel:
         return i * 1000 + s * 100 + j
 
     for i in range(n_lines):
-        for s, y in ((0, 0.0), (1, cfg.depth)):
+        for s in sides:
             for j, z in enumerate(zs):
-                m.add_node(nid(i, s, j), i * cfg.bay_width, y, z)
+                m.add_node(nid(i, s, j), i * cfg.bay_width, y_of_side[s], z)
 
     # ---- uprights (continuous columns, one member per elevation segment) ---
     mid = 1
+    upright_members: Dict[Tuple[int, int], List[int]] = {}
     for i in range(n_lines):
-        for s in (0, 1):
+        for s in sides:
+            ids = []
             for j in range(len(zs) - 1):
                 m.add_member(mid, nid(i, s, j), nid(i, s, j + 1), up.name,
                              member_set="uprights", mesh=cfg.mesh_upright)
+                ids.append(mid)
                 mid += 1
+            upright_members[(i, s)] = ids
 
-    # ---- pallet beams (front + rear line) with semi-rigid connectors -------
+    # ---- pallet beams (per upright line) with semi-rigid connectors --------
     beam_pairs: Dict[float, List[int]] = {}
     for z in beam_levels:
         j = j_of(z)
         beam_pairs[z] = []
         for i in range(cfg.n_bays):
-            for s in (0, 1):
+            for s in sides:
                 m.add_member(
                     mid, nid(i, s, j), nid(i + 1, s, j), bm.name,
                     member_set="pallet beams", mesh=cfg.mesh_beam,
@@ -182,48 +214,95 @@ def build_rack(cfg: RackConfig) -> RackModel:
                 beam_pairs[z].append(mid)
                 mid += 1
 
-    # ---- cross-aisle frame bracing per the drawing --------------------------
-    # horizontal at the first bracing point, diagonals at the pitch
-    # (D: zigzag, X: crossed pairs), one horizontal at the last point
+    # ---- cross-aisle frame bracing per rack (see module docstring) ---------
+    # brace connection elevations per upright line, for the minor-axis
+    # buckling length (includes base and frame top)
+    brace_points: Dict[Tuple[int, int], List[float]] = {
+        (i, s): [0.0, H] for i in range(n_lines) for s in sides}
     if brace_zs:
         for i in range(n_lines):
-            j0, j1 = j_of(brace_zs[0]), j_of(brace_zs[-1])
-            m.add_member(mid, nid(i, 0, j0), nid(i, 1, j0), br.name,
-                         mtype="truss", member_set="bracing")
-            mid += 1
-            if len(brace_zs) > 1:
-                m.add_member(mid, nid(i, 0, j1), nid(i, 1, j1), br.name,
+            for sa, sb in rack_pairs:
+                j0, j1 = j_of(brace_zs[0]), j_of(brace_zs[-1])
+                m.add_member(mid, nid(i, sa, j0), nid(i, sb, j0), br.name,
                              mtype="truss", member_set="bracing")
                 mid += 1
-            for k in range(len(brace_zs) - 1):
-                ja, jb = j_of(brace_zs[k]), j_of(brace_zs[k + 1])
-                if cfg.bracing_type.upper() == "X":
-                    m.add_member(mid, nid(i, 0, ja), nid(i, 1, jb), br.name,
+                for s in (sa, sb):
+                    brace_points[(i, s)].append(brace_zs[0])
+                if len(brace_zs) > 1:
+                    m.add_member(mid, nid(i, sa, j1), nid(i, sb, j1), br.name,
                                  mtype="truss", member_set="bracing")
                     mid += 1
-                    m.add_member(mid, nid(i, 1, ja), nid(i, 0, jb), br.name,
-                                 mtype="truss", member_set="bracing")
-                    mid += 1
-                else:                                  # 'D' zigzag
-                    lo, hi = (0, 1) if k % 2 == 0 else (1, 0)
-                    m.add_member(mid, nid(i, lo, ja), nid(i, hi, jb), br.name,
-                                 mtype="truss", member_set="bracing")
-                    mid += 1
+                    for s in (sa, sb):
+                        brace_points[(i, s)].append(brace_zs[-1])
+                for k in range(len(brace_zs) - 1):
+                    ja, jb = j_of(brace_zs[k]), j_of(brace_zs[k + 1])
+                    if cfg.bracing_type.upper() == "X":
+                        m.add_member(mid, nid(i, sa, ja), nid(i, sb, jb),
+                                     br.name, mtype="truss",
+                                     member_set="bracing")
+                        mid += 1
+                        m.add_member(mid, nid(i, sb, ja), nid(i, sa, jb),
+                                     br.name, mtype="truss",
+                                     member_set="bracing")
+                        mid += 1
+                        for s in (sa, sb):
+                            brace_points[(i, s)] += [brace_zs[k],
+                                                     brace_zs[k + 1]]
+                    else:                                  # 'D' zigzag
+                        lo, hi = (sa, sb) if k % 2 == 0 else (sb, sa)
+                        m.add_member(mid, nid(i, lo, ja), nid(i, hi, jb),
+                                     br.name, mtype="truss",
+                                     member_set="bracing")
+                        mid += 1
+                        brace_points[(i, lo)].append(brace_zs[k])
+                        brace_points[(i, hi)].append(brace_zs[k + 1])
+
+    # ---- row spacers between back-to-back racks ----------------------------
+    if spacer_pair is not None:
+        sa, sb = spacer_pair
+        for i in range(n_lines):
+            for z in beam_levels:
+                j = j_of(z)
+                m.add_member(mid, nid(i, sa, j), nid(i, sb, j), br.name,
+                             mtype="truss", member_set="row spacers")
+                mid += 1
+
+    # ---- EN 15512 buckling lengths for the uprights -------------------------
+    # major axis (local z, down-aisle): beam gap of the level band
+    bands = [0.0] + beam_levels + ([H] if H - beam_levels[-1] > _TOL else [])
+    def major_length(z_mid: float) -> float:
+        for lo, hi in zip(bands, bands[1:]):
+            if lo - _TOL <= z_mid <= hi + _TOL:
+                return hi - lo
+        return bands[-1] - bands[-2]
+    # minor axis (local y, cross-aisle): max unsupported between diagonals
+    for (i, s), ids in upright_members.items():
+        pts = sorted(set(brace_points[(i, s)]))
+        l_minor = max(b - a for a, b in zip(pts, pts[1:])) if len(pts) > 1 else H
+        for mem_id in ids:
+            mem = m.members[mem_id]
+            z_mid = (m.nodes[mem.node_i].z + m.nodes[mem.node_j].z) / 2.0
+            mem.L_buckling_z = major_length(z_mid)
+            mem.L_buckling_y = l_minor
+
+    # buckling is verified on the uprights only (EN 15512); beams are
+    # checked for stress / moments / deflection
+    m.checks.buckling_sets = ["uprights"]
 
     # ---- semi-rigid floor connections ---------------------------------------
-    n_uprights = 2 * n_lines
+    n_uprights = len(sides) * n_lines
     if cfg.base_stiffness == "auto":
         if not cfg.master:
             raise ValueError("base_stiffness='auto' needs an .xlsx master "
                              "with a BASE_STIFFNESS sheet")
-        # estimated ULS axial load per upright from the pallet loads
+        n_modules = len(rack_pairs)
         N_est = (cfg.gamma_Q * cfg.pallet_load_per_level * cfg.n_bays
-                 * len(beam_levels)) / n_uprights
+                 * len(beam_levels) * n_modules) / n_uprights
         k_base, _ = cfg.master.base_stiffness(up.name, N_est)
     else:
         k_base = float(cfg.base_stiffness)
     for i in range(n_lines):
-        for s in (0, 1):
+        for s in sides:
             k = k_base if k_base > 0 else False
             m.supports.append(Support(nid(i, s, 0), ux=True, uy=True, uz=True,
                                       rx=k, ry=k, rz=False))

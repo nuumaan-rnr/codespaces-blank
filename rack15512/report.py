@@ -52,6 +52,8 @@ def write_report(model: RackModel, cases: List[CaseResult],
             f"'{gov.case}' - utilization **{gov.utilization:.3f}**")
     add("")
 
+    lines += _level_wise_utilization(model, checks)
+
     for kind in ("STRESS", "BUCKLING", "CONNECTOR", "DEFLECTION", "SWAY",
                  "ALPHA_CR", "STABILITY"):
         rows = [c for c in checks if c.check == kind]
@@ -75,3 +77,64 @@ def write_report(model: RackModel, cases: List[CaseResult],
         "factors, imperfection parameters and section/connector test values "
         "against the edition of the standard applicable to your project.*")
     return "\n".join(lines)
+
+
+def _level_wise_utilization(model: RackModel,
+                            checks: List[CheckResult]) -> List[str]:
+    """Worst utilization per beam level: the beams and connectors AT the
+    level, and the uprights / bracing of the storey band BELOW it."""
+    beam_z = sorted({model.nodes[m.node_i].z
+                     for m in model.members.values()
+                     if m.member_set == "pallet beams"})
+    if not beam_z:
+        return []
+    bands = [0.0] + beam_z
+
+    def band_of(z: float) -> int:
+        for k in range(len(bands) - 1):
+            if bands[k] - 1.0 <= z <= bands[k + 1] + 1.0:
+                return k + 1
+        return len(bands) - 1
+
+    # member id -> (level index, group)
+    where = {}
+    for m in model.members.values():
+        zi, zj = model.nodes[m.node_i].z, model.nodes[m.node_j].z
+        if m.member_set == "pallet beams":
+            where[m.id] = (band_of(zi), "beams")
+        elif m.member_set == "uprights":
+            where[m.id] = (band_of((zi + zj) / 2.0), "uprights")
+        else:
+            where[m.id] = (band_of((zi + zj) / 2.0), "bracing")
+
+    worst = {}     # (level, group) -> CheckResult
+    for c in checks:
+        if c.informative or not c.target.startswith("member"):
+            continue
+        mid = int(c.target.split()[1])
+        if mid not in where:
+            continue
+        level, group = where[mid]
+        if c.check == "CONNECTOR":
+            group = "connectors"
+        key = (level, group)
+        if key not in worst or c.utilization > worst[key].utilization:
+            worst[key] = c
+
+    out = ["## Utilization by level", "",
+           "Beams and connectors at the level; uprights and bracing of the "
+           "storey below it.", "",
+           "| level | elevation [mm] | uprights | beams | connectors "
+           "| bracing |", "|---|---|---|---|---|---|"]
+    for k, z in enumerate(beam_z, start=1):
+        cells = []
+        for group in ("uprights", "beams", "connectors", "bracing"):
+            c = worst.get((k, group))
+            if c is None:
+                cells.append("-")
+            else:
+                cells.append(f"{c.utilization:.3f} {c.status} ({c.check}, "
+                             f"member {c.target.split()[1]})")
+        out.append(f"| {k} | {z:.0f} | " + " | ".join(cells) + " |")
+    out.append("")
+    return out

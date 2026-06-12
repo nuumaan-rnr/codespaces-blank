@@ -294,6 +294,12 @@ class CheckSettings:
     sway_limit_ratio: float = 200.0       # max sway <= H / ratio (SLS)
     beam_defl_limit_ratio: float = 200.0  # beam deflection <= L / ratio (SLS)
     alpha_cr_warn: float = 10.0
+    # member sets to verify for flexural buckling.  Per EN 15512 practice
+    # buckling is checked on the uprights (columns) only; beams are checked
+    # for stress / moments / deflection.  None = automatic: member sets
+    # named 'uprights' or whose section role is 'upright'; if none exist,
+    # all compressed members are checked (generic-model fallback).
+    buckling_sets: Optional[List[str]] = None
 
 
 @dataclass

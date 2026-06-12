@@ -101,12 +101,25 @@ def _stress_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     return res
 
 
+def _buckling_targets(model: RackModel) -> Optional[set]:
+    """Member sets to buckling-check; None = every compressed member."""
+    if model.checks.buckling_sets is not None:
+        return set(model.checks.buckling_sets)
+    auto = {m.member_set for m in model.members.values()
+            if m.member_set == "uprights"
+            or model.section_of(m).role == "upright"}
+    return auto or None
+
+
 def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     res = []
     g = model.checks.gamma_M1
     kM = model.checks.k_M
+    targets = _buckling_targets(model)
     for mid, mr in case.members.items():
         m = model.members[mid]
+        if targets is not None and m.member_set not in targets:
+            continue                      # EN 15512: buckling on uprights only
         if mr.N_min >= 0.0:
             continue                      # no compression
         sec = model.section_of(m)
