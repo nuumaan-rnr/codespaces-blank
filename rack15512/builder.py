@@ -44,7 +44,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from .library import SectionLibrary
 from .master_xlsx import MasterWorkbook
 from .model import (BasePlate, Combination, Hinge, Imperfection, LoadCase,
-                    MemberLoad, NodalLoad, RackModel, Steel, Support)
+                    MemberLoad, NodalLoad, RackModel, Splice, Steel, Support)
 
 _TOL = 1.0     # mm: merge coincident elevations
 
@@ -65,6 +65,22 @@ class RackConfig:
     bracing_type: str = "D"            # 'D' zigzag | 'X' crossed
     bracing_start: float = 150.0       # first horizontal above floor [mm]
     bracing_pitch: float = 600.0       # diagonal panel height [mm]
+    # optional different pattern below the first beam level (e.g. 'X'
+    # below level 1 for accidental loads, 'D' above)
+    bracing_type_zone1: Optional[str] = None
+    # upright splice: auto-placed at H/2 when frame height > splice_above
+    # (max manufacturable upright length); set splice_z to position it
+    splice_z: Optional[float] = None
+    splice_above: float = 11000.0
+    splice_bolt_d: float = 12.0
+    splice_bolt_grade: str = "4.6"
+    splice_rows: int = 2               # bolts along axis per side (pitch p1)
+    splice_cols: int = 1               # bolt columns across (pitch p2)
+    splice_e1: float = 30.0
+    splice_e2: float = 20.0
+    splice_p1: float = 60.0
+    splice_p2: float = 0.0
+    splice_t: Optional[float] = None   # sleeve thickness (default: wall t)
     # sections: names from the master
     library: Optional[SectionLibrary] = None     # default: bundled master
     master: Optional[MasterWorkbook] = None      # .xlsx master (overrides
@@ -149,15 +165,18 @@ def build_rack(cfg: RackConfig) -> RackModel:
         m.sections[sec.name] = sec
 
     # ---- upright lines across the CA direction -----------------------------
+    # the rear module's bracing is MIRRORED relative to the front frame
+    # (accidental-load path; modelling both the same overstates utilization)
     if cfg.module == "back-to-back":
         y_of_side = {0: 0.0, 1: cfg.depth,
                      2: cfg.depth + cfg.b2b_gap,
                      3: 2.0 * cfg.depth + cfg.b2b_gap}
-        rack_pairs: List[Tuple[int, int]] = [(0, 1), (2, 3)]
+        rack_pairs: List[Tuple[int, int, bool]] = [(0, 1, False),
+                                                   (2, 3, True)]
         spacer_pair: Optional[Tuple[int, int]] = (1, 2)
     elif cfg.module == "single":
         y_of_side = {0: 0.0, 1: cfg.depth}
-        rack_pairs = [(0, 1)]
+        rack_pairs = [(0, 1, False)]
         spacer_pair = None
     else:
         raise ValueError("RackConfig.module must be 'single' or 'back-to-back'")
@@ -172,8 +191,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
         raise ValueError("frame_height is below the top beam level")
     brace_zs = bracing_elevations(cfg, H)
 
+    # upright splice: explicit elevation or automatic at H/2 when the
+    # upright exceeds the maximum manufacturable length
+    splice_z = cfg.splice_z
+    if splice_z is None and H > cfg.splice_above:
+        splice_z = H / 2.0
+
     zs: List[float] = [0.0]
-    for z in sorted(set(beam_levels) | set(brace_zs) | {H}):
+    extra = {splice_z} if splice_z else set()
+    for z in sorted(set(beam_levels) | set(brace_zs) | {H} | extra):
         if z - zs[-1] > _TOL:
             zs.append(z)
 
@@ -234,7 +260,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         (i, s): [0.0, H] for i in range(n_lines) for s in sides}
     if brace_zs:
         for i in range(n_lines):
-            for sa, sb in rack_pairs:
+            for sa, sb, mirror in rack_pairs:
                 j0, j1 = j_of(brace_zs[0]), j_of(brace_zs[-1])
                 m.add_member(mid, nid(i, sa, j0), nid(i, sb, j0), br.name,
                              mtype="truss", member_set="bracing")
@@ -249,7 +275,11 @@ def build_rack(cfg: RackConfig) -> RackModel:
                         brace_points[(i, s)].append(brace_zs[-1])
                 for k in range(len(brace_zs) - 1):
                     ja, jb = j_of(brace_zs[k]), j_of(brace_zs[k + 1])
-                    if cfg.bracing_type.upper() == "X":
+                    ptype = cfg.bracing_type
+                    if cfg.bracing_type_zone1 and \
+                            brace_zs[k + 1] <= beam_levels[0] + _TOL:
+                        ptype = cfg.bracing_type_zone1
+                    if ptype.upper() == "X":
                         m.add_member(mid, nid(i, sa, ja), nid(i, sb, jb),
                                      br.name, mtype="truss",
                                      member_set="bracing")
@@ -262,7 +292,8 @@ def build_rack(cfg: RackConfig) -> RackModel:
                             brace_points[(i, s)] += [brace_zs[k],
                                                      brace_zs[k + 1]]
                     else:                                  # 'D' zigzag
-                        lo, hi = (sa, sb) if k % 2 == 0 else (sb, sa)
+                        even = (k % 2 == 0) != mirror      # rear: mirrored
+                        lo, hi = (sa, sb) if even else (sb, sa)
                         m.add_member(mid, nid(i, lo, ja), nid(i, hi, jb),
                                      br.name, mtype="truss",
                                      member_set="bracing")
@@ -283,20 +314,29 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # ---- EN 15512 buckling lengths for the uprights -------------------------
     # major axis (local z, down-aisle): beam gap of the level band
     bands = [0.0] + beam_levels + ([H] if H - beam_levels[-1] > _TOL else [])
-    def major_length(z_mid: float) -> float:
+
+    def band_of(z_mid: float) -> Tuple[float, float]:
         for lo, hi in zip(bands, bands[1:]):
             if lo - _TOL <= z_mid <= hi + _TOL:
-                return hi - lo
-        return bands[-1] - bands[-2]
-    # minor axis (local y, cross-aisle): max unsupported between diagonals
+                return lo, hi
+        return bands[-2], bands[-1]
+
+    # minor axis (local y, cross-aisle): taken FROM THE MODEL per level
+    # band - the largest gap between bracing connection points on that
+    # upright among the gaps that overlap the band (so e.g. X bracing up
+    # to level 1 gives Lcr = pitch there and 2 x pitch for the D zone
+    # above, each level seeing its own unsupported length)
     for (i, s), ids in upright_members.items():
         pts = sorted(set(brace_points[(i, s)]))
-        l_minor = max(b - a for a, b in zip(pts, pts[1:])) if len(pts) > 1 else H
+        gaps = list(zip(pts, pts[1:]))
         for mem_id in ids:
             mem = m.members[mem_id]
             z_mid = (m.nodes[mem.node_i].z + m.nodes[mem.node_j].z) / 2.0
-            mem.L_buckling_z = major_length(z_mid)
-            mem.L_buckling_y = l_minor
+            lo, hi = band_of(z_mid)
+            mem.L_buckling_z = hi - lo
+            overlapping = [b - a for a, b in gaps
+                           if b > lo + _TOL and a < hi - _TOL]
+            mem.L_buckling_y = max(overlapping) if overlapping else hi - lo
 
     # buckling is verified on the uprights only (EN 15512); beams are
     # checked for stress / moments / deflection
@@ -314,6 +354,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.checks.bolts_per_connection = cfg.bolts_per_connection
     m.base_plate = BasePlate(f_ck=cfg.concrete_fck, fy_plate=cfg.plate_fy,
                              b=cfg.plate_b, d=cfg.plate_d, t=cfg.plate_t)
+
+    # upright splice connection check
+    if splice_z:
+        m.splices.append(Splice(
+            z=splice_z, bolt_d=cfg.splice_bolt_d,
+            bolt_grade=cfg.splice_bolt_grade,
+            rows=cfg.splice_rows, cols=cfg.splice_cols,
+            e1=cfg.splice_e1, e2=cfg.splice_e2,
+            p1=cfg.splice_p1, p2=cfg.splice_p2, t_sleeve=cfg.splice_t))
 
     # ---- semi-rigid floor connections ---------------------------------------
     n_uprights = len(sides) * n_lines

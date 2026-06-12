@@ -8,7 +8,8 @@ from typing import Any, Dict
 
 from .model import (AnalysisSettings, BasePlate, CheckSettings, Combination,
                     CrossSection, Hinge, Imperfection, LoadCase, Member,
-                    MemberLoad, NodalLoad, Node, RackModel, Steel, Support)
+                    MemberLoad, NodalLoad, Node, RackModel, Splice, Steel,
+                    Support)
 
 
 def model_to_dict(m: RackModel) -> Dict[str, Any]:
@@ -25,6 +26,7 @@ def model_to_dict(m: RackModel) -> Dict[str, Any]:
         "analysis": asdict(m.analysis),
         "checks": asdict(m.checks),
         "base_plate": asdict(m.base_plate) if m.base_plate else None,
+        "splices": [asdict(s) for s in m.splices],
     }
 
 
@@ -61,6 +63,8 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
         m.checks = CheckSettings(**d["checks"])
     if d.get("base_plate"):
         m.base_plate = BasePlate(**d["base_plate"])
+    for x in d.get("splices", []):
+        m.splices.append(Splice(**x))
     return m
 
 

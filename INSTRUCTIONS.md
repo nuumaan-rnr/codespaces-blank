@@ -109,8 +109,16 @@ print(write_report(model, cases, checks))
 │ Frame height [mm]            [ 6500   ]        │
 ├─ Cross-aisle bracing ──────────────────────────┤
 │ Type            (•) D (zigzag)  ( ) X (crossed)│
+│ Different pattern below level 1   [same     ▼] │
 │ First horizontal above floor [mm]  [ 150 ]     │
 │ Diagonal pitch [mm]                [ 600 ]     │
+├─ Upright splice (auto if H > 11 m) ────────────┤
+│ [x] Add splice + connection check              │
+│ Splice elevation [mm]            [ 6000 ]      │
+│ Bolt [M12 ▼] grade [4.6 ▼]                     │
+│ rows x cols / side  [2] x [1]                  │
+│ e1 [30]  e2 [20]  p1 [60]  p2 [0]              │
+│ Sleeve thickness [mm] (0 = wall)  [ 0 ]        │
 ├─ Steel & connections ──────────────────────────┤
 │ Default fy [MPa]                   [ 355  ]    │
 │ Connector stiffness [kNm/rad]      [ 65.7 ]    │
@@ -183,10 +191,11 @@ UI tabs / CLI output directory:
 | Check | Applies to | Rule |
 |---|---|---|
 | STRESS | all members (ULS) | \|N\|/(A_eff·fy/γM0) + \|My\|/(Wy_eff·fy/γM0) + \|Mz\|/(Wz_eff·fy/γM0) ≤ 1 at every station — covers the maximum-moment check of the beams. |
-| BUCKLING | **uprights only** (ULS) | Flexural buckling about **both axes**, χ per EN 1993-1-1 §6.3.1. Buckling lengths assigned automatically: **major axis = the beam gap of that level band** (floor→L1, L1→L2, …); **minor axis (CA) = largest unsupported length between the bracing connection points on that upright** (for a D-pattern the diagonals meet each upright every other pitch → 2×pitch). χ_min of the two governs the interaction with the moments. |
+| BUCKLING | **uprights only** (ULS) | Flexural buckling about **both axes**, χ per EN 1993-1-1 §6.3.1. Buckling lengths assigned automatically **from the model, per level band**: **major axis = the beam gap of that level** (floor→L1, L1→L2, …); **minor axis (CA) = the largest unsupported length between the bracing connection points on that upright within that level band** — e.g. X bracing up to level 1 gives Lcr = pitch there and the D zone above gives 2×pitch, each level seeing its own value. χ_min of the two governs the interaction with the moments. |
 | CONNECTOR | beam end connectors (ULS) | \|M_Ed\| ≤ M_Rd from the connector test. |
 | BRACE_BOLT | bracing end connections (ULS) | Brace axial force ≤ n_bolts × **min( bolt shear, bearing on the brace, bearing on the upright )** per EN 1993-1-8: Fb,Rd = k1·αb·fu·d·t/γM2 with αb = min(e1/3d0, fub/fu, 1), k1 = min(2.8·e2/d0−1.7, 2.5) — **e1/e2/t/fu of both plies come from the masters** (upright sheet columns e1/e2/t-wall; bracing sheet rows end-dist e1/e2, Thk, Fu). The governing component is named in the report. |
-| BASEPLATE | footplate (ULS) | Floor bearing N_Ed ≤ b·d·f_jd and plate thickness t ≥ c·√(3·f_jd·γM0/fy) (EN 1993-1-8 §6.2.5 cantilever projection). The report always states the **minimum required plate size and thickness** for the governing base reaction; if you enter your actual plate it is verified PASS/FAIL. |
+| BASEPLATE | footplate (ULS) | EN 1993-1-8 §6.2.5 T-stub in compression: the plate bears on **strips of width c = t·√(fy/(3·f_jd·γM0)) around the upright walls**, A_eff = L_p·(t_wall + 2c) with L_p the developed wall length of the upright; demand N_eq = N + 6·M/d from the governing base reaction (max axial **and** moment). The report states the required thickness and minimum plate size — typical rack plates of 3–4 mm verify; the actual plate is checked PASS/FAIL when entered. |
+| SPLICE | upright splices (ULS) | When the frame is taller than 11 m a splice is added (auto at H/2, or at the entered elevation). The bolt group per side (user inputs: bolt size, grade, rows×cols, e1, e2, p1, p2, sleeve t) is verified per EN 1993-1-8 with the elastic bolt-group method for the concurrent N, V and M at the splice elevation; per-bolt resistance = min(shear, bearing on the lesser of the upright wall / sleeve thickness), end- and inner-bolt bearing factors from e1/p1 and e2/p2. |
 | DEFLECTION | pallet beams (SLS) | transverse deflection ≤ span/200 (configurable). |
 | SWAY | frame (SLS) | max sway in X and in Y ≤ H/200 (configurable). |
 | ALPHA_CR | frame (info) | sway-sensitivity report from the 1st/2nd-order amplification; second-order effects are already inside the results. |

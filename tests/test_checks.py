@@ -196,7 +196,7 @@ def test_brace_bolt_and_baseplate_checks_in_pipeline():
                      brace_section="C 36X21X1.5",
                      base_stiffness="auto",
                      bolt_d=12.0, bolt_grade="4.6",
-                     plate_b=150.0, plate_d=130.0, plate_t=6.0)
+                     plate_b=150.0, plate_d=130.0, plate_t=4.0)
     model = build_rack(cfg)
     cases = run_all(model)
     checks = run_checks(model, cases)
@@ -205,9 +205,88 @@ def test_brace_bolt_and_baseplate_checks_in_pipeline():
     assert bolts and all(c.member_set in ("bracing", "row spacers")
                          for c in bolts)
     assert any("governs" in c.detail for c in bolts)
-    assert any("bearing" in c.target for c in plates)
-    assert any("thickness" in c.target for c in plates)
-    assert any("min plate" in c.detail for c in plates)
+    # strip method: a typical 4 mm plate verifies (EN 1993-1-8 6.2.5)
+    assert plates and all(c.ok for c in plates)
+    assert all("A_eff" in c.detail and "t_req" in c.detail for c in plates)
+
+
+def test_back_to_back_rear_bracing_mirrored():
+    """The rear module's D-zigzag is inverted relative to the front frame
+    (accidental-load path, per the frame drawing)."""
+    cfg = RackConfig(module="back-to-back", n_bays=1, depth=1000.0,
+                     b2b_gap=250.0, beam_levels=[1500.0, 3000.0],
+                     frame_height=3300.0, bracing_type="D")
+    model = build_rack(cfg)
+    diags = [m for m in model.members.values()
+             if m.member_set == "bracing"
+             and abs(model.nodes[m.node_i].z - model.nodes[m.node_j].z) > 1]
+
+    def first_panel_start_y(y_low_side, y_high_side):
+        for d in diags:
+            ni, nj = model.nodes[d.node_i], model.nodes[d.node_j]
+            lo, hi = (ni, nj) if ni.z < nj.z else (nj, ni)
+            if abs(lo.z - 150.0) < 1 and abs(ni.x) < 1 \
+                    and lo.y in (y_low_side, y_high_side):
+                return lo.y
+        raise AssertionError("first panel diagonal not found")
+
+    # front rack (y 0/1000): first diagonal starts at y=0
+    assert first_panel_start_y(0.0, 1000.0) == 0.0
+    # rear rack (y 1250/2250): mirrored -> first diagonal starts at y=2250
+    assert first_panel_start_y(1250.0, 2250.0) == 2250.0
+
+
+def test_ca_buckling_length_per_level_from_model():
+    """X bracing up to the first beam level: level 1 band gets Lcr = pitch,
+    the D zone above gets 2 x pitch - per level, from the actual model."""
+    cfg = RackConfig(n_bays=1, beam_levels=[1350.0, 3150.0],
+                     frame_height=3750.0, bracing_type="D",
+                     bracing_type_zone1="X", bracing_start=150.0,
+                     bracing_pitch=600.0)
+    model = build_rack(cfg)
+    ups = [m for m in model.members.values() if m.member_set == "uprights"]
+
+    def mid_z(m):
+        return (model.nodes[m.node_i].z + model.nodes[m.node_j].z) / 2
+
+    band1 = [m for m in ups if mid_z(m) < 1350]
+    band2 = [m for m in ups if 1350 < mid_z(m) < 3150]
+    assert band1 and all(m.L_buckling_y == pytest.approx(600.0)
+                         for m in band1)
+    assert band2 and all(m.L_buckling_y == pytest.approx(1200.0)
+                         for m in band2)
+    # major axis still the beam gap of the band
+    assert band1[0].L_buckling_z == pytest.approx(1350.0)
+    assert band2[0].L_buckling_z == pytest.approx(1800.0)
+
+
+def test_upright_splice_auto_and_check():
+    """Frame height > 11 m: a splice is added automatically at H/2 and the
+    bolt-group connection is verified per EN 1993-1-8."""
+    master = __import__("rack15512.master_xlsx",
+                        fromlist=["load_master"]).load_master(
+        os.path.join(os.path.dirname(__file__), "..", "examples",
+                     "Master.xlsx"))
+    cfg = RackConfig(n_bays=1, beam_levels=[6000.0, 11000.0],
+                     frame_height=12000.0, master=master,
+                     upright_section="UP0022",
+                     beam_section="RHS 122x61x2.0",
+                     brace_section="C 34X34X2.0", base_stiffness="auto",
+                     splice_rows=2, splice_cols=2, splice_p1=60.0,
+                     splice_p2=40.0, splice_e1=30.0, splice_e2=20.0)
+    model = build_rack(cfg)
+    assert len(model.splices) == 1
+    assert model.splices[0].z == pytest.approx(6000.0)
+    # the splice elevation exists as a node line
+    assert any(abs(n.z - 6000.0) < 1 for n in model.nodes.values())
+    model.combinations = model.combinations[:1]
+    model.imperfection.directions = ["+x"]
+    cases = run_all(model)
+    checks = run_checks(model, cases)
+    sp = [c for c in checks if c.check == "SPLICE" and not c.informative]
+    assert sp
+    assert all("Fv=" in c.detail and "Fb=" in c.detail for c in sp)
+    assert all(0.0 < c.utilization < 50.0 for c in sp)
 
 
 def test_overloaded_rack_fails_checks():

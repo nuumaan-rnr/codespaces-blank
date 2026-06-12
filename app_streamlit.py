@@ -97,6 +97,11 @@ with st.sidebar:
 
     st.subheader("Cross-aisle bracing")
     btype = st.radio("Type", ["D (zigzag)", "X (crossed)"], horizontal=True)
+    zone1 = st.selectbox("Different pattern below level 1",
+                         ["same", "X (crossed)", "D (zigzag)"], 0,
+                         help="e.g. X bracing up to the first beam level "
+                              "for accidental loads; the CA buckling "
+                              "length follows the actual bracing per level")
     bstart = st.number_input("First horizontal above floor [mm]",
                              50.0, 1000.0, 150.0, 10.0)
     bpitch = st.number_input("Diagonal pitch [mm]", 200.0, 2000.0, 600.0, 50.0)
@@ -136,6 +141,32 @@ with st.sidebar:
         pd_ = st.number_input("Plate depth Y [mm] (0 = none)", 0.0, 500.0, 0.0)
         pt = st.number_input("Plate thickness [mm] (0 = none)", 0.0, 40.0, 0.0)
 
+    splice_auto = frame_h > 11000.0
+    with st.expander(f"Upright splice "
+                     f"({'REQUIRED, H > 11 m' if splice_auto else 'optional'})",
+                     expanded=splice_auto):
+        sp_on = st.checkbox("Add splice + connection check", splice_auto)
+        sp_z = st.number_input("Splice elevation [mm]", 500.0, 15000.0,
+                               round(frame_h / 2 / 50) * 50.0, 50.0,
+                               disabled=not sp_on)
+        sp_bolt = st.selectbox("Splice bolt size",
+                               ["M8", "M10", "M12", "M14", "M16"], 2,
+                               disabled=not sp_on)
+        sp_grade = st.selectbox("Splice bolt grade",
+                                ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
+                                0, disabled=not sp_on)
+        c1, c2 = st.columns(2)
+        sp_rows = c1.number_input("Bolt rows / side (pitch p1)", 1, 6, 2,
+                                  disabled=not sp_on)
+        sp_cols = c2.number_input("Bolt columns (pitch p2)", 1, 4, 1,
+                                  disabled=not sp_on)
+        sp_e1 = c1.number_input("e1 [mm]", 10.0, 100.0, 30.0, disabled=not sp_on)
+        sp_e2 = c2.number_input("e2 [mm]", 10.0, 100.0, 20.0, disabled=not sp_on)
+        sp_p1 = c1.number_input("p1 [mm]", 0.0, 200.0, 60.0, disabled=not sp_on)
+        sp_p2 = c2.number_input("p2 [mm]", 0.0, 200.0, 0.0, disabled=not sp_on)
+        sp_t = st.number_input("Sleeve thickness [mm] (0 = upright wall)",
+                               0.0, 10.0, 0.0, disabled=not sp_on)
+
     st.header("Loads")
     pallet = st.number_input("Pallet load per bay per level [kN]",
                              1.0, 100.0, 20.0)
@@ -156,7 +187,15 @@ cfg = RackConfig(
     n_bays=int(n_bays), bay_width=bay_width, depth=depth,
     beam_levels=beam_levels, frame_height=frame_h,
     bracing_type="X" if btype.startswith("X") else "D",
+    bracing_type_zone1=(None if zone1 == "same"
+                        else ("X" if zone1.startswith("X") else "D")),
     bracing_start=bstart, bracing_pitch=bpitch,
+    splice_z=sp_z if sp_on else None,
+    splice_above=0.0 if sp_on else 1.0e9,
+    splice_bolt_d=float(sp_bolt[1:]), splice_bolt_grade=sp_grade,
+    splice_rows=int(sp_rows), splice_cols=int(sp_cols),
+    splice_e1=sp_e1, splice_e2=sp_e2, splice_p1=sp_p1, splice_p2=sp_p2,
+    splice_t=sp_t or None,
     library=lib, master=master,
     upright_section=upright_sec, beam_section=beam_sec,
     brace_section=brace_sec, steel_fy=fy,

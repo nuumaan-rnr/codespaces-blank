@@ -21,11 +21,13 @@ partial factors and limits are configurable in CheckSettings):
              alpha_b = min(e1/(3*d0), fub/fu, 1) and
              k1 = min(2.8*e2/d0 - 1.7, 2.5), using e1/e2/t/fu of each ply
              from the section master.  Enabled by CheckSettings.bolt_d.
-  BASEPLATE  footplate per EN 1993-1-8 6.2.5: floor bearing
-             N_Ed <= b*d*f_jd and cantilever-projection plate thickness
-             t >= c * sqrt(3*f_jd*gamma_M0/fy); the minimum required plate
-             size/thickness for the governing base reaction is reported.
-             Enabled by RackModel.base_plate.
+  BASEPLATE  footplate per EN 1993-1-8 6.2.5 (T-stub in compression): the
+             plate bears on strips of width c = t*sqrt(fy/(3*f_jd*gM0))
+             around the upright walls, A_eff = L_p*(t_wall + 2c) with
+             L_p = developed wall length; demand N_eq = N + 6*M/d from the
+             governing base reaction (axial + moment).  Required plate
+             thickness and minimum plate size are reported; the actual
+             plate is verified when given.  Enabled by RackModel.base_plate.
   DEFLECTION (SLS) beam transverse deflection (resultant relative to the
              chord) <= L / limit_ratio.
   SWAY       (SLS) max horizontal displacement in X and in Y <= H / ratio.
@@ -91,6 +93,7 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
             out += _connector_checks(model, case)
             out += _brace_bolt_checks(model, case)
             out += _base_plate_checks(model, case)
+            out += _splice_checks(model, case)
             a = _alpha_cr_check(model, case)
             if a:
                 out.append(a)
@@ -286,58 +289,166 @@ def _brace_bolt_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
 
 
 def _base_plate_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
+    """Footplate per EN 1993-1-8 6.2.5 (T-stub in compression): the plate
+    bears on STRIPS of width c on each side of the upright's walls,
+
+        c = t_p * sqrt(fy_p / (3 * f_jd * gamma_M0)),
+        A_eff = L_p * (t_wall + 2c)   (L_p = developed wall length = A/t),
+
+    and must carry the governing base demand N_eq = N + 6*M/d (elastic
+    peak-pressure equivalent of the concurrent base moment).  The required
+    thickness follows from inverting c; typical rack plates of 3-4 mm
+    verify."""
     bp = model.base_plate
     if bp is None or not case.reactions:
         return []
     f_jd = bp.bearing_strength()
     g0 = model.checks.gamma_M0
 
-    # governing (most compressed) support and its upright footprint
-    node, r = max(case.reactions.items(), key=lambda kv: kv[1][2])
-    N = max(r[2], 0.0)
-    foot_w = foot_d = None
-    for m in model.members.values():
-        if node in (m.node_i, m.node_j):
-            sec = model.section_of(m)
-            if m.member_set == "uprights" or sec.role == "upright":
-                foot_w, foot_d = sec.depth_h, sec.width_b
-                break
-    note = ""
-    if not foot_w or not foot_d:
-        foot_w = foot_d = 100.0
-        note = " (upright footprint unknown, 100x100 assumed)"
+    # upright section at each support, for wall thickness / footprint
+    def upright_at(node: int):
+        for m in model.members.values():
+            if node in (m.node_i, m.node_j):
+                sec = model.section_of(m)
+                if m.member_set == "uprights" or sec.role == "upright":
+                    return sec
+        return None
 
-    # minimum required plate: footprint + uniform projection c so that
-    # the bearing area carries N; thickness from the cantilever projection
-    A_req = N / f_jd
-    if A_req > foot_w * foot_d:
-        s, p = foot_w + foot_d, A_req - foot_w * foot_d
-        c_req = (-s + math.sqrt(s * s + 4.0 * p)) / 4.0
+    # governing support: max equivalent axial incl. the base moment
+    best = None
+    for node, r in case.reactions.items():
+        N = max(r[2], 0.0)
+        M = math.hypot(r[3], r[4])
+        sec = upright_at(node)
+        d_h = (sec.depth_h if sec and sec.depth_h else 100.0)
+        N_eq = N + 6.0 * M / d_h
+        if best is None or N_eq > best[0]:
+            best = (N_eq, N, M, node, sec)
+    N_eq, N, M, node, sec = best
+
+    note = ""
+    if sec is None or not sec.t:
+        sec_t, sec_A = 2.0, 600.0
+        note = " (upright wall data missing in master, t=2/A=600 assumed)"
     else:
-        c_req = 0.0
-    t_req_min = c_req * math.sqrt(3.0 * f_jd * g0 / bp.fy_plate)
-    min_txt = (f"min plate {foot_w + 2*c_req:.0f}x{foot_d + 2*c_req:.0f} mm, "
-               f"t>={max(t_req_min, 4.0):.1f} mm "
-               f"(N={N/1e3:.1f} kN at node {node}, f_jd={f_jd:.2f} MPa, "
-               f"c={c_req:.1f} mm{note})")
+        sec_t, sec_A = sec.t, sec.A
+    foot_w = sec.depth_h if sec and sec.depth_h else 100.0
+    foot_d = sec.width_b if sec and sec.width_b else 100.0
+    L_p = sec_A / sec_t                      # developed wall length
+
+    A_req = N_eq / f_jd
+    c_req = max(0.0, (A_req / L_p - sec_t) / 2.0)
+    t_req = c_req * math.sqrt(3.0 * f_jd * g0 / bp.fy_plate)
+    min_b = max(foot_w + 2.0 * c_req, math.sqrt(A_req * foot_w / foot_d))
+    min_d = max(foot_d + 2.0 * c_req, A_req / min_b)
+    min_txt = (f"N={N/1e3:.1f} kN, M={M/1e6:.2f} kNm -> N_eq={N_eq/1e3:.1f} kN "
+               f"at node {node}; f_jd={f_jd:.2f} MPa, A_req={A_req:.0f} mm2, "
+               f"strip c_req={c_req:.1f} mm -> t_req={t_req:.1f} mm "
+               f"(use >= {max(t_req, 3.0):.1f} mm), "
+               f"min plate {min_b:.0f}x{min_d:.0f} mm{note}")
 
     if bp.b and bp.d and bp.t:
-        util_bearing = N / (bp.b * bp.d * f_jd)
-        c_act = max((bp.b - foot_w) / 2.0, (bp.d - foot_d) / 2.0, 0.0)
-        t_req = c_act * math.sqrt(3.0 * f_jd * g0 / bp.fy_plate)
-        util_t = t_req / bp.t if bp.t > 0 else 99.0
-        return [
-            CheckResult("BASEPLATE", case.name, f"node {node} bearing", "-",
-                        util_bearing,
-                        f"N={N/1e3:.1f} kN vs {bp.b:.0f}x{bp.d:.0f} plate, "
-                        f"f_jd={f_jd:.2f} MPa; {min_txt}"),
-            CheckResult("BASEPLATE", case.name, f"node {node} thickness", "-",
-                        util_t,
-                        f"t={bp.t:.1f} mm vs required {t_req:.1f} mm "
-                        f"(projection c={c_act:.1f} mm, fy={bp.fy_plate:.0f})"),
-        ]
+        c_t = bp.t * math.sqrt(bp.fy_plate / (3.0 * f_jd * g0))
+        A_eff = min(L_p * (sec_t + 2.0 * c_t), bp.b * bp.d)
+        util = A_req / A_eff if A_eff > 0 else 99.0
+        fit = ""
+        if bp.b + 1.0 < foot_w or bp.d + 1.0 < foot_d:
+            util = max(util, 99.0)
+            fit = (f"; FAIL plate smaller than the upright footprint "
+                   f"{foot_w:.0f}x{foot_d:.0f}")
+        return [CheckResult(
+            "BASEPLATE", case.name, f"node {node}", "-", util,
+            f"plate {bp.b:.0f}x{bp.d:.0f}x{bp.t:.1f}: c={c_t:.1f} mm, "
+            f"A_eff={A_eff:.0f} mm2 vs A_req={A_req:.0f} mm2; {min_txt}{fit}")]
     return [CheckResult("BASEPLATE", case.name, f"node {node}", "-", 0.0,
                         min_txt, informative=True)]
+
+
+def _splice_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
+    """Upright splice connection per EN 1993-1-8: elastic bolt-group method
+    for the concurrent N, V (resultant) and M (resultant) at the splice
+    elevation; per-bolt resistance = min(shear, bearing) with bearing on
+    the lesser of the upright wall and the sleeve thickness."""
+    res: List[CheckResult] = []
+    for sp in model.splices:
+        if int(sp.bolt_d) not in BOLTS or sp.bolt_grade not in BOLT_GRADES:
+            res.append(CheckResult("SPLICE", case.name, f"z={sp.z:.0f}", "-",
+                                   99.0, f"unknown bolt M{sp.bolt_d:.0f} "
+                                         f"grade {sp.bolt_grade}"))
+            continue
+        d0, As = BOLTS[int(sp.bolt_d)]
+        fub, alpha_v = BOLT_GRADES[sp.bolt_grade]
+        g2 = model.checks.gamma_M2
+        Fv = alpha_v * fub * As / g2
+
+        # bolt-group geometry (one side), elastic method
+        n = sp.rows * sp.cols
+        coords = [((r - (sp.rows - 1) / 2.0) * sp.p1,
+                   (c - (sp.cols - 1) / 2.0) * sp.p2)
+                  for r in range(sp.rows) for c in range(sp.cols)]
+        sum_r2 = sum(x * x + y * y for x, y in coords)
+
+        worst: Optional[Tuple[float, str, int]] = None
+        for mid, mr in case.members.items():
+            m = model.members[mid]
+            sec = model.section_of(m)
+            if not (m.member_set == "uprights" or sec.role == "upright"):
+                continue
+            zi = model.nodes[m.node_i].z
+            zj = model.nodes[m.node_j].z
+            if abs(zi - sp.z) <= 1.0:
+                st = mr.stations[0]
+            elif abs(zj - sp.z) <= 1.0 and zi < zj:
+                continue        # counted once via the segment above
+            else:
+                continue
+            N, V = abs(st.N), math.hypot(st.Vy, st.Vz)
+            M = math.hypot(st.My, st.Mz)
+
+            if sum_r2 > 1.0e-9:
+                F = max(math.hypot(N / n + M * abs(y) / sum_r2,
+                                   V / n + M * abs(x) / sum_r2)
+                        for x, y in coords)
+                m_note = ""
+            else:
+                F = math.hypot(N / n, V / n)
+                if M > 1.0e4:    # a single bolt cannot carry the moment
+                    F = max(F, 99.0 * Fv)
+                    m_note = (f"; FAIL: single-bolt group cannot carry "
+                              f"M={M/1e6:.2f} kNm - use rows/cols > 1")
+                else:
+                    m_note = ""
+
+            t_eff = min(sec.t or 1.0e9, sp.t_sleeve or 1.0e9)
+            if t_eff > 1.0e8:
+                res.append(CheckResult(
+                    "SPLICE", case.name, f"z={sp.z:.0f}", "-", 0.0,
+                    "upright wall thickness missing in the master - "
+                    "bearing not checked", informative=True))
+                break
+            fu = _fu_of(model, sec)
+            alpha_b = min(sp.e1 / (3.0 * d0), fub / fu, 1.0)
+            if sp.rows > 1 and sp.p1 > 0:
+                alpha_b = min(alpha_b, sp.p1 / (3.0 * d0) - 0.25)
+            k1 = min(2.8 * sp.e2 / d0 - 1.7, 2.5)
+            if sp.cols > 1 and sp.p2 > 0:
+                k1 = min(k1, 1.4 * sp.p2 / d0 - 1.7)
+            Fb = k1 * alpha_b * fu * sp.bolt_d * t_eff / g2
+            R = min(Fv, Fb)
+            gov = "bolt shear" if Fv <= Fb else f"bearing (t={t_eff:.1f} mm)"
+            util = F / R
+            detail = (f"N={N/1e3:.1f} kN, V={V/1e3:.2f} kN, "
+                      f"M={M/1e6:.2f} kNm -> F_bolt={F/1e3:.2f} kN vs "
+                      f"{sp.rows}x{sp.cols} M{sp.bolt_d:.0f} "
+                      f"{sp.bolt_grade}/side: Fv={Fv/1e3:.2f}, "
+                      f"Fb={Fb/1e3:.2f} kN ({gov} governs){m_note}")
+            if worst is None or util > worst[0]:
+                worst = (util, detail, mid)
+        if worst is not None:
+            res.append(CheckResult(
+                "SPLICE", case.name, f"member {worst[2]} (z={sp.z:.0f})",
+                "uprights", worst[0], worst[1]))
+    return res
 
 
 # --------------------------------------------------------------------- SLS

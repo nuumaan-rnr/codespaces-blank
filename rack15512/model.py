@@ -351,6 +351,31 @@ class BasePlate:
 
 
 @dataclass
+class Splice:
+    """Upright splice at elevation z (required when the upright is longer
+    than the maximum manufacturable length, typically > 11000 mm).
+
+    The bolt group on EACH side of the splice has `rows` bolts along the
+    upright axis at pitch p1 and `cols` bolt columns across at pitch p2,
+    with end/edge distances e1 (along) and e2 (across).  The connection is
+    verified per EN 1993-1-8 with the elastic bolt-group method for the
+    concurrent N, V and M at the splice elevation; bearing is checked on
+    the lesser of the upright wall and the sleeve thickness `t_sleeve`
+    (default: equal to the upright wall)."""
+
+    z: float
+    bolt_d: float = 12.0
+    bolt_grade: str = "4.6"
+    rows: int = 2                  # bolts along the upright axis (pitch p1)
+    cols: int = 1                  # bolt columns across (pitch p2)
+    e1: float = 30.0               # end distance along the axis [mm]
+    e2: float = 20.0               # edge distance across [mm]
+    p1: float = 60.0               # pitch along [mm]
+    p2: float = 0.0                # pitch across [mm] (cols > 1)
+    t_sleeve: Optional[float] = None
+
+
+@dataclass
 class RackModel:
     name: str = "rack"
     materials: Dict[str, Steel] = field(default_factory=dict)
@@ -364,6 +389,7 @@ class RackModel:
     analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
     checks: CheckSettings = field(default_factory=CheckSettings)
     base_plate: Optional[BasePlate] = None
+    splices: List[Splice] = field(default_factory=list)
 
     # ---- convenience builders -------------------------------------------
     def add_node(self, nid: int, x: float, y: float, z: float) -> Node:
