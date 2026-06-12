@@ -339,27 +339,31 @@ def _base_plate_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     A_req = N_eq / f_jd
     c_req = max(0.0, (A_req / L_p - sec_t) / 2.0)
     t_req = c_req * math.sqrt(3.0 * f_jd * g0 / bp.fy_plate)
-    min_b = max(foot_w + 2.0 * c_req, math.sqrt(A_req * foot_w / foot_d))
-    min_d = max(foot_d + 2.0 * c_req, A_req / min_b)
+    # minimum plate stated with the aspect of the actual plate (or the
+    # upright footprint); standard rack plates may be narrower than the
+    # upright depth - the section is allowed to overhang
+    aspect = (bp.b / bp.d) if bp.b and bp.d else (foot_w / foot_d)
+    min_b = math.sqrt(A_req * aspect)
+    min_d = A_req / min_b
     min_txt = (f"N={N/1e3:.1f} kN, M={M/1e6:.2f} kNm -> N_eq={N_eq/1e3:.1f} kN "
                f"at node {node}; f_jd={f_jd:.2f} MPa, A_req={A_req:.0f} mm2, "
                f"strip c_req={c_req:.1f} mm -> t_req={t_req:.1f} mm "
                f"(use >= {max(t_req, 3.0):.1f} mm), "
-               f"min plate {min_b:.0f}x{min_d:.0f} mm{note}")
+               f"min plate area {min_b:.0f}x{min_d:.0f} mm{note}")
 
     if bp.b and bp.d and bp.t:
         c_t = bp.t * math.sqrt(bp.fy_plate / (3.0 * f_jd * g0))
         A_eff = min(L_p * (sec_t + 2.0 * c_t), bp.b * bp.d)
         util = A_req / A_eff if A_eff > 0 else 99.0
-        fit = ""
+        over = ""
         if bp.b + 1.0 < foot_w or bp.d + 1.0 < foot_d:
-            util = max(util, 99.0)
-            fit = (f"; FAIL plate smaller than the upright footprint "
-                   f"{foot_w:.0f}x{foot_d:.0f}")
+            over = (f" (upright {foot_w:.0f}x{foot_d:.0f} overhangs the "
+                    "plate; A_eff capped by the plate area)")
         return [CheckResult(
             "BASEPLATE", case.name, f"node {node}", "-", util,
             f"plate {bp.b:.0f}x{bp.d:.0f}x{bp.t:.1f}: c={c_t:.1f} mm, "
-            f"A_eff={A_eff:.0f} mm2 vs A_req={A_req:.0f} mm2; {min_txt}{fit}")]
+            f"A_eff={A_eff:.0f} mm2 vs A_req={A_req:.0f} mm2{over}; "
+            f"{min_txt}")]
     return [CheckResult("BASEPLATE", case.name, f"node {node}", "-", 0.0,
                         min_txt, informative=True)]
 

@@ -155,6 +155,12 @@ class RackConfig:
     pallet_load_per_level: float = 20000.0  # N per bay per level PER MODULE
     dead_load_beam: float = 0.05            # N/mm per beam
     placement_load: float = 500.0           # N horizontal at top (EN 15512)
+    # accidental impact loads on an upright (EN 15512; 0 disables) -
+    # applied to the corner upright at accidental_height, combined at
+    # gamma = 1.0 with dead + pallet loads (accidental design situation)
+    accidental_load_x: float = 1250.0       # N down-aisle
+    accidental_load_y: float = 2500.0       # N cross-aisle
+    accidental_height: float = 400.0        # mm above floor
     # design
     gamma_G: float = 1.3
     gamma_Q: float = 1.4
@@ -262,6 +268,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
 
     zs: List[float] = [0.0]
     extra = {splice_z} if splice_z else set()
+    if (cfg.accidental_load_x or cfg.accidental_load_y) \
+            and 0.0 < cfg.accidental_height < H:
+        extra.add(cfg.accidental_height)
     for z in sorted(set(beam_levels) | set(brace_zs) | {H} | extra):
         if z - zs[-1] > _TOL:
             zs.append(z)
@@ -485,6 +494,20 @@ def build_rack(cfg: RackConfig) -> RackModel:
     place_y.nodal_loads.append(NodalLoad(nid(0, 0, top_j), fy=cfg.placement_load))
     m.load_cases["placement_y"] = place_y
 
+    # accidental impact loads on the corner upright (EN 15512)
+    acc = (cfg.accidental_load_x or cfg.accidental_load_y) \
+        and 0.0 < cfg.accidental_height < H
+    if acc:
+        j_acc = j_of(cfg.accidental_height)
+        acc_x = LoadCase("accidental_x", "accidental")
+        acc_x.nodal_loads.append(NodalLoad(nid(0, 0, j_acc),
+                                           fx=cfg.accidental_load_x))
+        m.load_cases["accidental_x"] = acc_x
+        acc_y = LoadCase("accidental_y", "accidental")
+        acc_y.nodal_loads.append(NodalLoad(nid(0, 0, j_acc),
+                                           fy=cfg.accidental_load_y))
+        m.load_cases["accidental_y"] = acc_y
+
     # ---- combinations (EN 15512 defaults - verify for your edition) --------
     m.combinations = [
         Combination("ULS1", "ULS",
@@ -501,6 +524,16 @@ def build_rack(cfg: RackConfig) -> RackModel:
                     {"dead": 1.0, "pallets": 1.0, "placement": 1.0},
                     imperfection=False),
     ]
+    if acc:
+        # accidental design situation: gamma = 1.0 on all actions
+        m.combinations.insert(3, Combination(
+            "ULS4 acc X", "ULS",
+            {"dead": 1.0, "pallets": 1.0, "accidental_x": 1.0},
+            imp_directions=["+x"]))
+        m.combinations.insert(4, Combination(
+            "ULS5 acc Y", "ULS",
+            {"dead": 1.0, "pallets": 1.0, "accidental_y": 1.0},
+            imp_directions=["+y"]))
 
     # ---- imperfection --------------------------------------------------------
     # phi_l: per EN 15512 the connector looseness may be omitted from phi

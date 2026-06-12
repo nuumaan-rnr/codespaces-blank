@@ -139,6 +139,8 @@ print(write_report(model, cases, checks))
 │ (pallet loads are per level, see beam levels)  │
 │ Beam dead load [N/mm]              [ 0.05 ]    │
 │ Placement load [kN]                [ 0.5  ]    │
+│ Accidental load X / Y [kN]   [1.25] / [2.5]    │
+│ Accidental load height [mm]        [ 400  ]    │
 ├─ Imperfection & factors ───────────────────────┤
 │ Out-of-plumb phi_s (1/x)           [ 350  ]    │
 │ gamma_G [1.3]   gamma_Q [1.4]                  │
@@ -168,6 +170,7 @@ print(write_report(model, cases, checks))
 | Pallet load | kN | Total unit load per bay per level **per module** (split between front/rear beam as UDL). |
 | Beam dead load | N/mm | Self weight of each beam. |
 | Placement load | kN | EN 15512 horizontal placement load at the top level (applied in X and Y combos). |
+| Accidental load X / Y / height | kN, mm | EN 15512 accidental impact on the corner upright (defaults 1.25 kN down-aisle, 2.5 kN cross-aisle at 400 mm; 0 disables). Combined as ULS4/ULS5 at **gamma = 1.0** with dead + pallet loads (accidental design situation). |
 | phi_s | 1/x | Erection out-of-plumb; sway imperfection phi = sqrt(0.5+1/n_cols)·(2·phi_s+phi_l) applied as equivalent horizontal forces in ±X and ±Y. |
 | gamma_G / gamma_Q | – | Partial factors → ULS 1.3G+1.4Q, SLS 1.0 (EN 15512 defaults, editable). |
 | Analysis | – | Second order (P-Delta, EN 15512 requirement) or first order for comparison. |
@@ -187,7 +190,7 @@ UI tabs / CLI output directory:
 | **Model** tab / `model.png`, `frame_elevation.png` | 3D geometry plot, CA frame elevation (compare with the frame drawing), table of the selected sections with the properties actually sent to the solver, model JSON download. |
 | **Results** tab / `deformed_*.png`, `moment_*.png`, `axial_*.png` | Per combination: sway X/Y, estimated alpha_cr, deformed shape, member force diagrams (Mz, My, N, Vy, Vz, T), support reactions. |
 | **EN 15512 checks** tab / `utilization.png` | PASS/FAIL verdict with governing member, colour-coded 3D utilization plot, full sortable check table. |
-| **Report** tab / `report.md` | Analysis-case summary (sway, alpha_cr), **utilization-by-level table**, then all checks grouped by type, worst first. |
+| **Report** tab / `report.md` | **Load-combinations table with the factors of every combination** (e.g. ULS1 = 1.3 x dead + 1.4 x pallets, imp ±x/±y; ULS4 = 1.0 x dead + 1.0 x pallets + 1.0 x accidental_x), analysis-case summary (sway, alpha_cr), **utilization-by-level table**, then all checks grouped by type, worst first. |
 
 ### Checks performed (per EN 15512, as configured for SPR)
 

@@ -32,6 +32,20 @@ def write_report(model: RackModel, cases: List[CaseResult],
         f"height: {model.height():.0f} mm")
     add("")
 
+    add("## Load combinations")
+    add("")
+    add("| combination | kind | load factors | imperfection |")
+    add("|---|---|---|---|")
+    for c in model.combinations:
+        factors = " + ".join(f"{f:g} x {lc}" for lc, f in c.factors.items())
+        if c.imperfection and (c.kind == "ULS" or c.imp_directions):
+            dirs = c.imp_directions or model.imperfection.directions
+            imp = ", ".join(dirs)
+        else:
+            imp = "-"
+        add(f"| {c.name} | {c.kind} | {factors} | {imp} |")
+    add("")
+
     add("## Analysis cases")
     add("")
     add("| case | kind | converged | sway X [mm] | sway Y [mm] | alpha_cr (est.) |")

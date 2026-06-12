@@ -181,6 +181,14 @@ with st.sidebar:
     st.header("Loads")
     dead_w = st.number_input("Beam dead load [N/mm]", 0.0, 1.0, 0.05)
     place = st.number_input("Placement load [kN]", 0.0, 5.0, 0.5)
+    acc_x = st.number_input("Accidental load X (down-aisle) [kN]",
+                            0.0, 10.0, 1.25,
+                            help="EN 15512 impact on the corner upright; "
+                                 "combined at gamma = 1.0 (0 disables)")
+    acc_y = st.number_input("Accidental load Y (cross-aisle) [kN]",
+                            0.0, 10.0, 2.5)
+    acc_h = st.number_input("Accidental load height [mm]",
+                            100.0, 1000.0, 400.0, 50.0)
 
     st.header("Imperfection & factors")
     phi_s = st.number_input("Out-of-plumb phi_s (1/x)", 100.0, 1000.0, 350.0)
@@ -218,6 +226,8 @@ cfg = RackConfig(
     plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
     dead_load_beam=dead_w,
     placement_load=place * 1e3,
+    accidental_load_x=acc_x * 1e3, accidental_load_y=acc_y * 1e3,
+    accidental_height=acc_h,
     gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
 )
 try:

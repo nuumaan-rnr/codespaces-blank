@@ -77,9 +77,12 @@ def test_full_pipeline_and_json_roundtrip(tmp_path):
     assert all(c.converged for c in cases)
     uls = [c for c in cases if c.kind == "ULS"]
     sls = [c for c in cases if c.kind == "SLS"]
-    # 3 ULS combos x 4 imperfection directions, 2 SLS
-    assert len(uls) == 12 and len(sls) == 2
+    # 3 ULS combos x 4 imperfection directions + 2 accidental combos with
+    # a single direction each, 2 SLS
+    assert len(uls) == 14 and len(sls) == 2
     assert {c.imp_direction for c in uls} == {"+x", "-x", "+y", "-y"}
+    acc = [c for c in uls if "acc" in c.combo]
+    assert len(acc) == 2
     # second-order sway exceeds first-order sway under gravity + EHF
     swayed = [c for c in uls if c.sway_first_order]
     assert swayed and all(c.max_sway > c.sway_first_order for c in swayed)
@@ -347,6 +350,32 @@ def test_twenty_levels_scalability():
              if m.member_set == "pallet beams"}
     assert len(beams) == 20
     assert model.splices and model.splices[0].z == pytest.approx(10250.0)
+
+
+def test_accidental_load_case_and_factor_report():
+    """EN 15512 accidental impact loads on the corner upright, combined at
+    gamma = 1.0; the report lists every combination with its factors."""
+    from rack15512.report import write_report
+    model = build_rack(RackConfig(n_bays=1, beam_levels=[1500.0, 3000.0]))
+    assert "accidental_x" in model.load_cases
+    ax = model.load_cases["accidental_x"].nodal_loads[0]
+    assert ax.fx == pytest.approx(1250.0)
+    node = model.nodes[ax.node]
+    assert (node.x, node.y, node.z) == (0.0, 0.0, 400.0)
+    ay = model.load_cases["accidental_y"].nodal_loads[0]
+    assert ay.fy == pytest.approx(2500.0)
+    co4 = next(c for c in model.combinations if c.name.startswith("ULS4"))
+    assert co4.factors == {"dead": 1.0, "pallets": 1.0, "accidental_x": 1.0}
+    assert co4.imp_directions == ["+x"]
+    # disabling
+    off = build_rack(RackConfig(n_bays=1, beam_levels=[1500.0],
+                                accidental_load_x=0.0, accidental_load_y=0.0))
+    assert "accidental_x" not in off.load_cases
+    # the report names every combination with its load factors
+    report = write_report(model, [], [])
+    assert "## Load combinations" in report
+    assert "1.3 x dead + 1.4 x pallets" in report
+    assert "1 x dead + 1 x pallets + 1 x accidental_x" in report
 
 
 def test_overloaded_rack_fails_checks():
