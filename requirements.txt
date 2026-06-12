@@ -1,0 +1,10 @@
+openseespy>=3.5
+numpy>=1.24
+matplotlib>=3.7
+
+# interactive web UI (optional):
+#   pip install streamlit
+#   streamlit run app_streamlit.py
+
+# tests:
+#   pip install pytest

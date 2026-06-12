@@ -1,0 +1,56 @@
+"""Runs all combinations: assembles factored loads, applies the EN 15512
+sway imperfection (EHF or initial geometry, in both directions), solves
+first and second order, and returns the list of analysis cases."""
+
+from __future__ import annotations
+
+from typing import List
+
+from .combos import apply_ehf, assemble
+from .engine.opensees import OpenSeesEngine
+from .model import RackModel
+from .results import CaseResult
+
+
+def run_all(model: RackModel) -> List[CaseResult]:
+    errors = model.validate()
+    if errors:
+        raise ValueError("Model validation failed:\n  " + "\n  ".join(errors))
+
+    engine = OpenSeesEngine()
+    order = model.analysis.order
+    results: List[CaseResult] = []
+
+    for combo in model.combinations:
+        base_loads = assemble(model, combo)
+        apply_imp = combo.imperfection and combo.kind == "ULS"
+        directions = model.imperfection.directions if apply_imp else [0]
+
+        for direction in directions:
+            loads = base_loads
+            geom_sway = None
+            name = combo.name
+            if direction != 0:
+                phi = model.imperfection.value()
+                if model.imperfection.method.upper() == "EHF":
+                    loads = apply_ehf(model, base_loads, phi, direction)
+                else:
+                    geom_sway = (phi, direction)
+                name = f"{combo.name} (imp {'+x' if direction > 0 else '-x'})"
+
+            case = engine.run_case(model, loads, name=name, combo=combo.name,
+                                   kind=combo.kind, order=order,
+                                   imp_direction=direction,
+                                   geom_sway=geom_sway)
+            if order == 2 and case.converged:
+                # first-order companion for the alpha_cr / sway-amplification
+                # estimate
+                lin = engine.run_case(model, loads, name=name + " [1st]",
+                                      combo=combo.name, kind=combo.kind,
+                                      order=1, imp_direction=direction,
+                                      geom_sway=geom_sway)
+                if lin.converged:
+                    case.sway_first_order = lin.max_sway
+            results.append(case)
+
+    return results

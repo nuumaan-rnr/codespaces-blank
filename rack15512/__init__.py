@@ -1,0 +1,15 @@
+"""rack15512 - storage-rack structural analysis and EN 15512 design checks.
+
+FEA engine: OpenSees (via OpenSeesPy) - second-order elastic analysis with
+semi-rigid connections, spring supports and global sway imperfections.
+"""
+
+from .analysis import run_all
+from .builder import RackConfig, build_rack
+from .checks.en15512 import CheckResult, all_ok, governing, run_checks
+from .model import (AnalysisSettings, CheckSettings, Combination,
+                    CrossSection, Hinge, Imperfection, LoadCase, Member,
+                    MemberLoad, NodalLoad, Node, RackModel, Steel, Support)
+from .report import write_report
+
+__version__ = "0.1.0"
