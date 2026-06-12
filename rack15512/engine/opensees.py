@@ -170,11 +170,12 @@ class OpenSeesEngine:
             mmap = _MemberMap(member=m, length=L, xh=xh, yh=yh, zh=zh)
             self._members[m.id] = mmap
 
+            A_an = sec.A * m.area_factor      # analysis-stiffness area
             if m.mtype == "truss":
                 mt = self._elastic_mat(mat.E)
                 ele = self._new_tag()
                 etype = "corotTruss" if order == 2 else "truss"
-                ops.element(etype, ele, ti, tj, sec.A, mt)
+                ops.element(etype, ele, ti, tj, A_an, mt)
                 mmap.truss_tag = ele
                 continue
 
@@ -197,7 +198,7 @@ class OpenSeesEngine:
             for k in range(nseg):
                 ele = self._new_tag()
                 ops.element("elasticBeamColumn", ele, tags[k], tags[k + 1],
-                            sec.A, mat.E, mat.G, sec.J, sec.Iy, sec.Iz,
+                            A_an, mat.E, mat.G, sec.J, sec.Iy, sec.Iz,
                             self._transf_tag)
                 mmap.segments.append(_Segment(
                     ele_tag=ele, tag_i=tags[k], tag_j=tags[k + 1],

@@ -117,6 +117,13 @@ print(write_report(model, cases, checks))
 │ Connector M_Rd [kNm]               [ 2.5  ]    │
 │ Connector looseness phi_l [mrad]   [ 0    ]    │
 │ [x] Base stiffness from master BASE_STIFFNESS  │
+├─ Bracing connection & footplate ───────────────┤
+│ Bracing area factor in analysis    [ 0.15 ]    │
+│ Connection bolt size  [M12 ▼]  grade [4.6 ▼]   │
+│ Bolts per brace end                [ 1    ]    │
+│ Floor concrete f_ck [MPa]          [ 25   ]    │
+│ Base plate fy [MPa]                [ 250  ]    │
+│ Actual base plate b x d x t [mm]   [150|130|6] │
 ├─ Loads ────────────────────────────────────────┤
 │ Pallet load per bay per level [kN] [ 20   ]    │
 │ Beam dead load [N/mm]              [ 0.05 ]    │
@@ -153,6 +160,10 @@ print(write_report(model, cases, checks))
 | phi_s | 1/x | Erection out-of-plumb; sway imperfection phi = sqrt(0.5+1/n_cols)·(2·phi_s+phi_l) applied as equivalent horizontal forces in ±X and ±Y. |
 | gamma_G / gamma_Q | – | Partial factors → ULS 1.3G+1.4Q, SLS 1.0 (EN 15512 defaults, editable). |
 | Analysis | – | Second order (P-Delta, EN 15512 requirement) or first order for comparison. |
+| Bracing area factor | – | Connection-flexibility modification: only this fraction of the brace area (default **15%**) acts in the **analysis stiffness**; all strength checks use the full section. |
+| Bolt size / grade / count | – | Bracing end-connection bolts for the BRACE_BOLT check (M8–M16; grades 4.6–10.9). |
+| f_ck / plate fy | MPa | Floor concrete grade (f_jd = 0.85·f_ck/1.5 unless overridden) and base-plate steel for the BASEPLATE check. |
+| Actual base plate b×d×t | mm | Optional: verifies your plate; leave blank to get the minimum required size/thickness reported. |
 
 ---
 
@@ -174,6 +185,8 @@ UI tabs / CLI output directory:
 | STRESS | all members (ULS) | \|N\|/(A_eff·fy/γM0) + \|My\|/(Wy_eff·fy/γM0) + \|Mz\|/(Wz_eff·fy/γM0) ≤ 1 at every station — covers the maximum-moment check of the beams. |
 | BUCKLING | **uprights only** (ULS) | Flexural buckling about **both axes**, χ per EN 1993-1-1 §6.3.1. Buckling lengths assigned automatically: **major axis = the beam gap of that level band** (floor→L1, L1→L2, …); **minor axis (CA) = largest unsupported length between the bracing connection points on that upright** (for a D-pattern the diagonals meet each upright every other pitch → 2×pitch). χ_min of the two governs the interaction with the moments. |
 | CONNECTOR | beam end connectors (ULS) | \|M_Ed\| ≤ M_Rd from the connector test. |
+| BRACE_BOLT | bracing end connections (ULS) | Brace axial force ≤ n_bolts × **min( bolt shear, bearing on the brace, bearing on the upright )** per EN 1993-1-8: Fb,Rd = k1·αb·fu·d·t/γM2 with αb = min(e1/3d0, fub/fu, 1), k1 = min(2.8·e2/d0−1.7, 2.5) — **e1/e2/t/fu of both plies come from the masters** (upright sheet columns e1/e2/t-wall; bracing sheet rows end-dist e1/e2, Thk, Fu). The governing component is named in the report. |
+| BASEPLATE | footplate (ULS) | Floor bearing N_Ed ≤ b·d·f_jd and plate thickness t ≥ c·√(3·f_jd·γM0/fy) (EN 1993-1-8 §6.2.5 cantilever projection). The report always states the **minimum required plate size and thickness** for the governing base reaction; if you enter your actual plate it is verified PASS/FAIL. |
 | DEFLECTION | pallet beams (SLS) | transverse deflection ≤ span/200 (configurable). |
 | SWAY | frame (SLS) | max sway in X and in Y ≤ H/200 (configurable). |
 | ALPHA_CR | frame (info) | sway-sensitivity report from the 1st/2nd-order amplification; second-order effects are already inside the results. |

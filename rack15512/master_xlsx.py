@@ -142,6 +142,8 @@ def _parse_uprights(ws):
             Wely=Wy_eff, Welz=Wz_eff,
             A_eff=A_eff, Wy_eff=Wy_eff, Wz_eff=Wz_eff,
             buckling_curve_y="b", buckling_curve_z="b",
+            t=t, e1=_num(cells[15]), e2=_num(cells[16]),
+            depth_h=_num(cells[2]), width_b=_num(cells[3]),
             description=f"{desc} (A=Aeff; J estimated A*t^2/3)"), fy))
     return out
 
@@ -188,6 +190,10 @@ _BRACE_ROW_KEYS = (
     ("zzz", "Wely", CM3),
     ("it", "J", CM4),
     ("fy", "fy", KNCM2),
+    ("fu", "fu", KNCM2),
+    ("thk", "t", 1.0),                      # mm
+    ("end dist. e1", "e1", 1.0),            # mm
+    ("end dist. e2", "e2", 1.0),
 )
 
 
@@ -216,6 +222,8 @@ def _parse_bracings(ws):
             A=p("A"), Iy=p("Iy"), Iz=p("Iz"), J=max(p("J"), 1.0),
             Wely=max(p("Wely"), 1.0), Welz=max(p("Welz"), 1.0),
             buckling_curve_y="c", buckling_curve_z="c",
+            t=p("t", None), e1=p("e1", None), e2=p("e2", None),
+            fu=p("fu", None) or None,
             description="cold-formed C brace"), p("fy", 270.0)))
     return out
 

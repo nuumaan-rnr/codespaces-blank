@@ -151,6 +151,65 @@ def test_buckling_only_on_uprights():
                for c in checks)
 
 
+def test_brace_area_factor_in_analysis_only():
+    """Only 15% of the brace area acts in the analysis; the stress check
+    still uses the full section."""
+    model = build_rack(RackConfig(n_bays=1, beam_levels=[1800.0]))
+    braces = [m for m in model.members.values() if m.member_set == "bracing"]
+    assert braces and all(m.area_factor == 0.15 for m in braces)
+    ups = [m for m in model.members.values() if m.member_set == "uprights"]
+    assert all(m.area_factor == 1.0 for m in ups)
+
+
+def test_brace_bolt_bearing_hand_calc():
+    """M12 4.6 on C 36X21X1.5 (t=1.5, e1=e2=18, fu=350) against UP0016-like
+    upright (t=2.0, e1=13.22, e2=15.15, fy=350 -> fu=385):
+      bolt shear  = 0.6*400*84.3/1.25            = 16.19 kN
+      brace ply   = 2.177*0.4615*350*12*1.5/1.25 =  5.06 kN
+      upright ply = 1.563*0.339*385*12*2.0/1.25  =  3.92 kN  <- governs
+    """
+    from rack15512.checks.en15512 import BOLTS, BOLT_GRADES, _bearing
+    from rack15512.model import CrossSection
+    d0, As = BOLTS[12]
+    fub, av = BOLT_GRADES["4.6"]
+    Fv = av * fub * As / 1.25
+    assert Fv == pytest.approx(16185.6, rel=1e-3)
+    brace = CrossSection("b", "steel", A=102, Iy=1, Iz=1, J=1, Wely=1,
+                         Welz=1, t=1.5, e1=18.0, e2=18.0, fu=350.0)
+    upright = CrossSection("u", "steel", A=487, Iy=1, Iz=1, J=1, Wely=1,
+                           Welz=1, t=2.0, e1=13.22, e2=15.15)
+    Fb_brace = _bearing(12.0, d0, fub, brace, 350.0, 1.25)
+    Fb_up = _bearing(12.0, d0, fub, upright, 385.0, 1.25)
+    assert Fb_brace == pytest.approx(5063.0, rel=0.005)
+    assert Fb_up == pytest.approx(3917.0, rel=0.005)
+    assert min(Fv, Fb_brace, Fb_up) == Fb_up      # minimum governs
+
+
+def test_brace_bolt_and_baseplate_checks_in_pipeline():
+    cfg = RackConfig(n_bays=1, beam_levels=[1500.0, 3000.0],
+                     master=__import__("rack15512.master_xlsx",
+                                       fromlist=["load_master"]).load_master(
+                         os.path.join(os.path.dirname(__file__), "..",
+                                      "examples", "Master.xlsx")),
+                     upright_section="UP0016",
+                     beam_section="RHS 112x50x2.0",
+                     brace_section="C 36X21X1.5",
+                     base_stiffness="auto",
+                     bolt_d=12.0, bolt_grade="4.6",
+                     plate_b=150.0, plate_d=130.0, plate_t=6.0)
+    model = build_rack(cfg)
+    cases = run_all(model)
+    checks = run_checks(model, cases)
+    bolts = [c for c in checks if c.check == "BRACE_BOLT" and not c.informative]
+    plates = [c for c in checks if c.check == "BASEPLATE"]
+    assert bolts and all(c.member_set in ("bracing", "row spacers")
+                         for c in bolts)
+    assert any("governs" in c.detail for c in bolts)
+    assert any("bearing" in c.target for c in plates)
+    assert any("thickness" in c.target for c in plates)
+    assert any("min plate" in c.detail for c in plates)
+
+
 def test_overloaded_rack_fails_checks():
     cfg = RackConfig(n_bays=2, beam_levels=[2500.0, 5000.0, 7500.0, 10000.0],
                      upright_section="UP-90x70x1.8",

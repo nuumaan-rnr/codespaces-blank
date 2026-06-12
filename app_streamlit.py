@@ -120,6 +120,22 @@ with st.sidebar:
                             "(0 = pinned)", 0.0, 5000.0, 500.0,
                             disabled=base_auto)
 
+    st.header("Bracing connection & footplate")
+    brace_factor = st.number_input(
+        "Bracing area factor in analysis (connection flexibility)",
+        0.05, 1.0, 0.15, 0.05)
+    bolt_size = st.selectbox("Connection bolt size",
+                             ["M8", "M10", "M12", "M14", "M16"], index=2)
+    bolt_grade = st.selectbox("Bolt grade",
+                              ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"], 0)
+    n_bolts = st.number_input("Bolts per brace end", 1, 4, 1)
+    fck = st.number_input("Floor concrete f_ck [MPa]", 15.0, 60.0, 25.0, 5.0)
+    plate_fy = st.number_input("Base plate fy [MPa]", 200.0, 460.0, 250.0, 5.0)
+    with st.expander("Actual base plate (blank = report minimum only)"):
+        pb = st.number_input("Plate width X [mm] (0 = none)", 0.0, 500.0, 0.0)
+        pd_ = st.number_input("Plate depth Y [mm] (0 = none)", 0.0, 500.0, 0.0)
+        pt = st.number_input("Plate thickness [mm] (0 = none)", 0.0, 40.0, 0.0)
+
     st.header("Loads")
     pallet = st.number_input("Pallet load per bay per level [kN]",
                              1.0, 100.0, 20.0)
@@ -147,6 +163,11 @@ cfg = RackConfig(
     connector_stiffness=kc * 1e6, connector_m_rd=mrd * 1e6,
     connector_looseness=phi_l / 1000.0,
     base_stiffness="auto" if base_auto else kbase * 1e6,
+    brace_area_factor=brace_factor,
+    bolt_d=float(bolt_size[1:]), bolt_grade=bolt_grade,
+    bolts_per_connection=int(n_bolts),
+    concrete_fck=fck, plate_fy=plate_fy,
+    plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
     pallet_load_per_level=pallet * 1e3, dead_load_beam=dead_w,
     placement_load=place * 1e3,
     gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,

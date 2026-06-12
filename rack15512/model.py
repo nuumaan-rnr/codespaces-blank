@@ -70,6 +70,14 @@ class CrossSection:
     buckling_curve_z: str = "b"
     role: str = ""
     description: str = ""
+    # connection / detailing data from the master (used by the bolt-bearing
+    # and base-plate checks; all optional)
+    t: Optional[float] = None         # plate / wall thickness [mm]
+    e1: Optional[float] = None        # edge distance in load direction [mm]
+    e2: Optional[float] = None        # edge distance perpendicular [mm]
+    fu: Optional[float] = None        # ultimate strength [MPa]
+    width_b: Optional[float] = None   # overall section width [mm]
+    depth_h: Optional[float] = None   # overall section depth [mm]
 
     @property
     def area_eff(self) -> float:
@@ -144,6 +152,10 @@ class Member:
                      deflected shapes.
     member_set     : group label for reporting ('uprights', 'pallet beams',
                      'bracing', ...).
+    area_factor    : stiffness modification on the section area used in the
+                     ANALYSIS only (e.g. 0.15 on bracing to represent the
+                     flexibility of the bolted end connections); strength
+                     checks use the full section.
     """
 
     id: int
@@ -160,6 +172,7 @@ class Member:
     L_buckling_z: Optional[float] = None
     mesh: int = 2
     member_set: str = "default"
+    area_factor: float = 1.0
 
 
 @dataclass
@@ -300,6 +313,41 @@ class CheckSettings:
     # named 'uprights' or whose section role is 'upright'; if none exist,
     # all compressed members are checked (generic-model fallback).
     buckling_sets: Optional[List[str]] = None
+    # bracing bolt-connection check (EN 1993-1-8): set bolt_d to enable.
+    # Resistance = bolts_per_connection x min(bolt shear, bearing on the
+    # brace, bearing on the upright), with bearing from d, t, e1, e2, fu of
+    # each connected ply (e1/e2/t/fu from the section master).
+    bolt_d: Optional[float] = None           # bolt diameter [mm], e.g. 12
+    bolt_grade: str = "4.6"                  # 4.6/4.8/5.6/5.8/6.8/8.8/10.9
+    bolts_per_connection: int = 1
+    gamma_M2: float = 1.25
+    # fallback ultimate strength when a section has no fu in the master
+    fu_over_fy: float = 1.10
+
+
+@dataclass
+class BasePlate:
+    """Footplate (base plate) check inputs per EN 1993-1-8 6.2.5 (rigid
+    plate, cantilever-projection method).
+
+    f_jd = design bearing strength of the floor joint; if not given it is
+    taken as alpha_cc * f_ck / gamma_c.  When the actual plate b x d x t is
+    given the check verifies it; the report always states the minimum
+    required plate size and thickness for the governing base reaction.
+    """
+
+    f_ck: float = 25.0                 # concrete grade [MPa]
+    gamma_c: float = 1.5
+    alpha_cc: float = 0.85
+    f_jd: Optional[float] = None       # direct override [MPa]
+    fy_plate: float = 250.0            # plate steel [MPa]
+    b: Optional[float] = None          # actual plate width (X) [mm]
+    d: Optional[float] = None          # actual plate depth (Y) [mm]
+    t: Optional[float] = None          # actual plate thickness [mm]
+
+    def bearing_strength(self) -> float:
+        return self.f_jd if self.f_jd is not None \
+            else self.alpha_cc * self.f_ck / self.gamma_c
 
 
 @dataclass
@@ -315,6 +363,7 @@ class RackModel:
     imperfection: Imperfection = field(default_factory=Imperfection)
     analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
     checks: CheckSettings = field(default_factory=CheckSettings)
+    base_plate: Optional[BasePlate] = None
 
     # ---- convenience builders -------------------------------------------
     def add_node(self, nid: int, x: float, y: float, z: float) -> Node:

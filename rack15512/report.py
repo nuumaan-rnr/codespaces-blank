@@ -54,8 +54,8 @@ def write_report(model: RackModel, cases: List[CaseResult],
 
     lines += _level_wise_utilization(model, checks)
 
-    for kind in ("STRESS", "BUCKLING", "CONNECTOR", "DEFLECTION", "SWAY",
-                 "ALPHA_CR", "STABILITY"):
+    for kind in ("STRESS", "BUCKLING", "CONNECTOR", "BRACE_BOLT",
+                 "BASEPLATE", "DEFLECTION", "SWAY", "ALPHA_CR", "STABILITY"):
         rows = [c for c in checks if c.check == kind]
         if not rows:
             continue

@@ -43,8 +43,8 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from .library import SectionLibrary
 from .master_xlsx import MasterWorkbook
-from .model import (Combination, Hinge, Imperfection, LoadCase, MemberLoad,
-                    NodalLoad, RackModel, Steel, Support)
+from .model import (BasePlate, Combination, Hinge, Imperfection, LoadCase,
+                    MemberLoad, NodalLoad, RackModel, Steel, Support)
 
 _TOL = 1.0     # mm: merge coincident elevations
 
@@ -82,6 +82,19 @@ class RackConfig:
     # interpolate the master's BASE_STIFFNESS table at the estimated
     # upright axial load (requires `master`)
     base_stiffness: Union[float, str] = 5.0e8
+    # bracing: analysis-stiffness modification (bolted end-connection
+    # flexibility) - strength checks use the full section
+    brace_area_factor: float = 0.15
+    # bracing end-connection bolts (None disables the BRACE_BOLT check)
+    bolt_d: Optional[float] = 12.0          # mm (M12)
+    bolt_grade: str = "4.6"
+    bolts_per_connection: int = 1
+    # footplate / base plate (BASEPLATE check)
+    concrete_fck: float = 25.0              # MPa
+    plate_fy: float = 250.0                 # MPa
+    plate_b: Optional[float] = None         # actual plate [mm] (optional)
+    plate_d: Optional[float] = None
+    plate_t: Optional[float] = None
     # loads
     pallet_load_per_level: float = 20000.0  # N per bay per level PER MODULE
     dead_load_beam: float = 0.05            # N/mm per beam
@@ -288,6 +301,19 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # buckling is verified on the uprights only (EN 15512); beams are
     # checked for stress / moments / deflection
     m.checks.buckling_sets = ["uprights"]
+
+    # bracing connection-flexibility modification: only this fraction of
+    # the brace area acts in the ANALYSIS (strength checks use full A)
+    for mm in m.members.values():
+        if mm.member_set in ("bracing", "row spacers"):
+            mm.area_factor = cfg.brace_area_factor
+
+    # bracing bolt-connection and footplate checks
+    m.checks.bolt_d = cfg.bolt_d
+    m.checks.bolt_grade = cfg.bolt_grade
+    m.checks.bolts_per_connection = cfg.bolts_per_connection
+    m.base_plate = BasePlate(f_ck=cfg.concrete_fck, fy_plate=cfg.plate_fy,
+                             b=cfg.plate_b, d=cfg.plate_d, t=cfg.plate_t)
 
     # ---- semi-rigid floor connections ---------------------------------------
     n_uprights = len(sides) * n_lines

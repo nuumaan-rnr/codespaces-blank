@@ -6,9 +6,9 @@ import json
 from dataclasses import asdict
 from typing import Any, Dict
 
-from .model import (AnalysisSettings, CheckSettings, Combination, CrossSection,
-                    Hinge, Imperfection, LoadCase, Member, MemberLoad,
-                    NodalLoad, Node, RackModel, Steel, Support)
+from .model import (AnalysisSettings, BasePlate, CheckSettings, Combination,
+                    CrossSection, Hinge, Imperfection, LoadCase, Member,
+                    MemberLoad, NodalLoad, Node, RackModel, Steel, Support)
 
 
 def model_to_dict(m: RackModel) -> Dict[str, Any]:
@@ -24,6 +24,7 @@ def model_to_dict(m: RackModel) -> Dict[str, Any]:
         "imperfection": asdict(m.imperfection),
         "analysis": asdict(m.analysis),
         "checks": asdict(m.checks),
+        "base_plate": asdict(m.base_plate) if m.base_plate else None,
     }
 
 
@@ -58,6 +59,8 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
         m.analysis = AnalysisSettings(**d["analysis"])
     if "checks" in d:
         m.checks = CheckSettings(**d["checks"])
+    if d.get("base_plate"):
+        m.base_plate = BasePlate(**d["base_plate"])
     return m
 
 
