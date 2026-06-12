@@ -137,6 +137,35 @@ def summarize(comps: List[Comparison]) -> str:
         add(f"| {q} | {len(sub)} | {100*sub[len(sub)//2]:.1f}% "
             f"| {100*sub[min(int(0.95*len(sub)), len(sub)-1)]:.1f}% |")
     add("")
+    add("## By combination")
+    add("")
+    add("| combination | n | median diff | p95 |")
+    add("|---|---|---|---|")
+    combos = sorted({c.combo for c in comps},
+                    key=lambda s: (len(s), s))
+    for co in combos:
+        sub = sorted(c.rel_diff for c in comps if c.combo == co)
+        add(f"| {co} | {len(sub)} | {100*sub[len(sub)//2]:.1f}% "
+            f"| {100*sub[min(int(0.95*len(sub)), len(sub)-1)]:.1f}% |")
+    add("")
+    add("## Governing members side by side")
+    add("")
+    add("For each combination: the most compressed member and the member "
+        "with the largest bending moment (by this app's results).")
+    add("")
+    add("| combination | quantity | member | set | ours | RSTAB/RFEM | diff |")
+    add("|---|---|---|---|---|---|---|")
+    for co in combos:
+        sub = [c for c in comps if c.combo == co]
+        for q, div, unit in (("N_min", KN, "kN"), ("Mz_absmax", KNCM, "kNcm")):
+            qs = [c for c in sub if c.quantity == q]
+            if not qs:
+                continue
+            gov = max(qs, key=lambda c: abs(c.ours))
+            add(f"| {co} | {q} | {gov.member} | {gov.member_set[:18]} "
+                f"| {gov.ours/div:.2f} {unit} | {gov.theirs/div:.2f} {unit} "
+                f"| {100*gov.rel_diff:.1f}% |")
+    add("")
     add("### Reading the tail")
     add("")
     add("Large *relative* differences concentrate in members with tiny "
