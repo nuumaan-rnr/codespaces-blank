@@ -42,7 +42,11 @@ The native format is the engineering master workbook
   upright (workbook Iyy = major axis → model local z; upright torsion J is
   estimated as A·t²/3 since it is not tabulated)
 - **BEAM_MASTER** — RHS h×b×t, major-axis I and Wel, fy, section M_Rd
-  (minor axis, area and J are computed from the RHS geometry)
+  (minor axis, area and J are computed from the RHS geometry). Optional
+  per-beam connector columns (detected by header text):
+  `Connector k (kNcm/rad)`, `Connector M_Rd (kNcm)`,
+  `Connector looseness (mrad)` — every beam level then automatically uses
+  its beam's connector data for the hinges and the sway imperfection
 - **BRACING_MASTER** — C-channel area, Iyy/Izz, Zyy/Zzz, IT (St-Venant J),
   fy (transposed layout; duplicate names are suffixed `#2`)
 - **BASE_STIFFNESS** — per upright, the EN 15512 load-dependent floor

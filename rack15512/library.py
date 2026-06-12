@@ -30,7 +30,9 @@ from typing import Dict, List, Optional
 from .model import CrossSection
 
 _NUM_FIELDS = ("A", "Iy", "Iz", "J", "Wely", "Welz")
-_OPT_NUM_FIELDS = ("A_eff", "Wy_eff", "Wz_eff")
+# optional columns; connector_* in N*mm units (per-beam connector data)
+_OPT_NUM_FIELDS = ("A_eff", "Wy_eff", "Wz_eff",
+                   "connector_k", "connector_m_rd", "connector_looseness")
 _CURVES = ("a0", "a", "b", "c", "d")
 
 

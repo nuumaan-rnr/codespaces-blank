@@ -68,17 +68,19 @@ python -m rack15512 rfem SPR_CHECK_Data.xlsx --master Master.xlsx --compare
 ### Python script
 
 ```python
-from rack15512 import RackConfig, build_rack, load_master, run_all, run_checks, write_report
+from rack15512 import (LevelSpec, RackConfig, build_rack, load_master,
+                       run_all, run_checks, write_report)
 
 cfg = RackConfig(
     name="SPR back-to-back module (non-seismic)",
     module="back-to-back", n_bays=3, bay_width=2700, depth=1000,
-    b2b_gap=250, beam_levels=[1500, 3000, 4500, 6000], frame_height=6500,
+    b2b_gap=250, frame_height=6500,
     bracing_type="D", bracing_start=150, bracing_pitch=600,
     master=load_master("examples/Master.xlsx"),
-    upright_section="UP0016", beam_section="RHS 112x50x2.0",
-    brace_section="C 36X21X1.5", base_stiffness="auto",
-    pallet_load_per_level=20000)
+    upright_section="UP0016", brace_section="C 36X21X1.5",
+    base_stiffness="auto",
+    levels=[LevelSpec(gap=1500, beam_section="RHS 112x50x2.0",
+                      pallet_load=20000)] * 4)
 model  = build_rack(cfg)        # creates nodes/members/loads/combinations
 cases  = run_all(model)         # 2nd-order OpenSees analysis, all combos
 checks = run_checks(model, cases)
@@ -93,7 +95,6 @@ print(write_report(model, cases, checks))
 ┌─ Section master ───────────────────────────────┐
 │ Master file (.xlsx/.csv/.json)  [Master.xlsx]  │
 │ Upright       [UP0016          ▼]              │
-│ Pallet beam   [RHS 112x50x2.0  ▼]              │
 │ Bracing       [C 36X21X1.5     ▼]              │
 ├─ Geometry ─────────────────────────────────────┤
 │ Module type      (•) Back-to-back  ( ) Single  │
@@ -121,9 +122,11 @@ print(write_report(model, cases, checks))
 │ Sleeve thickness [mm] (0 = wall)  [ 0 ]        │
 ├─ Steel & connections ──────────────────────────┤
 │ Default fy [MPa]                   [ 355  ]    │
-│ Connector stiffness [kNm/rad]      [ 65.7 ]    │
-│ Connector M_Rd [kNm]               [ 2.5  ]    │
-│ Connector looseness phi_l [mrad]   [ 0    ]    │
+│ (connector k / M_Rd / phi_l auto from beam     │
+│  master; fields below = fallback)              │
+│ Fallback connector stiffness [kNm/rad] [100 ]  │
+│ Fallback connector M_Rd [kNm]          [ 2.5]  │
+│ Fallback connector looseness [mrad]    [ 0  ]  │
 │ [x] Base stiffness from master BASE_STIFFNESS  │
 ├─ Bracing connection & footplate ───────────────┤
 │ Bracing area factor in analysis    [ 0.15 ]    │
@@ -133,7 +136,7 @@ print(write_report(model, cases, checks))
 │ Base plate fy [MPa]                [ 250  ]    │
 │ Actual base plate b x d x t [mm]   [150|130|6] │
 ├─ Loads ────────────────────────────────────────┤
-│ Pallet load per bay per level [kN] [ 20   ]    │
+│ (pallet loads are per level, see beam levels)  │
 │ Beam dead load [N/mm]              [ 0.05 ]    │
 │ Placement load [kN]                [ 0.5  ]    │
 ├─ Imperfection & factors ───────────────────────┤
@@ -160,7 +163,7 @@ print(write_report(model, cases, checks))
 | First horizontal | mm | Height of the bottom horizontal strut (default 150). |
 | Diagonal pitch | mm | Height of each diagonal panel (default 600, customizable). Diagonals run up to the last position that fits; one closing horizontal there; no intermediate horizontals. |
 | fy | MPa | Default yield strength; sections from an .xlsx master carry their own fy. |
-| Connector stiffness / M_Rd / looseness | kNm/rad, kNm, mrad | Beam-to-upright connector from EN 15512 Annex A tests. Looseness feeds the sway imperfection. |
+| Connector stiffness / M_Rd / looseness | kNm/rad, kNm, mrad | Taken **automatically from BEAM_MASTER per selected beam** (Annex A test data travels with the beam type, level by level). The UI fields are fallbacks for beams without connector columns. Looseness feeds the sway imperfection (largest value in use). |
 | Base stiffness | kNm/rad or auto | Floor connection; `auto` interpolates the master's k_b(N) table at the estimated upright load. |
 | Pallet load | kN | Total unit load per bay per level **per module** (split between front/rear beam as UDL). |
 | Beam dead load | N/mm | Self weight of each beam. |

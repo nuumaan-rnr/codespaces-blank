@@ -43,6 +43,65 @@ def test_master_xlsx_units_and_axes():
     assert br.J == pytest.approx(37.2)
 
 
+def test_beam_master_connector_columns(tmp_path):
+    """Optional 'Connector ...' columns in BEAM_MASTER are detected by
+    header text and converted (kNcm/rad, kNcm, mrad -> N*mm/rad, N*mm,
+    rad); beams without values get None (cfg fallback applies)."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "BEAM_MASTER"
+    ws.append([])
+    ws.append([None, "#", "SECTION", "Sec Height", "Sec Depth", "Sec Thick",
+               "I", "Wel", "fy", "M_Rd", "EI",
+               "Connector k\n(kNcm/rad)", "Connector M_Rd\n(kNcm)",
+               "Connector looseness\n(mrad)"])
+    ws.append([None, 1, "RHS-A", 100, 50, 1.6, 61.27, 12.25, 31, 379.75,
+               0, 6573, 110, 4.0])
+    ws.append([None, 2, "RHS-B", 80, 40, 1.6, 30.7, 7.67, 27, 207.09,
+               0, None, None, None])
+    p = tmp_path / "beams.xlsx"
+    wb.save(p)
+    mw = load_master(str(p))
+    a = mw.library.get("RHS-A")
+    assert a.connector_k == pytest.approx(6573.0 * 1e4)      # 65.73 kNm/rad
+    assert a.connector_m_rd == pytest.approx(110.0 * 1e4)    # 1.10 kNm
+    assert a.connector_looseness == pytest.approx(4.0e-3)
+    b = mw.library.get("RHS-B")
+    assert b.connector_k is None and b.connector_m_rd is None
+
+
+def test_builder_uses_per_beam_connector_data(tmp_path):
+    """Hinges take stiffness/M_Rd/looseness from the beam's master data,
+    per level; beams without data use the cfg fallback; phi_l = max
+    looseness in use."""
+    from rack15512.builder import LevelSpec, RackConfig, build_rack
+    from rack15512.library import SectionLibrary
+
+    lib = SectionLibrary.bundled()
+    sec_a = lib.get("BM-110x50x1.5")
+    sec_a.connector_k = 6.573e7
+    sec_a.connector_m_rd = 1.1e6
+    sec_a.connector_looseness = 4.0e-3
+    model = build_rack(RackConfig(
+        n_bays=1, library=lib,
+        levels=[LevelSpec(gap=1500.0, beam_section="BM-110x50x1.5"),
+                LevelSpec(gap=1500.0, beam_section="BM-130x50x1.5")],
+        connector_stiffness=1.0e8, connector_m_rd=2.5e6,
+        connector_looseness=0.0))
+    beams = sorted((m for m in model.members.values()
+                    if m.member_set == "pallet beams"),
+                   key=lambda m: model.nodes[m.node_i].z)
+    l1, l2 = beams[0], beams[-1]
+    assert l1.hinge_i.rz == pytest.approx(6.573e7)           # from master
+    assert l1.hinge_i.m_rd_z == pytest.approx(1.1e6)
+    assert l1.hinge_i.looseness == pytest.approx(4.0e-3)
+    assert l2.hinge_i.rz == pytest.approx(1.0e8)             # cfg fallback
+    assert l2.hinge_i.m_rd_z == pytest.approx(2.5e6)
+    # imperfection includes the largest looseness in use
+    assert model.imperfection.phi_l == pytest.approx(4.0e-3)
+
+
 @needs_master
 def test_base_stiffness_interpolation():
     mw = load_master(MASTER)

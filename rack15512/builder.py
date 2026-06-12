@@ -298,9 +298,20 @@ def build_rack(cfg: RackConfig) -> RackModel:
             upright_members[(i, s)] = ids
 
     # ---- pallet beams (per upright line) with semi-rigid connectors --------
-    # each level uses ITS OWN beam section and pallet load (cfg.levels)
+    # each level uses ITS OWN beam section and pallet load (cfg.levels);
+    # connector stiffness / M_Rd / looseness come from the BEAM master per
+    # selected beam section, falling back to the cfg values for beams
+    # without connector data
     beam_pairs: Dict[float, List[int]] = {}
+    looseness_used = [cfg.connector_looseness]
     for z, sec_name, _ in specs:
+        sec = m.sections[sec_name]
+        k_c = sec.connector_k or cfg.connector_stiffness
+        m_rd = sec.connector_m_rd or cfg.connector_m_rd
+        loos = (sec.connector_looseness
+                if sec.connector_looseness is not None
+                else cfg.connector_looseness)
+        looseness_used.append(loos)
         j = j_of(z)
         beam_pairs[z] = []
         for i in range(cfg.n_bays):
@@ -308,12 +319,8 @@ def build_rack(cfg: RackConfig) -> RackModel:
                 m.add_member(
                     mid, nid(i, s, j), nid(i + 1, s, j), sec_name,
                     member_set="pallet beams", mesh=cfg.mesh_beam,
-                    hinge_i=Hinge(rz=cfg.connector_stiffness,
-                                  m_rd_z=cfg.connector_m_rd,
-                                  looseness=cfg.connector_looseness),
-                    hinge_j=Hinge(rz=cfg.connector_stiffness,
-                                  m_rd_z=cfg.connector_m_rd,
-                                  looseness=cfg.connector_looseness))
+                    hinge_i=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos),
+                    hinge_j=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos))
                 beam_pairs[z].append(mid)
                 mid += 1
 
@@ -498,9 +505,10 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # ---- imperfection --------------------------------------------------------
     # phi_l: per EN 15512 the connector looseness may be omitted from phi
     # when modelled in the hinges; the builder's hinges are linear springs
-    # without looseness, so it is included here.
+    # without looseness, so the largest looseness of the connectors in use
+    # (per-beam from the master, or the cfg fallback) is included here.
     m.imperfection = Imperfection(
-        n_cols=n_lines, phi_s=cfg.phi_s, phi_l=cfg.connector_looseness,
+        n_cols=n_lines, phi_s=cfg.phi_s, phi_l=max(looseness_used),
         method="EHF", directions=["+x", "-x", "+y", "-y"])
 
     return m

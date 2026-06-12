@@ -150,12 +150,31 @@ def _parse_uprights(ws):
 
 def _parse_beams(ws):
     out = []
-    header_seen = False
+    header = None
+    k_col = mrd_col = loos_col = None
+    k_fac = mrd_fac = KNCM            # default workbook units: kNcm(/rad)
+    loos_fac = 1.0e-3                 # default: mrad
     for r in _rows(ws):
         cells = r[1:]
-        if not header_seen:
+        if header is None:
             if cells and str(cells[0]).strip() == "#":
-                header_seen = True
+                header = [str(c or "").strip().lower() for c in cells]
+                # optional per-beam connector columns, found by header text:
+                #   'Connector k (kNcm/rad)' or '(kNm/rad)'
+                #   'Connector M_Rd (kNcm)' or '(kNm)'
+                #   'Connector looseness (mrad)' or '(rad)' / 'phi_l'
+                for idx, h in enumerate(header):
+                    if "connector" in h and ("stiff" in h or " k" in h
+                                             or h.startswith("k")):
+                        k_col = idx
+                        k_fac = 1.0e6 if "knm" in h else KNCM
+                    elif "connector" in h and ("m_rd" in h or "mrd" in h
+                                               or "m rd" in h):
+                        mrd_col = idx
+                        mrd_fac = 1.0e6 if "knm" in h else KNCM
+                    elif "looseness" in h or "phi_l" in h:
+                        loos_col = idx
+                        loos_fac = 1.0 if "(rad" in h else 1.0e-3
             continue
         if not cells or not cells[1]:
             continue
@@ -166,6 +185,13 @@ def _parse_beams(ws):
         Iz = _num(cells[5]) * CM4           # workbook major I (sheet value)
         Welz = _num(cells[6]) * CM3
         fy = _num(cells[7], 27.0) * KNCM2
+
+        def opt(col, fac):
+            if col is None or col >= len(cells):
+                return None
+            v = _num(cells[col])
+            return v * fac if v else None
+
         # minor axis, area and J from the RHS h x b x t geometry
         hi, bi = h - 2 * t, b - 2 * t
         A = h * b - hi * bi
@@ -177,6 +203,9 @@ def _parse_beams(ws):
             name=name, material="steel", role="beam",
             A=A, Iy=Iy, Iz=Iz, J=J, Wely=Wely, Welz=Welz,
             buckling_curve_y="b", buckling_curve_z="b",
+            connector_k=opt(k_col, k_fac),
+            connector_m_rd=opt(mrd_col, mrd_fac),
+            connector_looseness=opt(loos_col, loos_fac),
             description=f"RHS {h:.0f}x{b:.0f}x{t:.1f} "
                         "(minor axis/J from geometry)"), fy))
     return out

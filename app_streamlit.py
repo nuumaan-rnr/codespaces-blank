@@ -117,9 +117,15 @@ with st.sidebar:
     st.header("Steel & connections")
     fy = st.number_input("Default fy [MPa] (sections without own fy)",
                          200.0, 700.0, 355.0, 5.0)
-    kc = st.number_input("Connector stiffness [kNm/rad]", 1.0, 1000.0, 100.0)
-    mrd = st.number_input("Connector M_Rd [kNm]", 0.1, 50.0, 2.5)
-    phi_l = st.number_input("Connector looseness phi_l [mrad]", 0.0, 20.0, 0.0)
+    st.caption("Connector stiffness / M_Rd / looseness are taken "
+               "AUTOMATICALLY from the BEAM master per selected beam; the "
+               "values below are fallbacks for beams without connector "
+               "data in the master.")
+    kc = st.number_input("Fallback connector stiffness [kNm/rad]",
+                         1.0, 1000.0, 100.0)
+    mrd = st.number_input("Fallback connector M_Rd [kNm]", 0.1, 50.0, 2.5)
+    phi_l = st.number_input("Fallback connector looseness phi_l [mrad]",
+                            0.0, 20.0, 0.0)
     if master:
         base_auto = st.checkbox("Base stiffness from master BASE_STIFFNESS "
                                 "table (at estimated upright load)", True)
@@ -231,7 +237,13 @@ with tab_model:
                  "material fy [MPa]": model.materials[s.material].fy,
                  "A": s.A, "Iy": s.Iy, "Iz": s.Iz, "J": round(s.J, 1),
                  "A_eff": s.area_eff,
-                 "curve y/z": f"{s.buckling_curve_y}/{s.buckling_curve_z}"}
+                 "curve y/z": f"{s.buckling_curve_y}/{s.buckling_curve_z}",
+                 "connector k [kNm/rad]":
+                     round(s.connector_k / 1e6, 1) if s.connector_k
+                     else ("fallback" if s.role == "beam" else "-"),
+                 "connector M_Rd [kNm]":
+                     round(s.connector_m_rd / 1e6, 2) if s.connector_m_rd
+                     else ("fallback" if s.role == "beam" else "-")}
                 for s in model.sections.values()]
     st.subheader("Selected sections (from master)")
     st.dataframe(sec_rows)

@@ -78,6 +78,12 @@ class CrossSection:
     fu: Optional[float] = None        # ultimate strength [MPa]
     width_b: Optional[float] = None   # overall section width [mm]
     depth_h: Optional[float] = None   # overall section depth [mm]
+    # beam-to-upright connector data from the BEAM master (per beam type,
+    # from EN 15512 Annex A tests); used automatically for the hinges of
+    # every beam of this section
+    connector_k: Optional[float] = None          # [N*mm/rad]
+    connector_m_rd: Optional[float] = None       # [N*mm]
+    connector_looseness: Optional[float] = None  # [rad]
 
     @property
     def area_eff(self) -> float:
