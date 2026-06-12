@@ -1,0 +1,69 @@
+# Example pallet rack - down-aisle spine model per EN 15512.
+#
+# Units: m, kN, kN/m, kNm/rad, MPa, GPa (see rackapp/config.py).
+# Section/connection values for perforated cold-formed rack components must be
+# the EFFECTIVE values derived from EN 15512 component tests.
+
+name: "Demo pallet rack 3x4"
+
+geometry:
+  n_bays: 3
+  bay_width: 2.7            # m
+  level_heights: [1.5, 1.5, 1.5, 1.5]   # m, floor->lvl1, lvl1->lvl2, ...
+
+sections:
+  upright:
+    name: "Upright 100x70x2.0 (effective)"
+    rfem_section: "SHS 100x100x4"   # RFEM library proxy (engine: rfem only)
+    A: 6.5e-4                # m2  effective area
+    Iy: 1.10e-6              # m4  (down-aisle bending)
+    Wy: 2.2e-5               # m3  effective modulus
+    self_weight: 5.1         # kg/m
+  beam:
+    name: "Box beam 110x45x1.5"
+    rfem_section: "SHS 100x100x3"
+    A: 4.6e-4
+    Iy: 8.0e-7
+    Wy: 1.45e-5
+    self_weight: 3.8
+
+material:
+  name: "S355"
+  E: 210.0                   # GPa
+  fy: 355.0                  # MPa
+  gamma_M0: 1.0              # EN 15512 7.5
+  gamma_M1: 1.0
+
+connections:
+  beam_end_stiffness: 110.0          # kNm/rad, from EN 15512 connector tests
+  beam_end_looseness: 0.005          # rad, connector looseness phi_l
+  beam_end_moment_resistance: 2.4    # kNm, connector M_Rd
+  base_stiffness: 150.0              # kNm/rad, floor connection
+
+loads:
+  unit_load_per_beam: 10.0   # kN, total pallet load carried by one beam
+  beam_dead_load: 0.05       # kN/m
+  placement_load: 0.5        # kN horizontal (EN 15512 placement load)
+  placement_level: -1        # -1 = top level
+
+imperfections:
+  out_of_plumb: 0.00286      # phi_s = 1/350 (erection tolerance class)
+  include_looseness: true    # adds connector looseness to phi
+  min_phi: 0.002             # lower bound 1/500
+
+factors:                     # EN 15512:2009 Table 2
+  gamma_G: 1.3
+  gamma_Q_unit: 1.4
+  gamma_Q_placement: 1.4
+
+analysis:
+  engine: internal           # internal | rfem
+  second_order: true         # P-Delta at ULS
+  max_iterations: 15
+  rfem_url: "http://localhost:8081"
+
+checks:
+  beam_deflection_limit: 200 # L/200
+  sway_limit: 200            # H/200 at SLS
+  buckling_alpha: 0.34       # EC3 curve b (or per upright test data)
+  K_upright: 1.0             # system length with 2nd-order + imperfections
