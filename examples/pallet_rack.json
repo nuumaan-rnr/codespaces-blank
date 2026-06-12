@@ -11,106 +11,249 @@
   ],
   "sections": [
     {
-      "name": "UPRIGHT-100",
+      "name": "UP-100x100x2.0",
       "material": "steel",
       "A": 780.0,
-      "I": 1200000.0,
-      "Wel": 24000.0,
+      "Iy": 980000.0,
+      "Iz": 1200000.0,
+      "J": 1050.0,
+      "Wely": 19200.0,
+      "Welz": 24000.0,
       "A_eff": 660.0,
-      "W_eff": 20500.0,
-      "buckling_curve": "b"
+      "Wy_eff": 16200.0,
+      "Wz_eff": 20500.0,
+      "buckling_curve_y": "b",
+      "buckling_curve_z": "b",
+      "role": "upright",
+      "description": "100x100 perforated upright 2.0mm (example values)"
     },
     {
-      "name": "BEAM-110",
+      "name": "BM-110x50x1.5",
       "material": "steel",
-      "A": 950.0,
-      "I": 2100000.0,
-      "Wel": 38000.0,
+      "A": 640.0,
+      "Iy": 230000.0,
+      "Iz": 1350000.0,
+      "J": 130000.0,
+      "Wely": 9100.0,
+      "Welz": 24500.0,
       "A_eff": null,
-      "W_eff": null,
-      "buckling_curve": "b"
+      "Wy_eff": null,
+      "Wz_eff": null,
+      "buckling_curve_y": "b",
+      "buckling_curve_z": "b",
+      "role": "beam",
+      "description": "110x50 boxed pallet beam 1.5mm (example values)"
+    },
+    {
+      "name": "BR-C40x40x2.0",
+      "material": "steel",
+      "A": 300.0,
+      "Iy": 72000.0,
+      "Iz": 72000.0,
+      "J": 420.0,
+      "Wely": 2500.0,
+      "Welz": 2500.0,
+      "A_eff": null,
+      "Wy_eff": null,
+      "Wz_eff": null,
+      "buckling_curve_y": "c",
+      "buckling_curve_z": "c",
+      "role": "bracing",
+      "description": "40x40 lipped channel brace 2.0mm (example values)"
     }
   ],
   "nodes": [
     {
       "id": 0,
       "x": 0.0,
-      "y": 0.0
+      "y": 0.0,
+      "z": 0.0
     },
     {
       "id": 1,
       "x": 0.0,
-      "y": 2000.0
+      "y": 0.0,
+      "z": 2000.0
     },
     {
       "id": 2,
       "x": 0.0,
-      "y": 4000.0
+      "y": 0.0,
+      "z": 4000.0
     },
     {
       "id": 3,
       "x": 0.0,
-      "y": 6000.0
+      "y": 0.0,
+      "z": 6000.0
     },
     {
       "id": 100,
-      "x": 2700.0,
-      "y": 0.0
+      "x": 0.0,
+      "y": 1100.0,
+      "z": 0.0
     },
     {
       "id": 101,
-      "x": 2700.0,
-      "y": 2000.0
+      "x": 0.0,
+      "y": 1100.0,
+      "z": 2000.0
     },
     {
       "id": 102,
-      "x": 2700.0,
-      "y": 4000.0
+      "x": 0.0,
+      "y": 1100.0,
+      "z": 4000.0
     },
     {
       "id": 103,
+      "x": 0.0,
+      "y": 1100.0,
+      "z": 6000.0
+    },
+    {
+      "id": 1000,
       "x": 2700.0,
-      "y": 6000.0
+      "y": 0.0,
+      "z": 0.0
     },
     {
-      "id": 200,
+      "id": 1001,
+      "x": 2700.0,
+      "y": 0.0,
+      "z": 2000.0
+    },
+    {
+      "id": 1002,
+      "x": 2700.0,
+      "y": 0.0,
+      "z": 4000.0
+    },
+    {
+      "id": 1003,
+      "x": 2700.0,
+      "y": 0.0,
+      "z": 6000.0
+    },
+    {
+      "id": 1100,
+      "x": 2700.0,
+      "y": 1100.0,
+      "z": 0.0
+    },
+    {
+      "id": 1101,
+      "x": 2700.0,
+      "y": 1100.0,
+      "z": 2000.0
+    },
+    {
+      "id": 1102,
+      "x": 2700.0,
+      "y": 1100.0,
+      "z": 4000.0
+    },
+    {
+      "id": 1103,
+      "x": 2700.0,
+      "y": 1100.0,
+      "z": 6000.0
+    },
+    {
+      "id": 2000,
       "x": 5400.0,
-      "y": 0.0
+      "y": 0.0,
+      "z": 0.0
     },
     {
-      "id": 201,
+      "id": 2001,
       "x": 5400.0,
-      "y": 2000.0
+      "y": 0.0,
+      "z": 2000.0
     },
     {
-      "id": 202,
+      "id": 2002,
       "x": 5400.0,
-      "y": 4000.0
+      "y": 0.0,
+      "z": 4000.0
     },
     {
-      "id": 203,
+      "id": 2003,
       "x": 5400.0,
-      "y": 6000.0
+      "y": 0.0,
+      "z": 6000.0
     },
     {
-      "id": 300,
-      "x": 8100.0,
-      "y": 0.0
+      "id": 2100,
+      "x": 5400.0,
+      "y": 1100.0,
+      "z": 0.0
     },
     {
-      "id": 301,
-      "x": 8100.0,
-      "y": 2000.0
+      "id": 2101,
+      "x": 5400.0,
+      "y": 1100.0,
+      "z": 2000.0
     },
     {
-      "id": 302,
-      "x": 8100.0,
-      "y": 4000.0
+      "id": 2102,
+      "x": 5400.0,
+      "y": 1100.0,
+      "z": 4000.0
     },
     {
-      "id": 303,
+      "id": 2103,
+      "x": 5400.0,
+      "y": 1100.0,
+      "z": 6000.0
+    },
+    {
+      "id": 3000,
       "x": 8100.0,
-      "y": 6000.0
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "id": 3001,
+      "x": 8100.0,
+      "y": 0.0,
+      "z": 2000.0
+    },
+    {
+      "id": 3002,
+      "x": 8100.0,
+      "y": 0.0,
+      "z": 4000.0
+    },
+    {
+      "id": 3003,
+      "x": 8100.0,
+      "y": 0.0,
+      "z": 6000.0
+    },
+    {
+      "id": 3100,
+      "x": 8100.0,
+      "y": 1100.0,
+      "z": 0.0
+    },
+    {
+      "id": 3101,
+      "x": 8100.0,
+      "y": 1100.0,
+      "z": 2000.0
+    },
+    {
+      "id": 3102,
+      "x": 8100.0,
+      "y": 1100.0,
+      "z": 4000.0
+    },
+    {
+      "id": 3103,
+      "x": 8100.0,
+      "y": 1100.0,
+      "z": 6000.0
     }
   ],
   "members": [
@@ -118,12 +261,15 @@
       "id": 1,
       "node_i": 0,
       "node_j": 1,
-      "section": "UPRIGHT-100",
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
@@ -131,12 +277,15 @@
       "id": 2,
       "node_i": 1,
       "node_j": 2,
-      "section": "UPRIGHT-100",
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
@@ -144,12 +293,15 @@
       "id": 3,
       "node_i": 2,
       "node_j": 3,
-      "section": "UPRIGHT-100",
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
@@ -157,12 +309,15 @@
       "id": 4,
       "node_i": 100,
       "node_j": 101,
-      "section": "UPRIGHT-100",
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
@@ -170,12 +325,15 @@
       "id": 5,
       "node_i": 101,
       "node_j": 102,
-      "section": "UPRIGHT-100",
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
@@ -183,281 +341,1229 @@
       "id": 6,
       "node_i": 102,
       "node_j": 103,
-      "section": "UPRIGHT-100",
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
     {
       "id": 7,
-      "node_i": 200,
-      "node_j": 201,
-      "section": "UPRIGHT-100",
+      "node_i": 1000,
+      "node_j": 1001,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
     {
       "id": 8,
-      "node_i": 201,
-      "node_j": 202,
-      "section": "UPRIGHT-100",
+      "node_i": 1001,
+      "node_j": 1002,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
     {
       "id": 9,
-      "node_i": 202,
-      "node_j": 203,
-      "section": "UPRIGHT-100",
+      "node_i": 1002,
+      "node_j": 1003,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
     {
       "id": 10,
-      "node_i": 300,
-      "node_j": 301,
-      "section": "UPRIGHT-100",
+      "node_i": 1100,
+      "node_j": 1101,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
     {
       "id": 11,
-      "node_i": 301,
-      "node_j": 302,
-      "section": "UPRIGHT-100",
+      "node_i": 1101,
+      "node_j": 1102,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
     {
       "id": 12,
-      "node_i": 302,
-      "node_j": 303,
-      "section": "UPRIGHT-100",
+      "node_i": 1102,
+      "node_j": 1103,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
       "hinge_i": null,
       "hinge_j": null,
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 2,
       "member_set": "uprights"
     },
     {
       "id": 13,
-      "node_i": 1,
-      "node_j": 101,
-      "section": "BEAM-110",
+      "node_i": 2000,
+      "node_j": 2001,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
-      "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "k_buckling": 1.0,
-      "L_buckling": null,
-      "mesh": 4,
-      "member_set": "pallet beams"
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
     },
     {
       "id": 14,
-      "node_i": 101,
-      "node_j": 201,
-      "section": "BEAM-110",
+      "node_i": 2001,
+      "node_j": 2002,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
-      "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "k_buckling": 1.0,
-      "L_buckling": null,
-      "mesh": 4,
-      "member_set": "pallet beams"
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
     },
     {
       "id": 15,
-      "node_i": 201,
-      "node_j": 301,
-      "section": "BEAM-110",
+      "node_i": 2002,
+      "node_j": 2003,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
-      "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "k_buckling": 1.0,
-      "L_buckling": null,
-      "mesh": 4,
-      "member_set": "pallet beams"
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
     },
     {
       "id": 16,
-      "node_i": 2,
-      "node_j": 102,
-      "section": "BEAM-110",
+      "node_i": 2100,
+      "node_j": 2101,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
-      "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "k_buckling": 1.0,
-      "L_buckling": null,
-      "mesh": 4,
-      "member_set": "pallet beams"
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
     },
     {
       "id": 17,
-      "node_i": 102,
-      "node_j": 202,
-      "section": "BEAM-110",
+      "node_i": 2101,
+      "node_j": 2102,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
-      "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "k_buckling": 1.0,
-      "L_buckling": null,
-      "mesh": 4,
-      "member_set": "pallet beams"
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
     },
     {
       "id": 18,
-      "node_i": 202,
-      "node_j": 302,
-      "section": "BEAM-110",
+      "node_i": 2102,
+      "node_j": 2103,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
-      "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "k_buckling": 1.0,
-      "L_buckling": null,
-      "mesh": 4,
-      "member_set": "pallet beams"
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
     },
     {
       "id": 19,
-      "node_i": 3,
-      "node_j": 103,
-      "section": "BEAM-110",
+      "node_i": 3000,
+      "node_j": 3001,
+      "section": "UP-100x100x2.0",
       "mtype": "beam",
-      "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
-        "looseness": 0.0
-      },
-      "k_buckling": 1.0,
-      "L_buckling": null,
-      "mesh": 4,
-      "member_set": "pallet beams"
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
     },
     {
       "id": 20,
-      "node_i": 103,
-      "node_j": 203,
-      "section": "BEAM-110",
+      "node_i": 3001,
+      "node_j": 3002,
+      "section": "UP-100x100x2.0",
+      "mtype": "beam",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
+    },
+    {
+      "id": 21,
+      "node_i": 3002,
+      "node_j": 3003,
+      "section": "UP-100x100x2.0",
+      "mtype": "beam",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
+    },
+    {
+      "id": 22,
+      "node_i": 3100,
+      "node_j": 3101,
+      "section": "UP-100x100x2.0",
+      "mtype": "beam",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
+    },
+    {
+      "id": 23,
+      "node_i": 3101,
+      "node_j": 3102,
+      "section": "UP-100x100x2.0",
+      "mtype": "beam",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
+    },
+    {
+      "id": 24,
+      "node_i": 3102,
+      "node_j": 3103,
+      "section": "UP-100x100x2.0",
+      "mtype": "beam",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "uprights"
+    },
+    {
+      "id": 25,
+      "node_i": 1,
+      "node_j": 1001,
+      "section": "BM-110x50x1.5",
       "mtype": "beam",
       "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
         "looseness": 0.0
       },
       "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
         "looseness": 0.0
       },
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 4,
       "member_set": "pallet beams"
     },
     {
-      "id": 21,
-      "node_i": 203,
-      "node_j": 303,
-      "section": "BEAM-110",
+      "id": 26,
+      "node_i": 101,
+      "node_j": 1101,
+      "section": "BM-110x50x1.5",
       "mtype": "beam",
       "hinge_i": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
         "looseness": 0.0
       },
       "hinge_j": {
-        "stiffness": 100000000.0,
-        "m_rd": 2500000.0,
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
         "looseness": 0.0
       },
-      "k_buckling": 1.0,
-      "L_buckling": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
       "mesh": 4,
       "member_set": "pallet beams"
+    },
+    {
+      "id": 27,
+      "node_i": 1001,
+      "node_j": 2001,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 28,
+      "node_i": 1101,
+      "node_j": 2101,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 29,
+      "node_i": 2001,
+      "node_j": 3001,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 30,
+      "node_i": 2101,
+      "node_j": 3101,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 31,
+      "node_i": 2,
+      "node_j": 1002,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 32,
+      "node_i": 102,
+      "node_j": 1102,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 33,
+      "node_i": 1002,
+      "node_j": 2002,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 34,
+      "node_i": 1102,
+      "node_j": 2102,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 35,
+      "node_i": 2002,
+      "node_j": 3002,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 36,
+      "node_i": 2102,
+      "node_j": 3102,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 37,
+      "node_i": 3,
+      "node_j": 1003,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 38,
+      "node_i": 103,
+      "node_j": 1103,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 39,
+      "node_i": 1003,
+      "node_j": 2003,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 40,
+      "node_i": 1103,
+      "node_j": 2103,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 41,
+      "node_i": 2003,
+      "node_j": 3003,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 42,
+      "node_i": 2103,
+      "node_j": 3103,
+      "section": "BM-110x50x1.5",
+      "mtype": "beam",
+      "hinge_i": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "hinge_j": {
+        "rz": 100000000.0,
+        "ry": null,
+        "rx": null,
+        "m_rd_z": 2500000.0,
+        "m_rd_y": null,
+        "looseness": 0.0
+      },
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 4,
+      "member_set": "pallet beams"
+    },
+    {
+      "id": 43,
+      "node_i": 1,
+      "node_j": 101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 44,
+      "node_i": 2,
+      "node_j": 102,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 45,
+      "node_i": 3,
+      "node_j": 103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 46,
+      "node_i": 0,
+      "node_j": 101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 47,
+      "node_i": 101,
+      "node_j": 2,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 48,
+      "node_i": 2,
+      "node_j": 103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 49,
+      "node_i": 1001,
+      "node_j": 1101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 50,
+      "node_i": 1002,
+      "node_j": 1102,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 51,
+      "node_i": 1003,
+      "node_j": 1103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 52,
+      "node_i": 1000,
+      "node_j": 1101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 53,
+      "node_i": 1101,
+      "node_j": 1002,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 54,
+      "node_i": 1002,
+      "node_j": 1103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 55,
+      "node_i": 2001,
+      "node_j": 2101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 56,
+      "node_i": 2002,
+      "node_j": 2102,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 57,
+      "node_i": 2003,
+      "node_j": 2103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 58,
+      "node_i": 2000,
+      "node_j": 2101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 59,
+      "node_i": 2101,
+      "node_j": 2002,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 60,
+      "node_i": 2002,
+      "node_j": 2103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 61,
+      "node_i": 3001,
+      "node_j": 3101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 62,
+      "node_i": 3002,
+      "node_j": 3102,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 63,
+      "node_i": 3003,
+      "node_j": 3103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 64,
+      "node_i": 3000,
+      "node_j": 3101,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 65,
+      "node_i": 3101,
+      "node_j": 3002,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
+    },
+    {
+      "id": 66,
+      "node_i": 3002,
+      "node_j": 3103,
+      "section": "BR-C40x40x2.0",
+      "mtype": "truss",
+      "hinge_i": null,
+      "hinge_j": null,
+      "vecxz": null,
+      "k_buckling_y": 1.0,
+      "k_buckling_z": 1.0,
+      "L_buckling_y": null,
+      "L_buckling_z": null,
+      "mesh": 2,
+      "member_set": "bracing"
     }
   ],
   "supports": [
@@ -465,25 +1571,73 @@
       "node": 0,
       "ux": true,
       "uy": true,
-      "rz": 500000000.0
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
     },
     {
       "node": 100,
       "ux": true,
       "uy": true,
-      "rz": 500000000.0
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
     },
     {
-      "node": 200,
+      "node": 1000,
       "ux": true,
       "uy": true,
-      "rz": 500000000.0
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
     },
     {
-      "node": 300,
+      "node": 1100,
       "ux": true,
       "uy": true,
-      "rz": 500000000.0
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
+    },
+    {
+      "node": 2000,
+      "ux": true,
+      "uy": true,
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
+    },
+    {
+      "node": 2100,
+      "ux": true,
+      "uy": true,
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
+    },
+    {
+      "node": 3000,
+      "ux": true,
+      "uy": true,
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
+    },
+    {
+      "node": 3100,
+      "ux": true,
+      "uy": true,
+      "uz": true,
+      "rx": 500000000.0,
+      "ry": 500000000.0,
+      "rz": false
     }
   ],
   "load_cases": [
@@ -493,49 +1647,112 @@
       "nodal_loads": [],
       "member_loads": [
         {
-          "member": 13,
+          "member": 25,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 14,
+          "member": 26,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 15,
+          "member": 27,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 16,
+          "member": 28,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 17,
+          "member": 29,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 18,
+          "member": 30,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 19,
+          "member": 31,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 20,
+          "member": 32,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
         },
         {
-          "member": 21,
+          "member": 33,
           "qx": 0.0,
-          "qy": -0.05
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 34,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 35,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 36,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 37,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 38,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 39,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 40,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 41,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
+        },
+        {
+          "member": 42,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -0.05
         }
       ]
     },
@@ -545,49 +1762,112 @@
       "nodal_loads": [],
       "member_loads": [
         {
-          "member": 13,
+          "member": 25,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 14,
+          "member": 26,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 15,
+          "member": 27,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 16,
+          "member": 28,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 17,
+          "member": 29,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 18,
+          "member": 30,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 19,
+          "member": 31,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 20,
+          "member": 32,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         },
         {
-          "member": 21,
+          "member": 33,
           "qx": 0.0,
-          "qy": -7.407407407407407
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 34,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 35,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 36,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 37,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 38,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 39,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 40,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 41,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
+        },
+        {
+          "member": 42,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": -3.7037037037037037
         }
       ]
     },
@@ -599,6 +1879,25 @@
           "node": 3,
           "fx": 500.0,
           "fy": 0.0,
+          "fz": 0.0,
+          "mx": 0.0,
+          "my": 0.0,
+          "mz": 0.0
+        }
+      ],
+      "member_loads": []
+    },
+    {
+      "name": "placement_y",
+      "case_type": "variable",
+      "nodal_loads": [
+        {
+          "node": 3,
+          "fx": 0.0,
+          "fy": 500.0,
+          "fz": 0.0,
+          "mx": 0.0,
+          "my": 0.0,
           "mz": 0.0
         }
       ],
@@ -622,6 +1921,16 @@
         "dead": 1.3,
         "pallets": 1.4,
         "placement": 1.4
+      },
+      "imperfection": true
+    },
+    {
+      "name": "ULS3",
+      "kind": "ULS",
+      "factors": {
+        "dead": 1.3,
+        "pallets": 1.4,
+        "placement_y": 1.4
       },
       "imperfection": true
     },
@@ -653,8 +1962,10 @@
     "phi_min": 0.002,
     "method": "EHF",
     "directions": [
-      1,
-      -1
+      "+x",
+      "-x",
+      "+y",
+      "-y"
     ]
   },
   "analysis": {

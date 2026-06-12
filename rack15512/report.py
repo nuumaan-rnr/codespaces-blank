@@ -34,12 +34,13 @@ def write_report(model: RackModel, cases: List[CaseResult],
 
     add("## Analysis cases")
     add("")
-    add("| case | kind | converged | max sway [mm] | alpha_cr (est.) |")
-    add("|---|---|---|---|---|")
+    add("| case | kind | converged | sway X [mm] | sway Y [mm] | alpha_cr (est.) |")
+    add("|---|---|---|---|---|---|")
     for c in cases:
         a = c.alpha_cr_estimate
         add(f"| {c.name} | {c.kind} | {'yes' if c.converged else '**NO**'} "
-            f"| {c.max_sway:.2f} | {f'{a:.2f}' if a else '-'} |")
+            f"| {c.max_sway_x:.2f} | {c.max_sway_y:.2f} "
+            f"| {f'{a:.2f}' if a else '-'} |")
     add("")
 
     gov = governing(checks)

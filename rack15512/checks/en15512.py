@@ -1,22 +1,24 @@
-"""EN 15512 design checks on the analysis results.
+"""EN 15512 design checks on the analysis results (3D).
 
 Implemented verifications (clause references EN 15512 / EN 1993-1-1; all
 partial factors and limits are configurable in CheckSettings):
 
-  STRESS     cross-section resistance, linear interaction
-             |N|/(A_eff*fy/gM0) + |M|/(W_eff*fy/gM0) <= 1
-  BUCKLING   in-plane flexural buckling of compression members,
-             |Nc|/(chi*A_eff*fy/gM1) + kM*|M|/(W_eff*fy/gM1) <= 1
-             with chi from EN 1993-1-1 6.3.1 buckling curves and
-             Ncr = pi^2*E*I/Lcr^2 (Lcr = K*L or explicit).
-  CONNECTOR  hinge moment |M_end| <= M_Rd of the connector (from tests).
-  DEFLECTION (SLS) beam transverse deflection <= L / limit_ratio.
-  SWAY       (SLS) max horizontal displacement <= H / limit_ratio.
-  ALPHA_CR   sway-sensitivity report: estimated elastic critical load
-             factor from 1st/2nd-order sway amplification.  Informative
-             when a second-order analysis was run (always satisfied by the
-             analysis itself); flagged if alpha_cr is very low (< 3, near
-             elastic instability).
+  STRESS     cross-section resistance, linear interaction at every station
+             |N|/(A_eff*fy/gM0) + |My|/(Wy_eff*fy/gM0)
+                                + |Mz|/(Wz_eff*fy/gM0) <= 1
+  BUCKLING   flexural buckling of compression members about both local
+             axes, chi from EN 1993-1-1 6.3.1 buckling curves,
+             Ncr = pi^2*E*I/Lcr^2 per axis (Lcr = K*L or explicit):
+             |Nc|/(chi_min*A_eff*fy/gM1) + kM*|My|/(Wy_eff*fy/gM1)
+                                         + kM*|Mz|/(Wz_eff*fy/gM1) <= 1
+  CONNECTOR  hinge end moments vs the connector resistances M_Rd,z / M_Rd,y
+             from tests.
+  DEFLECTION (SLS) beam transverse deflection (resultant relative to the
+             chord) <= L / limit_ratio.
+  SWAY       (SLS) max horizontal displacement in X and in Y <= H / ratio.
+  ALPHA_CR   informative sway-sensitivity report from the 1st/2nd-order
+             sway amplification (second-order effects are already inside
+             the analysis results).
 """
 
 from __future__ import annotations
@@ -68,7 +70,7 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
                 out.append(a)
         else:
             out += _deflection_checks(model, case)
-            out.append(_sway_check(model, case))
+            out += _sway_checks(model, case)
     return out
 
 
@@ -81,15 +83,19 @@ def _stress_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         sec = model.section_of(m)
         fy = model.material_of(m).fy
         N_rd = sec.area_eff * fy / g
-        M_rd = sec.mod_eff * fy / g
-        eta, st_worst = 0.0, None
+        My_rd = sec.mod_y_eff * fy / g
+        Mz_rd = sec.mod_z_eff * fy / g
+        eta, st_worst = -1.0, None
         for s in mr.stations:
-            e = abs(s.N) / N_rd + (abs(s.M) / M_rd if m.mtype == "beam" else 0.0)
+            e = abs(s.N) / N_rd
+            if m.mtype == "beam":
+                e += abs(s.My) / My_rd + abs(s.Mz) / Mz_rd
             if e > eta:
                 eta, st_worst = e, s
-        detail = (f"N={st_worst.N/1e3:.1f} kN, M={st_worst.M/1e6:.2f} kNm "
-                  f"at x={st_worst.x:.0f} mm; "
-                  f"N_Rd={N_rd/1e3:.1f} kN, M_Rd={M_rd/1e6:.2f} kNm")
+        detail = (f"N={st_worst.N/1e3:.1f} kN, My={st_worst.My/1e6:.2f} kNm, "
+                  f"Mz={st_worst.Mz/1e6:.2f} kNm at x={st_worst.x:.0f} mm; "
+                  f"N_Rd={N_rd/1e3:.1f} kN, My_Rd={My_rd/1e6:.2f} kNm, "
+                  f"Mz_Rd={Mz_rd/1e6:.2f} kNm")
         res.append(CheckResult("STRESS", case.name, f"member {mid}",
                                m.member_set, eta, detail))
     return res
@@ -105,18 +111,29 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             continue                      # no compression
         sec = model.section_of(m)
         mat = model.material_of(m)
-        L_cr = m.L_buckling if m.L_buckling else m.k_buckling * mr.length
-        N_cr = buckling.n_cr(mat.E, sec.I, L_cr)
-        lam = buckling.lambda_bar(sec.area_eff, mat.fy, N_cr)
-        chi = buckling.chi(lam, sec.buckling_curve)
-        Nb_rd = chi * sec.area_eff * mat.fy / g
-        M_rd = sec.mod_eff * mat.fy / g
+        Lcr_y = m.L_buckling_y if m.L_buckling_y else m.k_buckling_y * mr.length
+        Lcr_z = m.L_buckling_z if m.L_buckling_z else m.k_buckling_z * mr.length
+        Ncr_y = buckling.n_cr(mat.E, sec.Iy, Lcr_y)
+        Ncr_z = buckling.n_cr(mat.E, sec.Iz, Lcr_z)
+        lam_y = buckling.lambda_bar(sec.area_eff, mat.fy, Ncr_y)
+        lam_z = buckling.lambda_bar(sec.area_eff, mat.fy, Ncr_z)
+        chi_y = buckling.chi(lam_y, sec.buckling_curve_y)
+        chi_z = buckling.chi(lam_z, sec.buckling_curve_z)
+        chi_min = min(chi_y, chi_z)
+        Nb_rd = chi_min * sec.area_eff * mat.fy / g
+        My_rd = sec.mod_y_eff * mat.fy / g
+        Mz_rd = sec.mod_z_eff * mat.fy / g
         Nc = abs(mr.N_min)
-        Mmax = mr.M_absmax if m.mtype == "beam" else 0.0
-        eta = Nc / Nb_rd + kM * Mmax / M_rd
-        detail = (f"Nc={Nc/1e3:.1f} kN, M={Mmax/1e6:.2f} kNm; "
-                  f"Lcr={L_cr:.0f} mm, lambda={lam:.2f}, "
-                  f"chi={chi:.3f} (curve {sec.buckling_curve}), "
+        eta = Nc / Nb_rd
+        if m.mtype == "beam":
+            eta += kM * mr.My_absmax / My_rd + kM * mr.Mz_absmax / Mz_rd
+        gov = "y" if chi_y <= chi_z else "z"
+        detail = (f"Nc={Nc/1e3:.1f} kN, My={mr.My_absmax/1e6:.2f} kNm, "
+                  f"Mz={mr.Mz_absmax/1e6:.2f} kNm; "
+                  f"Lcr_y={Lcr_y:.0f}, Lcr_z={Lcr_z:.0f} mm, "
+                  f"lambda_y={lam_y:.2f}, lambda_z={lam_z:.2f}, "
+                  f"chi={chi_min:.3f} (about {gov}, curve "
+                  f"{sec.buckling_curve_y if gov == 'y' else sec.buckling_curve_z}), "
                   f"Nb_Rd={Nb_rd/1e3:.1f} kN")
         res.append(CheckResult("BUCKLING", case.name, f"member {mid}",
                                m.member_set, eta, detail))
@@ -128,13 +145,18 @@ def _connector_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     for mid, mr in case.members.items():
         m = model.members[mid]
         for end, hinge in (("i", m.hinge_i), ("j", m.hinge_j)):
-            if hinge is None or hinge.m_rd is None:
+            if hinge is None:
                 continue
-            M = abs(mr.M_end(end))
-            res.append(CheckResult(
-                "CONNECTOR", case.name, f"member {mid} end {end}",
-                m.member_set, M / hinge.m_rd,
-                f"M_Ed={M/1e6:.3f} kNm, M_Rd={hinge.m_rd/1e6:.3f} kNm"))
+            st = mr.end(end)
+            for axis, m_rd, M in (("z", hinge.m_rd_z, st.Mz),
+                                  ("y", hinge.m_rd_y, st.My)):
+                if m_rd is None:
+                    continue
+                res.append(CheckResult(
+                    "CONNECTOR", case.name, f"member {mid} end {end} ({axis})",
+                    m.member_set, abs(M) / m_rd,
+                    f"M{axis},Ed={abs(M)/1e6:.3f} kNm, "
+                    f"M{axis},Rd={m_rd/1e6:.3f} kNm"))
     return res
 
 
@@ -147,8 +169,8 @@ def _alpha_cr_check(model: RackModel, case: CaseResult) -> Optional[CheckResult]
     eta = 3.0 / a
     note = ""
     if a < model.checks.alpha_cr_warn:
-        note = (f" (alpha_cr < {model.checks.alpha_cr_warn:.0f}: sway frame, "
-                "second-order analysis required - and performed)")
+        note = (f" (alpha_cr < {model.checks.alpha_cr_warn:.0f}: sway-"
+                "sensitive, second-order analysis required - and performed)")
     return CheckResult(
         "ALPHA_CR", case.name, "frame", "-", eta,
         f"estimated alpha_cr={a:.2f}, sway amplification="
@@ -166,7 +188,8 @@ def _deflection_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         if m.mtype != "beam":
             continue
         ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
-        if abs(nj.y - ni.y) > abs(nj.x - ni.x):
+        run = ((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2) ** 0.5
+        if abs(nj.z - ni.z) > run:
             continue                      # vertical-ish: treated by sway
         limit = mr.length / ratio
         d = mr.defl_absmax
@@ -177,14 +200,19 @@ def _deflection_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     return res
 
 
-def _sway_check(model: RackModel, case: CaseResult) -> CheckResult:
+def _sway_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     H = model.height()
-    limit = H / model.checks.sway_limit_ratio
-    d = case.max_sway
-    return CheckResult(
-        "SWAY", case.name, "frame", "-", d / limit if limit > 0 else 0.0,
-        f"max sway={d:.2f} mm, limit=H/{model.checks.sway_limit_ratio:.0f}"
-        f"={limit:.2f} mm (H={H:.0f} mm)")
+    ratio = model.checks.sway_limit_ratio
+    limit = H / ratio if H > 0 else 0.0
+    out = []
+    for axis, d in (("X (down-aisle)", case.max_sway_x),
+                    ("Y (cross-aisle)", case.max_sway_y)):
+        out.append(CheckResult(
+            "SWAY", case.name, f"frame {axis}", "-",
+            d / limit if limit > 0 else 0.0,
+            f"max sway={d:.2f} mm, limit=H/{ratio:.0f}={limit:.2f} mm "
+            f"(H={H:.0f} mm)"))
+    return out
 
 
 # ------------------------------------------------------------------ summary

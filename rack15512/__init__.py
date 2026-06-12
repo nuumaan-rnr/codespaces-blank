@@ -7,6 +7,7 @@ semi-rigid connections, spring supports and global sway imperfections.
 from .analysis import run_all
 from .builder import RackConfig, build_rack
 from .checks.en15512 import CheckResult, all_ok, governing, run_checks
+from .library import SectionLibrary
 from .model import (AnalysisSettings, CheckSettings, Combination,
                     CrossSection, Hinge, Imperfection, LoadCase, Member,
                     MemberLoad, NodalLoad, Node, RackModel, Steel, Support)

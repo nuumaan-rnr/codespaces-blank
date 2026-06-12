@@ -1,0 +1,9 @@
+name,role,A,Iy,Iz,J,Wely,Welz,A_eff,Wy_eff,Wz_eff,curve_y,curve_z,material,description
+UP-90x70x1.8,upright,640,5.10e5,8.20e5,720,1.10e4,1.75e4,540,9.20e3,1.48e4,b,b,steel,90x70 perforated upright 1.8mm (example values)
+UP-100x100x2.0,upright,780,9.80e5,1.20e6,1050,1.92e4,2.40e4,660,1.62e4,2.05e4,b,b,steel,100x100 perforated upright 2.0mm (example values)
+UP-120x110x2.5,upright,1150,1.95e6,2.60e6,2400,3.40e4,4.30e4,1000,2.95e4,3.75e4,b,b,steel,120x110 perforated upright 2.5mm (example values)
+BM-100x40x1.5,beam,560,1.45e5,9.50e5,8.5e4,7.10e3,1.90e4,,,,b,b,steel,100x40 boxed pallet beam 1.5mm (example values)
+BM-110x50x1.5,beam,640,2.30e5,1.35e6,1.3e5,9.10e3,2.45e4,,,,b,b,steel,110x50 boxed pallet beam 1.5mm (example values)
+BM-130x50x1.5,beam,700,2.45e5,2.10e6,1.5e5,9.70e3,3.20e4,,,,b,b,steel,130x50 boxed pallet beam 1.5mm (example values)
+BR-C25x25x1.5,bracing,140,1.30e4,1.30e4,120,7.40e2,7.40e2,,,,c,c,steel,25x25 lipped channel brace 1.5mm (example values)
+BR-C40x40x2.0,bracing,300,7.20e4,7.20e4,420,2.50e3,2.50e3,,,,c,c,steel,40x40 lipped channel brace 2.0mm (example values)

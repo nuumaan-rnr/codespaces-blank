@@ -1,4 +1,4 @@
-"""Data model for a 2D storage-rack frame (down-aisle or cross-aisle plane).
+"""Data model for a 3D storage-rack structure.
 
 Units (consistent SI-mm set, used everywhere):
     length : mm
@@ -8,26 +8,34 @@ Units (consistent SI-mm set, used everywhere):
     rotational spring stiffness : N*mm/rad
     distributed load : N/mm
 
-Coordinate system: x horizontal, y vertical (gravity = -y).
-Nodal DOFs: ux, uy, rz.
+Global axes:  X = down-aisle, Y = cross-aisle (depth), Z = vertical (up).
+Gravity acts in -Z.  Nodal DOFs: ux, uy, uz, rx, ry, rz.
+
+Member local axes (right-handed, local x = node i -> node j):
+  * non-vertical members: local y is vertical (up) -> gravity bending is
+    about local z and engages Iz / Welz ("major" axis of pallet beams);
+  * vertical members (uprights): local y = global +X (down-aisle), local
+    z = global +Y -> down-aisle frame bending is about local z (Iz),
+    cross-aisle bending about local y (Iy);
+  * override per member with an explicit `vecxz` vector (defines the local
+    x-z plane, OpenSees convention) when your section axes differ.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # A support DOF is either fixed (True), free (False) or a spring stiffness
-# (float > 0; N/mm for translations, N*mm/rad for rotation).
+# (float > 0; N/mm for translations, N*mm/rad for rotations).
 DofRestraint = Union[bool, float]
 
 
 @dataclass
 class Steel:
     """Steel material. fy is the design yield strength (for perforated rack
-    uprights this is usually the average yield strength derived from tests
-    per EN 15512 Annex A)."""
+    uprights usually derived from tests per EN 15512 Annex A)."""
 
     name: str
     E: float = 210000.0       # MPa
@@ -38,33 +46,50 @@ class Steel:
 
 @dataclass
 class CrossSection:
-    """Cross-section properties about the in-plane bending axis.
+    """Full 3D cross-section properties (in member local axes, see module
+    docstring).  Typically selected from the section master library.
 
     For cold-formed perforated uprights EN 15512 requires effective
-    properties (A_eff, W_eff) obtained from stub-column / bending tests or
-    EN 1993-1-3.  If not given they default to the gross values.
+    properties (A_eff, W_eff) from stub-column / bending tests or
+    EN 1993-1-3; they default to the gross values when not given.
+    role is a free label from the master ('upright', 'beam', 'bracing'...).
     """
 
     name: str
     material: str             # Steel name
     A: float                  # gross area, mm^2
-    I: float                  # second moment of area, mm^4
-    Wel: float                # elastic section modulus, mm^3
+    Iy: float                 # second moment about local y, mm^4
+    Iz: float                 # second moment about local z, mm^4
+    J: float                  # St-Venant torsion constant, mm^4
+    Wely: float               # elastic modulus about local y, mm^3
+    Welz: float               # elastic modulus about local z, mm^3
     A_eff: Optional[float] = None
-    W_eff: Optional[float] = None
-    buckling_curve: str = "b"  # EN 1993-1-1 Table 6.1: a0, a, b, c, d
+    Wy_eff: Optional[float] = None
+    Wz_eff: Optional[float] = None
+    buckling_curve_y: str = "b"   # EN 1993-1-1 Table 6.1: a0, a, b, c, d
+    buckling_curve_z: str = "b"
+    role: str = ""
+    description: str = ""
 
     @property
     def area_eff(self) -> float:
         return self.A_eff if self.A_eff is not None else self.A
 
     @property
-    def mod_eff(self) -> float:
-        return self.W_eff if self.W_eff is not None else self.Wel
+    def mod_y_eff(self) -> float:
+        return self.Wy_eff if self.Wy_eff is not None else self.Wely
 
     @property
-    def radius_of_gyration(self) -> float:
-        return math.sqrt(self.I / self.A)
+    def mod_z_eff(self) -> float:
+        return self.Wz_eff if self.Wz_eff is not None else self.Welz
+
+    @property
+    def iy(self) -> float:
+        return math.sqrt(self.Iy / self.A)
+
+    @property
+    def iz(self) -> float:
+        return math.sqrt(self.Iz / self.A)
 
 
 @dataclass
@@ -72,23 +97,33 @@ class Node:
     id: int
     x: float
     y: float
+    z: float
 
 
 @dataclass
 class Hinge:
-    """Semi-rigid rotational connection at a member end (e.g. beam-to-upright
-    connector).  Stiffness from EN 15512 Annex A bending tests.
+    """Semi-rigid / released rotational connection at a member end (e.g.
+    beam-to-upright connector).  Per local rotation axis:
 
-    stiffness : rotational stiffness k [N*mm/rad]; 0.0 -> perfect pin.
-    m_rd      : design moment resistance of the connector [N*mm] (checked
-                against the analysis moment if given).
-    looseness : connector looseness phi_l [rad].  Only used to compute the
-                global sway imperfection; per EN 15512 it may be taken as 0
-                in the imperfection if modelled in the connection itself.
+        None  -> continuous (rigid connection for that axis)
+        0.0   -> released (perfect pin about that axis)
+        > 0   -> spring stiffness [N*mm/rad]
+
+    rz governs gravity bending of horizontal beams (the EN 15512 Annex A
+    connector test stiffness goes here); ry the out-of-plane bending; rx
+    torsion.  Translations are always continuous.
+
+    m_rd_z / m_rd_y : design moment resistance of the connector about the
+                      corresponding axis [N*mm] (checked when given).
+    looseness       : connector looseness phi_l [rad], used only in the
+                      global sway imperfection (may be 0 if modelled here).
     """
 
-    stiffness: float
-    m_rd: Optional[float] = None
+    rz: Optional[float] = None
+    ry: Optional[float] = None
+    rx: Optional[float] = None
+    m_rd_z: Optional[float] = None
+    m_rd_y: Optional[float] = None
     looseness: float = 0.0
 
 
@@ -96,16 +131,19 @@ class Hinge:
 class Member:
     """Beam or truss member between two nodes.
 
-    mtype       : 'beam' (6 dof frame element) or 'truss' (axial only).
-    hinge_i/j   : optional semi-rigid end connections (beams only).
-    k_buckling  : effective length factor for in-plane flexural buckling.
-                  With a full second-order analysis including imperfections
-                  EN 15512 permits the system length (K = 1.0).
-    L_buckling  : optional explicit buckling length [mm] (overrides K * L).
-    mesh        : number of internal subdivisions (>= 1).  More segments give
-                  better P-little-delta capture and deflected shapes.
-    member_set  : group label used for check reporting (e.g. 'uprights',
-                  'pallet beams', 'diagonals').
+    mtype          : 'beam' (12 dof frame element) or 'truss' (axial only).
+    hinge_i/j      : optional end connections (beams only).
+    vecxz          : optional (x, y, z) vector defining the local x-z plane
+                     (OpenSees convention); default per module docstring.
+    k_buckling_y/z : effective length factors for flexural buckling about
+                     the local y / z axes.  With second-order global
+                     analysis + imperfections EN 15512 permits the system
+                     length (K = 1.0).
+    L_buckling_y/z : explicit buckling lengths [mm] (override K * L).
+    mesh           : internal subdivisions (>= 1) for P-little-delta and
+                     deflected shapes.
+    member_set     : group label for reporting ('uprights', 'pallet beams',
+                     'bracing', ...).
     """
 
     id: int
@@ -115,8 +153,11 @@ class Member:
     mtype: str = "beam"
     hinge_i: Optional[Hinge] = None
     hinge_j: Optional[Hinge] = None
-    k_buckling: float = 1.0
-    L_buckling: Optional[float] = None
+    vecxz: Optional[Tuple[float, float, float]] = None
+    k_buckling_y: float = 1.0
+    k_buckling_z: float = 1.0
+    L_buckling_y: Optional[float] = None
+    L_buckling_z: Optional[float] = None
     mesh: int = 2
     member_set: str = "default"
 
@@ -125,14 +166,20 @@ class Member:
 class Support:
     """Nodal support.  Each DOF: True = fixed, False = free, float = spring.
 
-    A semi-rigid floor connection per EN 15512 is modelled with ux/uy fixed
-    and rz = rotational stiffness from the floor-connection test.
-    """
+    A semi-rigid floor connection per EN 15512: ux/uy/uz fixed, rx/ry =
+    rotational stiffness from the floor-connection test (rx resists
+    cross-aisle rocking, ry resists down-aisle sway)."""
 
     node: int
     ux: DofRestraint = True
     uy: DofRestraint = True
+    uz: DofRestraint = True
+    rx: DofRestraint = False
+    ry: DofRestraint = False
     rz: DofRestraint = False
+
+    def restraints(self) -> Tuple[DofRestraint, ...]:
+        return (self.ux, self.uy, self.uz, self.rx, self.ry, self.rz)
 
 
 @dataclass
@@ -140,24 +187,27 @@ class NodalLoad:
     node: int
     fx: float = 0.0
     fy: float = 0.0
+    fz: float = 0.0
+    mx: float = 0.0
+    my: float = 0.0
     mz: float = 0.0
 
 
 @dataclass
 class MemberLoad:
     """Uniformly distributed load on a member, in GLOBAL axes, per unit
-    length of the member (qy = -w for gravity loads of magnitude w)."""
+    length of the member (qz = -w for a gravity load of magnitude w)."""
 
     member: int
     qx: float = 0.0
     qy: float = 0.0
+    qz: float = 0.0
 
 
 @dataclass
 class LoadCase:
-    """case_type: 'permanent' (dead loads) | 'variable' (unit/pallet loads)
-    | 'placement' (placement loads) | 'other'.  Only used for bookkeeping;
-    combination factors are explicit."""
+    """case_type: 'permanent' | 'variable' | 'placement' | 'other' -
+    bookkeeping only; combination factors are explicit."""
 
     name: str
     case_type: str = "variable"
@@ -169,19 +219,15 @@ class LoadCase:
 class Imperfection:
     """Global sway imperfection per EN 15512.
 
-    phi may be given directly.  Otherwise it is computed with the helper
-    formula of EN 15512:2009 10.3.1 (verify against the edition you use):
+    phi may be given directly; otherwise computed with the helper formula
+    of EN 15512:2009 10.3.1 (verify against the edition you use):
 
         phi = sqrt(0.5 + 1/n_cols) * (2*phi_s + phi_l)   >= phi_min
 
-    n_cols : number of interconnected uprights in the plane of bending.
-    phi_s  : maximum specified out-of-plumb per unit height (erection
-             tolerance, e.g. 1/350).
-    phi_l  : connector looseness [rad]; 0 if modelled in the hinges.
-    method : 'EHF' -> equivalent horizontal forces phi * V applied at every
-             loaded node; 'geometry' -> initial out-of-plumb geometry
-             (x' = x + phi * y).
-    directions : imperfection senses to analyse; results are enveloped.
+    method     : 'EHF' (equivalent horizontal forces phi * V at every
+                 loaded node) or 'geometry' (initial out-of-plumb).
+    directions : sway senses analysed and enveloped; any of
+                 '+x', '-x' (down-aisle), '+y', '-y' (cross-aisle).
     """
 
     phi: Optional[float] = None
@@ -190,7 +236,8 @@ class Imperfection:
     phi_l: float = 0.0
     phi_min: float = 1.0 / 500.0
     method: str = "EHF"
-    directions: List[int] = field(default_factory=lambda: [1, -1])
+    directions: List[str] = field(
+        default_factory=lambda: ["+x", "-x", "+y", "-y"])
 
     def value(self) -> float:
         if self.phi is not None:
@@ -203,15 +250,20 @@ class Imperfection:
         return max(phi, self.phi_min)
 
 
+DIRECTION_VECTORS: Dict[str, Tuple[float, float]] = {
+    "+x": (1.0, 0.0), "-x": (-1.0, 0.0),
+    "+y": (0.0, 1.0), "-y": (0.0, -1.0),
+}
+
+
 @dataclass
 class Combination:
-    """Load combination.  factors maps load-case name -> partial factor.
+    """Load combination; factors maps load-case name -> partial factor.
 
-    EN 15512 defaults (verify against your edition / national annex):
+    EN 15512 defaults (verify for your edition / national annex):
       ULS:  1.3 * permanent + 1.4 * variable (unit loads)
       SLS:  1.0 * all
-    Imperfections are applied to ULS combinations by default.
-    """
+    Imperfections are applied to ULS combinations by default."""
 
     name: str
     kind: str                      # 'ULS' or 'SLS'
@@ -233,10 +285,10 @@ class CheckSettings:
 
     gamma_M0: float = 1.0          # cross-section resistance
     gamma_M1: float = 1.0          # member buckling resistance
-    k_M: float = 1.0               # moment interaction factor in buckling check
-    sway_limit_ratio: float = 200.0      # max sway <= H / ratio (SLS)
+    k_M: float = 1.0               # moment interaction factor (buckling)
+    sway_limit_ratio: float = 200.0       # max sway <= H / ratio (SLS)
     beam_defl_limit_ratio: float = 200.0  # beam deflection <= L / ratio (SLS)
-    alpha_cr_warn: float = 10.0    # below this, 2nd-order effects significant
+    alpha_cr_warn: float = 10.0
 
 
 @dataclass
@@ -254,8 +306,8 @@ class RackModel:
     checks: CheckSettings = field(default_factory=CheckSettings)
 
     # ---- convenience builders -------------------------------------------
-    def add_node(self, nid: int, x: float, y: float) -> Node:
-        n = Node(nid, x, y)
+    def add_node(self, nid: int, x: float, y: float, z: float) -> Node:
+        n = Node(nid, x, y, z)
         self.nodes[nid] = n
         return n
 
@@ -266,7 +318,29 @@ class RackModel:
 
     def member_length(self, m: Member) -> float:
         ni, nj = self.nodes[m.node_i], self.nodes[m.node_j]
-        return math.hypot(nj.x - ni.x, nj.y - ni.y)
+        return math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2
+                         + (nj.z - ni.z) ** 2)
+
+    def member_axes(self, m: Member) -> Tuple[Tuple[float, float, float],
+                                              Tuple[float, float, float],
+                                              Tuple[float, float, float]]:
+        """Local axes (x_hat, y_hat, z_hat) per the documented convention."""
+        ni, nj = self.nodes[m.node_i], self.nodes[m.node_j]
+        L = self.member_length(m)
+        xh = ((nj.x - ni.x) / L, (nj.y - ni.y) / L, (nj.z - ni.z) / L)
+        if m.vecxz is not None:
+            v = m.vecxz
+        elif abs(xh[2]) > 0.999:               # vertical member
+            v = (0.0, 1.0, 0.0)
+        else:                                   # local y as vertical as possible
+            v = _cross(xh, (0.0, 0.0, 1.0))    # vecxz = x_hat x Z
+        yh = _normalize(_cross(v, xh))         # OpenSees: y = vecxz x x_hat
+        zh = _cross(xh, yh)
+        return xh, yh, zh
+
+    def member_vecxz(self, m: Member) -> Tuple[float, float, float]:
+        xh, yh, zh = self.member_axes(m)
+        return zh                               # z_hat lies in the x-z plane
 
     def section_of(self, m: Member) -> CrossSection:
         return self.sections[m.section]
@@ -275,8 +349,8 @@ class RackModel:
         return self.materials[self.sections[m.section].material]
 
     def height(self) -> float:
-        ys = [n.y for n in self.nodes.values()]
-        return max(ys) - min(ys)
+        zs = [n.z for n in self.nodes.values()]
+        return max(zs) - min(zs)
 
     # ---- validation ------------------------------------------------------
     def validate(self) -> List[str]:
@@ -284,17 +358,19 @@ class RackModel:
         for s in self.sections.values():
             if s.material not in self.materials:
                 errors.append(f"Section '{s.name}': unknown material '{s.material}'")
+            if s.J <= 0:
+                errors.append(f"Section '{s.name}': torsion constant J must be > 0")
         for m in self.members.values():
             if m.node_i not in self.nodes or m.node_j not in self.nodes:
                 errors.append(f"Member {m.id}: unknown node")
+                continue
             if m.section not in self.sections:
                 errors.append(f"Member {m.id}: unknown section '{m.section}'")
             if m.mtype not in ("beam", "truss"):
                 errors.append(f"Member {m.id}: mtype must be 'beam' or 'truss'")
             if m.mtype == "truss" and (m.hinge_i or m.hinge_j):
                 errors.append(f"Member {m.id}: truss members cannot have hinges")
-            if m.node_i in self.nodes and m.node_j in self.nodes \
-                    and self.member_length(m) < 1.0e-6:
+            if self.member_length(m) < 1.0e-6:
                 errors.append(f"Member {m.id}: zero length")
         sup_nodes = set()
         for s in self.supports:
@@ -316,4 +392,21 @@ class RackModel:
             for case in c.factors:
                 if case not in self.load_cases:
                     errors.append(f"Combination '{c.name}': unknown case '{case}'")
+        for d in self.imperfection.directions:
+            if d not in DIRECTION_VECTORS:
+                errors.append(f"Imperfection direction '{d}' not in "
+                              f"{sorted(DIRECTION_VECTORS)}")
         return errors
+
+
+def _cross(a, b) -> Tuple[float, float, float]:
+    return (a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0])
+
+
+def _normalize(a) -> Tuple[float, float, float]:
+    n = math.sqrt(a[0] ** 2 + a[1] ** 2 + a[2] ** 2)
+    if n < 1.0e-12:
+        raise ValueError("member vecxz is parallel to the member axis")
+    return (a[0] / n, a[1] / n, a[2] / n)

@@ -1,6 +1,7 @@
 """Runs all combinations: assembles factored loads, applies the EN 15512
-sway imperfection (EHF or initial geometry, in both directions), solves
-first and second order, and returns the list of analysis cases."""
+sway imperfection (EHF or initial geometry, in the configured horizontal
+directions), solves first and second order, and returns the analysis
+cases."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from typing import List
 
 from .combos import apply_ehf, assemble
 from .engine.opensees import OpenSeesEngine
-from .model import RackModel
+from .model import DIRECTION_VECTORS, RackModel
 from .results import CaseResult
 
 
@@ -24,19 +25,20 @@ def run_all(model: RackModel) -> List[CaseResult]:
     for combo in model.combinations:
         base_loads = assemble(model, combo)
         apply_imp = combo.imperfection and combo.kind == "ULS"
-        directions = model.imperfection.directions if apply_imp else [0]
+        directions = model.imperfection.directions if apply_imp else [""]
 
         for direction in directions:
             loads = base_loads
             geom_sway = None
             name = combo.name
-            if direction != 0:
+            if direction:
                 phi = model.imperfection.value()
+                vec = DIRECTION_VECTORS[direction]
                 if model.imperfection.method.upper() == "EHF":
-                    loads = apply_ehf(model, base_loads, phi, direction)
+                    loads = apply_ehf(model, base_loads, phi, vec)
                 else:
-                    geom_sway = (phi, direction)
-                name = f"{combo.name} (imp {'+x' if direction > 0 else '-x'})"
+                    geom_sway = (phi, vec)
+                name = f"{combo.name} (imp {direction})"
 
             case = engine.run_case(model, loads, name=name, combo=combo.name,
                                    kind=combo.kind, order=order,

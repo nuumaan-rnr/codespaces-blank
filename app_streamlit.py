@@ -1,52 +1,72 @@
-"""Interactive web app for EN 15512 storage-rack analysis.
+"""Interactive web app for 3D EN 15512 storage-rack analysis.
 
 Run with:  streamlit run app_streamlit.py
 
-Define the rack in the sidebar (geometry, sections, semi-rigid connections,
-loads, imperfections, factors), run the second-order OpenSees analysis and
-browse results, plots and EN 15512 checks.
+Upload your section master (CSV/JSON) or use the bundled example master,
+pick sections by role, define the rack in the sidebar (geometry, semi-rigid
+connections, loads, imperfections, factors), run the second-order OpenSees
+analysis and browse results, plots and EN 15512 checks.
 """
 
 import json
+import tempfile
 
 import streamlit as st
 
 from rack15512 import io_json
 from rack15512.analysis import run_all
-from rack15512.builder import RackConfig, build_rack, default_beam, default_upright
+from rack15512.builder import RackConfig, build_rack
 from rack15512.checks.en15512 import all_ok, governing, run_checks
-from rack15512.model import CrossSection
+from rack15512.library import SectionLibrary
 from rack15512.report import write_report
 from rack15512.viewer import (plot_deformed, plot_diagram, plot_model,
                               plot_utilization)
 
 st.set_page_config(page_title="EN 15512 Rack Check", layout="wide")
-st.title("Storage rack analysis & EN 15512 checks")
+st.title("Storage rack analysis & EN 15512 checks (3D)")
 st.caption("Engine: OpenSees (second-order elastic, semi-rigid connections). "
-           "Units: N, mm, MPa.")
+           "Units: N, mm, MPa. Axes: X down-aisle, Y cross-aisle, Z up.")
+
+
+@st.cache_data
+def load_library(uploaded_bytes: bytes | None, filename: str):
+    if uploaded_bytes is None:
+        return SectionLibrary.bundled()
+    suffix = ".json" if filename.lower().endswith(".json") else ".csv"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(uploaded_bytes)
+        path = f.name
+    return SectionLibrary.from_file(path)
+
 
 with st.sidebar:
+    st.header("Section master")
+    up_file = st.file_uploader("Master file (CSV or JSON)", type=["csv", "json"])
+    try:
+        lib = load_library(up_file.getvalue() if up_file else None,
+                           up_file.name if up_file else "")
+    except ValueError as e:
+        st.error(str(e))
+        st.stop()
+    st.caption(f"{len(lib.sections)} sections, roles: {', '.join(lib.roles())}")
+
+    def pick(label, role, fallback_role=None):
+        names = lib.names(role) or lib.names(fallback_role) or lib.names()
+        return st.selectbox(label, names)
+
+    upright_sec = pick("Upright", "upright")
+    beam_sec = pick("Pallet beam", "beam")
+    brace_sec = pick("Bracing", "bracing")
+
     st.header("Geometry")
-    n_bays = st.number_input("Bays", 1, 12, 3)
+    n_bays = st.number_input("Bays (down-aisle)", 1, 12, 3)
     bay_width = st.number_input("Bay width [mm]", 1000.0, 4500.0, 2700.0, 50.0)
+    depth = st.number_input("Frame depth [mm]", 600.0, 2000.0, 1100.0, 50.0)
     n_levels = st.number_input("Beam levels", 1, 10, 3)
     level_h = st.number_input("Level height [mm]", 500.0, 4000.0, 2000.0, 50.0)
 
-    st.header("Steel & sections")
+    st.header("Steel & connections")
     fy = st.number_input("fy [MPa]", 200.0, 700.0, 355.0, 5.0)
-    with st.expander("Upright section"):
-        uA = st.number_input("A [mm2]", value=780.0)
-        uI = st.number_input("I [mm4]", value=1.20e6, format="%.3e")
-        uW = st.number_input("Wel [mm3]", value=2.40e4, format="%.3e")
-        uAe = st.number_input("A_eff [mm2]", value=660.0)
-        uWe = st.number_input("W_eff [mm3]", value=2.05e4, format="%.3e")
-        u_curve = st.selectbox("Buckling curve", ["a0", "a", "b", "c", "d"], 2)
-    with st.expander("Pallet beam section"):
-        bA = st.number_input("A [mm2] ", value=950.0)
-        bI = st.number_input("I [mm4] ", value=2.10e6, format="%.3e")
-        bW = st.number_input("Wel [mm3] ", value=3.80e4, format="%.3e")
-
-    st.header("Semi-rigid connections")
     kc = st.number_input("Connector stiffness [kNm/rad]", 1.0, 1000.0, 100.0)
     mrd = st.number_input("Connector M_Rd [kNm]", 0.1, 50.0, 2.5)
     phi_l = st.number_input("Connector looseness phi_l [mrad]", 0.0, 20.0, 0.0)
@@ -68,12 +88,10 @@ with st.sidebar:
     go = st.button("Run analysis", type="primary", use_container_width=True)
 
 cfg = RackConfig(
-    n_bays=int(n_bays), bay_width=bay_width,
+    n_bays=int(n_bays), bay_width=bay_width, depth=depth,
     level_heights=[level_h] * int(n_levels),
-    steel_fy=fy,
-    upright=CrossSection("UPRIGHT", "steel", A=uA, I=uI, Wel=uW,
-                         A_eff=uAe, W_eff=uWe, buckling_curve=u_curve),
-    beam=CrossSection("BEAM", "steel", A=bA, I=bI, Wel=bW),
+    library=lib, upright_section=upright_sec, beam_section=beam_sec,
+    brace_section=brace_sec, steel_fy=fy,
     connector_stiffness=kc * 1e6, connector_m_rd=mrd * 1e6,
     connector_looseness=phi_l / 1000.0,
     base_stiffness=kbase * 1e6,
@@ -90,6 +108,12 @@ tab_model, tab_results, tab_checks, tab_report = st.tabs(
 
 with tab_model:
     st.pyplot(plot_model(model))
+    sec_rows = [{"name": s.name, "role": s.role, "A": s.A, "Iy": s.Iy,
+                 "Iz": s.Iz, "J": s.J, "A_eff": s.area_eff,
+                 "curve y/z": f"{s.buckling_curve_y}/{s.buckling_curve_z}"}
+                for s in model.sections.values()]
+    st.subheader("Selected sections (from master)")
+    st.dataframe(sec_rows)
     st.download_button("Download model JSON",
                        json.dumps(io_json.model_to_dict(model), indent=2),
                        "rack_model.json")
@@ -113,17 +137,20 @@ if "cases" in st.session_state:
             st.error("Analysis did not converge - structure likely unstable "
                      "under this combination.")
         else:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Max sway [mm]", f"{case.max_sway:.2f}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Sway X [mm]", f"{case.max_sway_x:.2f}")
+            c2.metric("Sway Y [mm]", f"{case.max_sway_y:.2f}")
             a = case.alpha_cr_estimate
-            c2.metric("alpha_cr (est.)", f"{a:.2f}" if a else "n/a")
-            c3.metric("Order", "2nd" if case.order == 2 else "1st")
+            c3.metric("alpha_cr (est.)", f"{a:.2f}" if a else "n/a")
+            c4.metric("Order", "2nd" if case.order == 2 else "1st")
             st.pyplot(plot_deformed(model, case))
-            kind = st.radio("Diagram", ["M", "N", "V"], horizontal=True)
+            kind = st.radio("Diagram", ["Mz", "My", "N", "Vy", "Vz", "T"],
+                            horizontal=True)
             st.pyplot(plot_diagram(model, case, kind))
-            st.subheader("Reactions [N, N, N*mm]")
+            st.subheader("Reactions [N / N*mm]")
             st.dataframe([{"node": n, "Fx": f"{r[0]:.0f}", "Fy": f"{r[1]:.0f}",
-                           "Mz": f"{r[2]:.0f}"}
+                           "Fz": f"{r[2]:.0f}", "Mx": f"{r[3]:.0f}",
+                           "My": f"{r[4]:.0f}", "Mz": f"{r[5]:.0f}"}
                           for n, r in case.reactions.items()])
 
     with tab_checks:

@@ -40,6 +40,8 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
         for h in ("hinge_i", "hinge_j"):
             if x.get(h) is not None:
                 x[h] = Hinge(**x[h])
+        if x.get("vecxz") is not None:
+            x["vecxz"] = tuple(x["vecxz"])
         m.members[x["id"]] = Member(**x)
     for x in d.get("supports", []):
         m.supports.append(Support(**x))

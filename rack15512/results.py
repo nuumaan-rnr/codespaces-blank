@@ -1,27 +1,37 @@
-"""Result containers produced by the FEA engine."""
+"""Result containers produced by the FEA engine (3D)."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
 class Station:
-    """Internal forces at a position along a member.
+    """Internal forces at a position along a member (local axes).
 
-    x    : distance from node i along the member axis [mm]
-    N    : axial force, tension positive [N]
-    V    : shear force [N]
-    M    : bending moment [N*mm]
-    defl : transverse deflection relative to the member chord [mm]
+    x       : distance from node i along the member axis [mm]
+    N       : axial force, tension positive [N]
+    Vy, Vz  : shear forces in local y / z [N]
+    T       : torsion [N*mm]
+    My, Mz  : bending moments about local y / z [N*mm]
+    defl_y/z: transverse deflection relative to the member chord [mm]
     """
 
     x: float
     N: float
-    V: float
-    M: float
-    defl: float = 0.0
+    Vy: float = 0.0
+    Vz: float = 0.0
+    T: float = 0.0
+    My: float = 0.0
+    Mz: float = 0.0
+    defl_y: float = 0.0
+    defl_z: float = 0.0
+
+    @property
+    def defl(self) -> float:
+        return math.hypot(self.defl_y, self.defl_z)
 
 
 @dataclass
@@ -39,19 +49,27 @@ class MemberResult:
         return max(s.N for s in self.stations)
 
     @property
-    def M_absmax(self) -> float:
-        return max(abs(s.M) for s in self.stations)
+    def My_absmax(self) -> float:
+        return max(abs(s.My) for s in self.stations)
+
+    @property
+    def Mz_absmax(self) -> float:
+        return max(abs(s.Mz) for s in self.stations)
 
     @property
     def V_absmax(self) -> float:
-        return max(abs(s.V) for s in self.stations)
+        return max(math.hypot(s.Vy, s.Vz) for s in self.stations)
+
+    @property
+    def T_absmax(self) -> float:
+        return max(abs(s.T) for s in self.stations)
 
     @property
     def defl_absmax(self) -> float:
-        return max(abs(s.defl) for s in self.stations)
+        return max(s.defl for s in self.stations)
 
-    def M_end(self, end: str) -> float:
-        return self.stations[0].M if end == "i" else self.stations[-1].M
+    def end(self, end: str) -> Station:
+        return self.stations[0] if end == "i" else self.stations[-1]
 
 
 @dataclass
@@ -63,31 +81,35 @@ class CaseResult:
     combo: str
     kind: str                                   # 'ULS' | 'SLS'
     order: int                                  # 1 or 2
-    imp_direction: int = 0                      # +1, -1 or 0 (none)
+    imp_direction: str = ""                     # '+x', '-y', ... or ''
     converged: bool = True
-    displacements: Dict[int, Tuple[float, float, float]] = field(default_factory=dict)
-    reactions: Dict[int, Tuple[float, float, float]] = field(default_factory=dict)
+    # node id -> (ux, uy, uz, rx, ry, rz)
+    displacements: Dict[int, Tuple[float, ...]] = field(default_factory=dict)
+    reactions: Dict[int, Tuple[float, ...]] = field(default_factory=dict)
     members: Dict[int, MemberResult] = field(default_factory=dict)
     # companion first-order sway (same loads, linear) for alpha_cr estimate
     sway_first_order: Optional[float] = None
 
     @property
     def max_sway(self) -> float:
-        """Maximum absolute horizontal displacement [mm]."""
+        """Maximum horizontal displacement resultant [mm]."""
         if not self.displacements:
             return 0.0
-        return max(abs(d[0]) for d in self.displacements.values())
+        return max(math.hypot(d[0], d[1]) for d in self.displacements.values())
+
+    @property
+    def max_sway_x(self) -> float:
+        return max((abs(d[0]) for d in self.displacements.values()), default=0.0)
+
+    @property
+    def max_sway_y(self) -> float:
+        return max((abs(d[1]) for d in self.displacements.values()), default=0.0)
 
     @property
     def alpha_cr_estimate(self) -> Optional[float]:
-        """Estimate of the elastic critical load factor from the sway
-        amplification:  d2 ~ d1 / (1 - 1/alpha_cr)  ->
-        alpha_cr ~ 1 / (1 - d1/d2).  Only meaningful for 2nd-order sway
-        cases with a 1st-order companion run."""
+        """Elastic critical load factor estimated from the sway
+        amplification:  d2 ~ d1 / (1 - 1/alpha_cr)."""
         d1, d2 = self.sway_first_order, self.max_sway
         if self.order != 2 or d1 is None or d2 <= 1.0e-9 or d1 >= d2:
             return None
-        ratio = d1 / d2
-        if ratio >= 1.0:
-            return None
-        return 1.0 / (1.0 - ratio)
+        return 1.0 / (1.0 - d1 / d2)
