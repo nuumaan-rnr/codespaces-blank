@@ -58,6 +58,9 @@ class SectionLibrary:
     @classmethod
     def from_file(cls, path: str,
                   mapping: Optional[Dict[str, str]] = None) -> "SectionLibrary":
+        if path.lower().endswith((".xlsx", ".xlsm")):
+            from .master_xlsx import load_master
+            return load_master(path).library
         if path.lower().endswith(".json"):
             return cls.from_json(path, mapping)
         return cls.from_csv(path, mapping)

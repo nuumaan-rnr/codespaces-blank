@@ -20,7 +20,8 @@ from .checks.en15512 import all_ok, run_checks
 from .library import SectionLibrary
 from .model import RackModel
 from .report import write_report
-from .viewer import plot_deformed, plot_diagram, plot_model, plot_utilization
+from .viewer import (plot_deformed, plot_diagram, plot_frame_elevation,
+                     plot_model, plot_utilization)
 
 
 def _run(model: RackModel, outdir: str) -> int:
@@ -36,6 +37,8 @@ def _run(model: RackModel, outdir: str) -> int:
         f.write(report)
 
     plot_model(model, os.path.join(outdir, "model.png"))
+    plot_frame_elevation(model, 0.0,
+                         os.path.join(outdir, "frame_elevation.png"))
     plot_utilization(model, checks, os.path.join(outdir, "utilization.png"))
     for case in cases:
         if not case.converged:
@@ -55,6 +58,14 @@ def _load_library(path: str | None) -> SectionLibrary:
     return SectionLibrary.from_file(path) if path else SectionLibrary.bundled()
 
 
+def _example_config(master_path: str | None) -> RackConfig:
+    if master_path and master_path.lower().endswith((".xlsx", ".xlsm")):
+        from .master_xlsx import load_master
+        return RackConfig(master=load_master(master_path),
+                          base_stiffness="auto")
+    return RackConfig(library=_load_library(master_path))
+
+
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="rack15512",
                                 description="EN 15512 storage-rack analysis "
@@ -69,11 +80,11 @@ def main(argv: List[str] | None = None) -> int:
 
     pe = sub.add_parser("example", help="generate, save and run the demo rack")
     pe.add_argument("--outdir", default="out")
-    pe.add_argument("--master", help="section master CSV/JSON "
+    pe.add_argument("--master", help="section master CSV/JSON/XLSX "
                                      "(default: bundled example master)")
 
     ps = sub.add_parser("sections", help="list the section master")
-    ps.add_argument("--master", help="section master CSV/JSON")
+    ps.add_argument("--master", help="section master CSV/JSON/XLSX")
     ps.add_argument("--role", help="filter by role (upright/beam/bracing/...)")
 
     a = p.parse_args(argv)
@@ -83,7 +94,7 @@ def main(argv: List[str] | None = None) -> int:
             model.analysis.order = 1
         return _run(model, a.outdir)
     if a.cmd == "example":
-        model = build_rack(RackConfig(library=_load_library(a.master)))
+        model = build_rack(_example_config(a.master))
         os.makedirs(a.outdir, exist_ok=True)
         io_json.save(model, os.path.join(a.outdir, "example_model.json"))
         return _run(model, a.outdir)

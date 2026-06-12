@@ -131,6 +131,36 @@ def plot_diagram(model: RackModel, case: CaseResult, kind: str = "Mz",
     return fig
 
 
+def plot_frame_elevation(model: RackModel, x: float = 0.0,
+                         path: Optional[str] = None):
+    """Cross-aisle (Y-Z) elevation of the upright frame at down-aisle
+    position x - for comparing the bracing arrangement with the drawing."""
+    fig, ax = plt.subplots(figsize=(4, 10))
+    colors = _member_color(model)
+    tol = 1.0
+    for m in model.members.values():
+        ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
+        if abs(ni.x - x) > tol or abs(nj.x - x) > tol:
+            continue
+        ls = "--" if m.mtype == "truss" else "-"
+        lw = 2.5 if m.member_set == "uprights" else 1.5
+        ax.plot([ni.y, nj.y], [ni.z, nj.z], ls,
+                color=colors[m.member_set], lw=lw)
+    for s in model.supports:
+        n = model.nodes[s.node]
+        if abs(n.x - x) <= tol:
+            ax.plot(n.y, n.z, "^", color="k", ms=10)
+    ax.set_title(f"frame elevation at x={x:.0f} mm")
+    ax.set_aspect("equal")
+    ax.set_xlabel("Y [mm]")
+    ax.set_ylabel("Z [mm]")
+    fig.tight_layout()
+    if path:
+        fig.savefig(path, dpi=140)
+        plt.close(fig)
+    return fig
+
+
 def plot_utilization(model: RackModel, checks: List[CheckResult],
                      path: Optional[str] = None):
     """Worst utilization per member (all non-informative checks)."""

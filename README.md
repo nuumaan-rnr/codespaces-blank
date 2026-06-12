@@ -27,12 +27,39 @@ scriptable and battle-tested:
 
 ## Section master library
 
-Keep ONE master file (CSV or JSON) with all your sections and their full
-properties, tagged by **role** (`upright` / `beam` / `bracing` / …).
-Members are assigned by section name and the library hands the complete,
-solver-ready property set to the model — gross + effective areas and
-moduli, both bending axes, torsion, and the EN 1993-1-1 buckling curve per
-axis.
+Keep ONE master file with all your sections and their full properties,
+tagged by **role** (`upright` / `beam` / `bracing` / …). Members are
+assigned by section name and the library hands the complete, solver-ready
+property set to the model — gross + effective areas and moduli, both
+bending axes, torsion, and the EN 1993-1-1 buckling curve per axis.
+
+### .xlsx master workbook
+
+The native format is the engineering master workbook
+(`examples/Master.xlsx`) with sheets, in cm/kN units as maintained:
+
+- **UPRIGHT_MASTER** — Aeff, Iyy/Izz, Weff,y/Weff,z, fy, wall t per
+  upright (workbook Iyy = major axis → model local z; upright torsion J is
+  estimated as A·t²/3 since it is not tabulated)
+- **BEAM_MASTER** — RHS h×b×t, major-axis I and Wel, fy, section M_Rd
+  (minor axis, area and J are computed from the RHS geometry)
+- **BRACING_MASTER** — C-channel area, Iyy/Izz, Zyy/Zzz, IT (St-Venant J),
+  fy (transposed layout; duplicate names are suffixed `#2`)
+- **BASE_STIFFNESS** — per upright, the EN 15512 load-dependent floor
+  connection: N vs k_b vs M_Rd. With `base_stiffness="auto"` the builder
+  interpolates k_b at the estimated ULS upright axial load.
+
+Per-section fy values from the workbook are honoured automatically via
+dedicated material entries.
+
+```python
+from rack15512 import load_master
+mw = load_master("examples/Master.xlsx")
+mw.library.names("upright")                # UP0002 ... UP0026
+k, m_rd = mw.base_stiffness("UP0008", 45e3)  # floor spring at N = 45 kN
+```
+
+### CSV / JSON master
 
 Canonical CSV header:
 
@@ -154,11 +181,41 @@ checks = run_checks(m, cases)     # EN 15512 verifications
 print(write_report(m, cases, checks))
 ```
 
-A parametric generator for regular rack blocks is included
-(`rack15512.builder.build_rack(RackConfig(...))`) — uprights, beam pairs
-with connectors, braced cross-aisle frames, loads, combinations and
-imperfections from ~15 parameters. See `examples/pallet_rack.json` for the
-generated input format.
+### Parametric rack builder
+
+`rack15512.builder.build_rack(RackConfig(...))` generates a complete rack
+block — uprights, beam pairs with connectors, braced cross-aisle frames,
+loads, combinations and imperfections. Key inputs:
+
+- **`beam_levels`** — each beam level elevation individually, e.g.
+  `[1500, 3000, 4700, 6600]` (not forced to a uniform pitch)
+- **`frame_height`** — upright length, independent of the top beam level
+- **Cross-aisle bracing per the standard frame drawings**:
+  `bracing_type="D"` (zigzag) or `"X"` (crossed pairs), a horizontal strut
+  at `bracing_start` (default 150 mm) above the floor, truss diagonals in
+  `bracing_pitch` panels (default 600 mm, customizable), no intermediate
+  horizontals, and one closing horizontal at the last diagonal position
+  that fits below the frame top
+- **`master=load_master("Master.xlsx")`** + `base_stiffness="auto"` to
+  pull section properties and the load-interpolated floor-connection
+  stiffness straight from the workbook
+
+```python
+from rack15512 import RackConfig, build_rack, load_master
+cfg = RackConfig(
+    n_bays=3, bay_width=2700, depth=1000,
+    beam_levels=[1500, 3000, 4500, 6000, 7500, 9000],
+    frame_height=9898, bracing_type="D",
+    bracing_start=150, bracing_pitch=600,
+    master=load_master("examples/Master.xlsx"),
+    upright_section="UP0022", beam_section="RHS 122x61x1.6",
+    brace_section="C 34X34X2.0", base_stiffness="auto")
+model = build_rack(cfg)
+```
+
+`viewer.plot_frame_elevation(model)` draws the Y-Z frame elevation for a
+direct visual comparison with the CAD drawing. See
+`examples/pallet_rack.json` for the generated input format.
 
 ## Model format notes
 
