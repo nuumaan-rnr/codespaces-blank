@@ -289,6 +289,66 @@ def test_upright_splice_auto_and_check():
     assert all(0.0 < c.utilization < 50.0 for c in sp)
 
 
+def test_per_level_gap_section_and_load():
+    """Every level takes its own beam gap, beam section and pallet load."""
+    from rack15512.builder import LevelSpec
+    model = build_rack(RackConfig(n_bays=1, levels=[
+        LevelSpec(gap=1500.0, beam_section="BM-100x40x1.5",
+                  pallet_load=15000.0),
+        LevelSpec(gap=1700.0, beam_section="BM-130x50x1.5",
+                  pallet_load=25000.0)]))
+    beams = sorted((m for m in model.members.values()
+                    if m.member_set == "pallet beams"),
+                   key=lambda m: model.nodes[m.node_i].z)
+    assert model.nodes[beams[0].node_i].z == pytest.approx(1500.0)
+    assert model.nodes[beams[-1].node_i].z == pytest.approx(3200.0)
+    assert beams[0].section == "BM-100x40x1.5"
+    assert beams[-1].section == "BM-130x50x1.5"
+    udl = {}
+    for ml in model.load_cases["pallets"].member_loads:
+        z = model.nodes[model.members[ml.member].node_i].z
+        udl[round(z)] = abs(ml.qz)
+    assert udl[1500] == pytest.approx(15000.0 / 2 / 2700.0)
+    assert udl[3200] == pytest.approx(25000.0 / 2 / 2700.0)
+
+
+def test_standard_footplate_defaults():
+    master = __import__("rack15512.master_xlsx",
+                        fromlist=["load_master"]).load_master(
+        os.path.join(os.path.dirname(__file__), "..", "examples",
+                     "Master.xlsx"))
+    m90 = build_rack(RackConfig(n_bays=1, beam_levels=[1500.0], master=master,
+                                upright_section="UP0002",
+                                beam_section="RHS 60x40x1.2",
+                                brace_section="C 36X21X1.2",
+                                base_stiffness="auto"))
+    assert (m90.base_plate.b, m90.base_plate.d, m90.base_plate.t) \
+        == (100.0, 145.0, 4.0)
+    m120 = build_rack(RackConfig(n_bays=1, beam_levels=[1500.0], master=master,
+                                 upright_section="UP0022",
+                                 beam_section="RHS 122x61x2.0",
+                                 brace_section="C 34X34X2.0",
+                                 base_stiffness="auto"))
+    assert (m120.base_plate.b, m120.base_plate.d, m120.base_plate.t) \
+        == (100.0, 176.0, 4.0)
+
+
+def test_twenty_levels_scalability():
+    from rack15512.builder import LevelSpec
+    model = build_rack(RackConfig(
+        module="back-to-back", n_bays=3,
+        levels=[LevelSpec(gap=1000.0) for _ in range(20)],
+        frame_height=20500.0))
+    assert model.validate() == []
+    ids = list(model.nodes)
+    assert len(ids) == len(set(ids))            # node-id scheme holds
+    beams = {round(model.nodes[m.node_i].z)
+             for m in model.members.values()
+             if m.member_set == "pallet beams"}
+    assert len(beams) == 20
+    assert model.splices and model.splices[0].z == pytest.approx(10250.0)
+
+
 def test_overloaded_rack_fails_checks():
     cfg = RackConfig(n_bays=2, beam_levels=[2500.0, 5000.0, 7500.0, 10000.0],
                      upright_section="UP-90x70x1.8",

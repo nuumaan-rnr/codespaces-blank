@@ -101,11 +101,11 @@ print(write_report(model, cases, checks))
 │ Beam span / bay width [mm]   [ 2700   ]        │
 │ Frame depth [mm]             [ 1000   ]        │
 │ Back-to-back gap [mm]        [ 250    ]        │
-│ Number of beam levels        [ 4      ]        │
-│   Level 1 elevation [mm]     [ 1500   ]        │
-│   Level 2 elevation [mm]     [ 3000   ]        │
-│   Level 3 elevation [mm]     [ 4500   ]        │
-│   Level 4 elevation [mm]     [ 6000   ]        │
+│ Number of beam levels (1-20) [ 4      ]        │
+│   L1: gap [1500] beam [RHS 112x50x2.0] [20 kN] │
+│   L2: gap [1500] beam [RHS 112x50x2.0] [20 kN] │
+│   L3: gap [1500] beam [RHS 100x50x1.6] [15 kN] │
+│   L4: gap [1500] beam [RHS 100x50x1.6] [15 kN] │
 │ Frame height [mm]            [ 6500   ]        │
 ├─ Cross-aisle bracing ──────────────────────────┤
 │ Type            (•) D (zigzag)  ( ) X (crossed)│
@@ -154,9 +154,9 @@ print(write_report(model, cases, checks))
 | Beam span / bay width | mm | Upright centreline spacing = pallet-beam span. |
 | Frame depth | mm | Front-to-rear upright spacing of one rack frame. |
 | Back-to-back gap | mm | Clear gap between the two racks of a back-to-back module. |
-| Beam levels | mm | Elevation of **each** beam level individually (level-to-level beam gap is taken from these). |
+| Beam levels (1–20) | – | **Per level**: the beam gap (level-to-level spacing), the beam section from the master, and the pallet load — every level can differ. The model scales to 20 levels. |
 | Frame height | mm | Total upright length (≥ top beam level). |
-| Bracing type | – | CA frame pattern: `D` zigzag or `X` crossed pairs. |
+| Bracing type | – | CA frame pattern: `D` zigzag or `X` crossed pairs. In each frame the first diagonal connects to the **outer (aisle-side) upright** just above the bottom horizontal; the two frames of a back-to-back module are mirrored accordingly (`bracing_first_side` flips the convention). |
 | First horizontal | mm | Height of the bottom horizontal strut (default 150). |
 | Diagonal pitch | mm | Height of each diagonal panel (default 600, customizable). Diagonals run up to the last position that fits; one closing horizontal there; no intermediate horizontals. |
 | fy | MPa | Default yield strength; sections from an .xlsx master carry their own fy. |
@@ -171,7 +171,7 @@ print(write_report(model, cases, checks))
 | Bracing area factor | – | Connection-flexibility modification: only this fraction of the brace area (default **15%**) acts in the **analysis stiffness**; all strength checks use the full section. |
 | Bolt size / grade / count | – | Bracing end-connection bolts for the BRACE_BOLT check (M8–M16; grades 4.6–10.9). |
 | f_ck / plate fy | MPa | Floor concrete grade (f_jd = 0.85·f_ck/1.5 unless overridden) and base-plate steel for the BASEPLATE check. |
-| Actual base plate b×d×t | mm | Optional: verifies your plate; leave blank to get the minimum required size/thickness reported. |
+| Actual base plate b×d×t | mm | Leave at 0 to use the **standard footplate for the upright depth** (90 mm upright → 100×145×4, 120 mm → 100×176×4); enter values to verify a specific plate. The report always also states the minimum required size/thickness. |
 
 ---
 

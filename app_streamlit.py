@@ -16,7 +16,8 @@ import streamlit as st
 
 from rack15512 import io_json
 from rack15512.analysis import run_all
-from rack15512.builder import RackConfig, bracing_elevations, build_rack
+from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
+                               build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
 from rack15512.library import SectionLibrary
 from rack15512.master_xlsx import MasterWorkbook, load_master
@@ -67,7 +68,6 @@ with st.sidebar:
         return st.selectbox(label, names)
 
     upright_sec = pick("Upright", "upright")
-    beam_sec = pick("Pallet beam", "beam")
     brace_sec = pick("Bracing", "bracing")
 
     st.header("Geometry")
@@ -80,20 +80,24 @@ with st.sidebar:
     b2b_gap = st.number_input("Back-to-back gap [mm]", 50.0, 600.0, 250.0,
                               10.0, disabled=module == "Single")
 
-    st.subheader("Beam levels (each level individually)")
-    n_levels = int(st.number_input("Number of beam levels", 1, 12, 3))
-    beam_levels = []
-    prev = 0.0
+    st.subheader("Beam levels (gap, section and load per level)")
+    n_levels = int(st.number_input("Number of beam levels", 1, 20, 3))
+    beam_names = lib.names("beam") or lib.names()
+    level_specs = []
+    elev = 0.0
     for k in range(n_levels):
-        z = st.number_input(f"Level {k + 1} elevation [mm]",
-                            min_value=prev + 100.0, max_value=30000.0,
-                            value=max(2000.0 * (k + 1), prev + 100.0),
-                            step=50.0, key=f"lvl{k}")
-        beam_levels.append(z)
-        prev = z
+        c1, c2, c3 = st.columns([1, 1.4, 1])
+        gap = c1.number_input(f"L{k + 1} gap [mm]", 300.0, 4000.0, 2000.0,
+                              50.0, key=f"gap{k}")
+        sec = c2.selectbox(f"L{k + 1} beam", beam_names, key=f"sec{k}")
+        load = c3.number_input(f"L{k + 1} load [kN]", 0.0, 100.0, 20.0,
+                               1.0, key=f"load{k}")
+        level_specs.append(LevelSpec(gap=gap, beam_section=sec,
+                                     pallet_load=load * 1e3))
+        elev += gap
+    st.caption(f"Top beam level at {elev:.0f} mm")
     frame_h = st.number_input("Frame height [mm] (>= top level)",
-                              min_value=beam_levels[-1],
-                              value=beam_levels[-1], step=50.0)
+                              min_value=elev, value=elev + 500.0, step=50.0)
 
     st.subheader("Cross-aisle bracing")
     btype = st.radio("Type", ["D (zigzag)", "X (crossed)"], horizontal=True)
@@ -136,10 +140,11 @@ with st.sidebar:
     n_bolts = st.number_input("Bolts per brace end", 1, 4, 1)
     fck = st.number_input("Floor concrete f_ck [MPa]", 15.0, 60.0, 25.0, 5.0)
     plate_fy = st.number_input("Base plate fy [MPa]", 200.0, 460.0, 250.0, 5.0)
-    with st.expander("Actual base plate (blank = report minimum only)"):
-        pb = st.number_input("Plate width X [mm] (0 = none)", 0.0, 500.0, 0.0)
-        pd_ = st.number_input("Plate depth Y [mm] (0 = none)", 0.0, 500.0, 0.0)
-        pt = st.number_input("Plate thickness [mm] (0 = none)", 0.0, 40.0, 0.0)
+    with st.expander("Base plate (0 = standard footplate for the upright: "
+                     "90 -> 100x145x4, 120 -> 100x176x4)"):
+        pb = st.number_input("Plate width X [mm] (0 = standard)", 0.0, 500.0, 0.0)
+        pd_ = st.number_input("Plate depth Y [mm] (0 = standard)", 0.0, 500.0, 0.0)
+        pt = st.number_input("Plate thickness [mm] (0 = standard)", 0.0, 40.0, 0.0)
 
     splice_auto = frame_h > 11000.0
     with st.expander(f"Upright splice "
@@ -168,8 +173,6 @@ with st.sidebar:
                                0.0, 10.0, 0.0, disabled=not sp_on)
 
     st.header("Loads")
-    pallet = st.number_input("Pallet load per bay per level [kN]",
-                             1.0, 100.0, 20.0)
     dead_w = st.number_input("Beam dead load [N/mm]", 0.0, 1.0, 0.05)
     place = st.number_input("Placement load [kN]", 0.0, 5.0, 0.5)
 
@@ -185,7 +188,7 @@ cfg = RackConfig(
     module="back-to-back" if module.startswith("Back") else "single",
     b2b_gap=b2b_gap,
     n_bays=int(n_bays), bay_width=bay_width, depth=depth,
-    beam_levels=beam_levels, frame_height=frame_h,
+    levels=level_specs, frame_height=frame_h,
     bracing_type="X" if btype.startswith("X") else "D",
     bracing_type_zone1=(None if zone1 == "same"
                         else ("X" if zone1.startswith("X") else "D")),
@@ -197,7 +200,7 @@ cfg = RackConfig(
     splice_e1=sp_e1, splice_e2=sp_e2, splice_p1=sp_p1, splice_p2=sp_p2,
     splice_t=sp_t or None,
     library=lib, master=master,
-    upright_section=upright_sec, beam_section=beam_sec,
+    upright_section=upright_sec,
     brace_section=brace_sec, steel_fy=fy,
     connector_stiffness=kc * 1e6, connector_m_rd=mrd * 1e6,
     connector_looseness=phi_l / 1000.0,
@@ -207,7 +210,7 @@ cfg = RackConfig(
     bolts_per_connection=int(n_bolts),
     concrete_fck=fck, plate_fy=plate_fy,
     plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
-    pallet_load_per_level=pallet * 1e3, dead_load_beam=dead_w,
+    dead_load_beam=dead_w,
     placement_load=place * 1e3,
     gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
 )

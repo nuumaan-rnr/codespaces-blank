@@ -48,6 +48,37 @@ from .model import (BasePlate, Combination, Hinge, Imperfection, LoadCase,
 
 _TOL = 1.0     # mm: merge coincident elevations
 
+# standard footplates per upright depth: depth -> (plate X, plate Y) [mm]
+STANDARD_FOOTPLATES = {90.0: (100.0, 145.0), 120.0: (100.0, 176.0)}
+STANDARD_FOOTPLATE_T = 4.0
+
+
+def standard_footplate(depth_h: Optional[float]):
+    """(b, d, t) of the standard footplate for an upright depth, or None."""
+    if depth_h is None:
+        return None
+    for ref, (b, d) in STANDARD_FOOTPLATES.items():
+        if abs(depth_h - ref) <= 5.0:
+            return b, d, STANDARD_FOOTPLATE_T
+    return None
+
+
+@dataclass
+class LevelSpec:
+    """One beam level: its own beam gap, beam section and pallet load.
+
+    gap          : vertical distance from the level below (floor for the
+                   first level) [mm]
+    beam_section : section name from the master (default: the global
+                   beam_section)
+    pallet_load  : N per bay at this level PER MODULE (default: the global
+                   pallet_load_per_level)
+    """
+
+    gap: float
+    beam_section: Optional[str] = None
+    pallet_load: Optional[float] = None
+
 
 @dataclass
 class RackConfig:
@@ -60,7 +91,16 @@ class RackConfig:
     b2b_gap: float = 250.0             # mm gap between back-to-back racks
     beam_levels: List[float] = field(
         default_factory=lambda: [2000.0, 4000.0, 6000.0])   # elevations [mm]
+    # per-level definition (preferred): beam gap + beam section + load for
+    # EVERY level individually; overrides beam_levels /
+    # pallet_load_per_level / beam_section for the levels
+    levels: Optional[List[LevelSpec]] = None
     frame_height: Optional[float] = None     # default: top beam level
+    # first diagonal connects to the 'outer' (aisle-side) or 'inner'
+    # upright of each frame, just above the bottom horizontal; both frames
+    # of a back-to-back module are mirrored so the chosen side is the
+    # outside on each
+    bracing_first_side: str = "outer"
     # cross-aisle frame bracing (see module docstring / drawing)
     bracing_type: str = "D"            # 'D' zigzag | 'X' crossed
     bracing_start: float = 150.0       # first horizontal above floor [mm]
@@ -151,10 +191,29 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m = RackModel(name=cfg.name)
     m.materials["steel"] = Steel("steel", fy=cfg.steel_fy)
 
+    # ---- per-level specification (gap + section + load each) ---------------
+    # specs: (elevation, beam section name, pallet load per bay per module)
+    if cfg.levels:
+        specs: List[Tuple[float, str, float]] = []
+        z = 0.0
+        for ls in cfg.levels:
+            z += ls.gap
+            specs.append((z, ls.beam_section or cfg.beam_section,
+                          ls.pallet_load if ls.pallet_load is not None
+                          else cfg.pallet_load_per_level))
+    else:
+        specs = [(z, cfg.beam_section, cfg.pallet_load_per_level)
+                 for z in sorted(cfg.beam_levels)]
+    if not specs:
+        raise ValueError("define at least one beam level "
+                         "(RackConfig.levels or beam_levels)")
+
     up = lib.get(_pick(lib, cfg.upright_section, "upright"))
-    bm = lib.get(_pick(lib, cfg.beam_section, "beam"))
     br = lib.get(_pick(lib, cfg.brace_section, "bracing"))
-    for sec in (up, bm, br):
+    beam_secs = {name: lib.get(_pick(lib, name, "beam"))
+                 for name in {s for _, s, _ in specs}}
+    specs = [(z, _pick(lib, s, "beam"), w) for z, s, w in specs]
+    for sec in (up, br, *beam_secs.values()):
         fy = cfg.master.fy.get(sec.name) if cfg.master else None
         if fy:
             mat_name = f"steel_fy{fy:.0f}"
@@ -165,27 +224,31 @@ def build_rack(cfg: RackConfig) -> RackModel:
         m.sections[sec.name] = sec
 
     # ---- upright lines across the CA direction -----------------------------
-    # the rear module's bracing is MIRRORED relative to the front frame
-    # (accidental-load path; modelling both the same overstates utilization)
+    # the two frames of a back-to-back module are MIRRORED: on each frame
+    # the first diagonal connects to the OUTER (aisle-side) upright just
+    # above the bottom horizontal (cfg.bracing_first_side flips this)
     if cfg.module == "back-to-back":
         y_of_side = {0: 0.0, 1: cfg.depth,
                      2: cfg.depth + cfg.b2b_gap,
                      3: 2.0 * cfg.depth + cfg.b2b_gap}
-        rack_pairs: List[Tuple[int, int, bool]] = [(0, 1, False),
-                                                   (2, 3, True)]
+        # (side a, side b, outer side) per frame
+        rack_pairs: List[Tuple[int, int, int]] = [(0, 1, 0), (2, 3, 3)]
         spacer_pair: Optional[Tuple[int, int]] = (1, 2)
     elif cfg.module == "single":
         y_of_side = {0: 0.0, 1: cfg.depth}
-        rack_pairs = [(0, 1, False)]
+        rack_pairs = [(0, 1, 0)]
         spacer_pair = None
     else:
         raise ValueError("RackConfig.module must be 'single' or 'back-to-back'")
     sides = sorted(y_of_side)
+    if cfg.bracing_first_side not in ("outer", "inner"):
+        raise ValueError("bracing_first_side must be 'outer' or 'inner'")
+    if cfg.bracing_first_side == "inner":
+        rack_pairs = [(sa, sb, sb if outer == sa else sa)
+                      for sa, sb, outer in rack_pairs]
 
     # ---- elevations --------------------------------------------------------
-    beam_levels = sorted(cfg.beam_levels)
-    if not beam_levels:
-        raise ValueError("RackConfig.beam_levels must contain at least one level")
+    beam_levels = [z for z, _, _ in specs]
     H = cfg.frame_height if cfg.frame_height else beam_levels[-1]
     if H + _TOL < beam_levels[-1]:
         raise ValueError("frame_height is below the top beam level")
@@ -210,11 +273,11 @@ def build_rack(cfg: RackConfig) -> RackModel:
         raise ValueError(f"elevation {z} not found")
 
     n_lines = cfg.n_bays + 1
-    if len(zs) > 99:
+    if len(zs) > 9999:
         raise ValueError("too many distinct elevations for the node id scheme")
 
     def nid(i: int, s: int, j: int) -> int:
-        return i * 1000 + s * 100 + j
+        return i * 100000 + s * 10000 + j
 
     for i in range(n_lines):
         for s in sides:
@@ -235,14 +298,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
             upright_members[(i, s)] = ids
 
     # ---- pallet beams (per upright line) with semi-rigid connectors --------
+    # each level uses ITS OWN beam section and pallet load (cfg.levels)
     beam_pairs: Dict[float, List[int]] = {}
-    for z in beam_levels:
+    for z, sec_name, _ in specs:
         j = j_of(z)
         beam_pairs[z] = []
         for i in range(cfg.n_bays):
             for s in sides:
                 m.add_member(
-                    mid, nid(i, s, j), nid(i + 1, s, j), bm.name,
+                    mid, nid(i, s, j), nid(i + 1, s, j), sec_name,
                     member_set="pallet beams", mesh=cfg.mesh_beam,
                     hinge_i=Hinge(rz=cfg.connector_stiffness,
                                   m_rd_z=cfg.connector_m_rd,
@@ -260,7 +324,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         (i, s): [0.0, H] for i in range(n_lines) for s in sides}
     if brace_zs:
         for i in range(n_lines):
-            for sa, sb, mirror in rack_pairs:
+            for sa, sb, outer in rack_pairs:
                 j0, j1 = j_of(brace_zs[0]), j_of(brace_zs[-1])
                 m.add_member(mid, nid(i, sa, j0), nid(i, sb, j0), br.name,
                              mtype="truss", member_set="bracing")
@@ -292,8 +356,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
                             brace_points[(i, s)] += [brace_zs[k],
                                                      brace_zs[k + 1]]
                     else:                                  # 'D' zigzag
-                        even = (k % 2 == 0) != mirror      # rear: mirrored
-                        lo, hi = (sa, sb) if even else (sb, sa)
+                        inner = sb if outer == sa else sa
+                        lo, hi = (outer, inner) if k % 2 == 0 \
+                            else (inner, outer)
                         m.add_member(mid, nid(i, lo, ja), nid(i, hi, jb),
                                      br.name, mtype="truss",
                                      member_set="bracing")
@@ -348,12 +413,19 @@ def build_rack(cfg: RackConfig) -> RackModel:
         if mm.member_set in ("bracing", "row spacers"):
             mm.area_factor = cfg.brace_area_factor
 
-    # bracing bolt-connection and footplate checks
+    # bracing bolt-connection and footplate checks; when no plate is given
+    # the standard footplate for the upright depth is used (90 -> 100x145,
+    # 120 -> 100x176, t = 4 mm)
     m.checks.bolt_d = cfg.bolt_d
     m.checks.bolt_grade = cfg.bolt_grade
     m.checks.bolts_per_connection = cfg.bolts_per_connection
+    pb, pd_, pt = cfg.plate_b, cfg.plate_d, cfg.plate_t
+    if pb is None and pd_ is None and pt is None:
+        std = standard_footplate(up.depth_h)
+        if std:
+            pb, pd_, pt = std
     m.base_plate = BasePlate(f_ck=cfg.concrete_fck, fy_plate=cfg.plate_fy,
-                             b=cfg.plate_b, d=cfg.plate_d, t=cfg.plate_t)
+                             b=pb, d=pd_, t=pt)
 
     # upright splice connection check
     if splice_z:
@@ -371,8 +443,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
             raise ValueError("base_stiffness='auto' needs an .xlsx master "
                              "with a BASE_STIFFNESS sheet")
         n_modules = len(rack_pairs)
-        N_est = (cfg.gamma_Q * cfg.pallet_load_per_level * cfg.n_bays
-                 * len(beam_levels) * n_modules) / n_uprights
+        total_pallets = sum(load for _, _, load in specs)
+        N_est = (cfg.gamma_Q * total_pallets * cfg.n_bays
+                 * n_modules) / n_uprights
         k_base, _ = cfg.master.base_stiffness(up.name, N_est)
     else:
         k_base = float(cfg.base_stiffness)
@@ -390,9 +463,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.load_cases["dead"] = dead
 
     pallets = LoadCase("pallets", "variable")
-    w_line = (cfg.pallet_load_per_level / 2.0) / cfg.bay_width  # per beam line
-    for ids in beam_pairs.values():
-        for b in ids:
+    for z, _, load in specs:
+        w_line = (load / 2.0) / cfg.bay_width      # UDL per beam line
+        for b in beam_pairs[z]:
             pallets.member_loads.append(MemberLoad(b, qz=-w_line))
     m.load_cases["pallets"] = pallets
 
