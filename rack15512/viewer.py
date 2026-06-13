@@ -211,3 +211,118 @@ def plot_utilization(model: RackModel, checks: List[CheckResult],
         fig.savefig(path, dpi=140)
         plt.close(fig)
     return fig
+
+
+# --------------------------------------------------------- dimensioned views
+def _dim_line(ax, p0, p1, text, offset=0.0, axis="x"):
+    """Draw a double-headed dimension line p0->p1 with a label."""
+    import numpy as np
+    x0, y0 = p0
+    x1, y1 = p1
+    ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
+                arrowprops=dict(arrowstyle="<->", color="#444", lw=0.8))
+    ax.text((x0 + x1) / 2, (y0 + y1) / 2, text, fontsize=7, color="#444",
+            ha="center", va="center",
+            bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none",
+                      alpha=0.8))
+
+
+def _projection(model, a, b):
+    """Members projected onto two global axes a,b in {'x','y','z'}."""
+    idx = {"x": 0, "y": 1, "z": 2}
+    ai, bi = idx[a], idx[b]
+    out = []
+    colors = _member_color(model)
+    for m in model.members.values():
+        ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
+        pi = (ni.x, ni.y, ni.z)
+        pj = (nj.x, nj.y, nj.z)
+        out.append(((pi[ai], pi[bi]), (pj[ai], pj[bi]),
+                    colors[m.member_set], m.member_set, m.mtype))
+    return out
+
+
+def _elevation(model, a, b, title, alabel, blabel, dims_a, dims_b,
+               path=None):
+    fig, ax = plt.subplots(figsize=(9, 6))
+    seen = set()
+    for (p0, p1, col, mset, mtype) in _projection(model, a, b):
+        lbl = mset if mset not in seen else None
+        seen.add(mset)
+        ls = "--" if mtype == "truss" else "-"
+        ax.plot([p0[0], p1[0]], [p0[1], p1[1]], ls, color=col, lw=1.3,
+                label=lbl)
+    idx = {"x": 0, "y": 1, "z": 2}
+    avals = sorted({(n.x, n.y, n.z)[idx[a]] for n in model.nodes.values()})
+    bvals = sorted({(n.x, n.y, n.z)[idx[b]] for n in model.nodes.values()})
+    a0, a1 = avals[0], avals[-1]
+    b0, b1 = bvals[0], bvals[-1]
+    span_a = (a1 - a0) or 1.0
+    span_b = (b1 - b0) or 1.0
+    # dimension chain along a (below) and b (left)
+    off_b = b0 - 0.08 * span_b
+    if dims_a:
+        for x0, x1, txt in dims_a:
+            _dim_line(ax, (x0, off_b), (x1, off_b), txt)
+    off_a = a0 - 0.10 * span_a
+    if dims_b:
+        for y0, y1, txt in dims_b:
+            _dim_line(ax, (off_a, y0), (off_a, y1), txt)
+    ax.set_title(title)
+    ax.set_xlabel(alabel)
+    ax.set_ylabel(blabel)
+    ax.set_aspect("equal")
+    ax.legend(loc="upper right", fontsize=7)
+    ax.margins(0.12)
+    fig.tight_layout()
+    if path:
+        fig.savefig(path, dpi=140)
+        plt.close(fig)
+    return fig
+
+
+def _consecutive_dims(vals):
+    vals = sorted(set(round(v, 1) for v in vals))
+    out = [(vals[i], vals[i + 1], f"{vals[i+1]-vals[i]:.0f}")
+           for i in range(len(vals) - 1)]
+    if len(vals) > 2:
+        out.append((vals[0], vals[-1], f"total {vals[-1]-vals[0]:.0f}"))
+    return out
+
+
+def _level_dims(model):
+    """Curated vertical dimension chain: floor, each beam level, frame top
+    (omits the many intermediate bracing nodes)."""
+    beam_z = {model.nodes[m.node_i].z for m in model.members.values()
+              if m.member_set == "pallet beams"}
+    zs = [n.z for n in model.nodes.values()]
+    levels = sorted({min(zs), max(zs)} | beam_z)
+    return _consecutive_dims(levels)
+
+
+def plot_front_elevation(model: RackModel, path: Optional[str] = None):
+    """Down-aisle (X-Z) front elevation with bay-width and level dimensions."""
+    xs = [n.x for n in model.nodes.values()]
+    return _elevation(model, "x", "z",
+                      "FRONT elevation (down-aisle, X-Z) [mm]",
+                      "X down-aisle [mm]", "Z [mm]",
+                      _consecutive_dims(xs), _level_dims(model), path)
+
+
+def plot_side_elevation(model: RackModel, path: Optional[str] = None):
+    """Cross-aisle (Y-Z) side / frame elevation with depth and level dims."""
+    ys = [n.y for n in model.nodes.values()]
+    return _elevation(model, "y", "z",
+                      "SIDE elevation (cross-aisle, Y-Z) [mm]",
+                      "Y cross-aisle [mm]", "Z [mm]",
+                      _consecutive_dims(ys), _level_dims(model), path)
+
+
+def plot_plan(model: RackModel, path: Optional[str] = None):
+    """Top (X-Y) plan view with length and depth dimensions."""
+    xs = [n.x for n in model.nodes.values()]
+    ys = [n.y for n in model.nodes.values()]
+    return _elevation(model, "x", "y",
+                      "PLAN (top, X-Y) [mm]",
+                      "X down-aisle [mm]", "Y cross-aisle [mm]",
+                      _consecutive_dims(xs), _consecutive_dims(ys), path)

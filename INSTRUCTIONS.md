@@ -75,13 +75,25 @@ with the saved **projects** listed on the right. From there:
   max member-stress utilisation).
 
 After a run, the configuration's **Results** tab gives an **interactive 3D
-viewer** (Plotly): hover a member for its forces (N, My, Mz, V) or a ◆
-support for its reaction components (the irregular node numbers are shown
-on hover), a **deformation-scale slider**, and an **envelope / case
-selector** — pick the **ULS** or **SLS** envelope (the worst over all
-combinations of that kind), a per-combination envelope, or an individual
-case. Moments are drawn on the tension side and the deformed shape shows
-the true member curvature.
+viewer** (Plotly): the model is **coloured by EN 15512 utilisation** (green
+→ red, with a colour-bar legend); hover a member for its utilisation and
+forces (N, My, Mz, V) or a ◆ support for its reaction components (the
+irregular node numbers are shown on hover), a **deformation-scale slider**,
+and an **envelope / case selector** — pick the **ULS** or **SLS** envelope
+(the worst over all combinations of that kind), a per-combination envelope,
+or an individual case. Moments are drawn on the tension side and the
+deformed shape shows the true member curvature.
+
+The **Report** tab offers a **Design Validation Report** download — a
+self-contained HTML engineering report (open in any browser, print to PDF)
+containing: the model summary and section properties; the **supports and
+stiffness** documentation (base floor-connection rotational springs per
+support and the beam-to-upright connector stiffness per level — confirming
+both are in the analysis model per EN 15512 §8.4); the load cases and
+combinations with factors; **front / side / plan / 3D model views with
+dimensions**; the analysis-case convergence table; and every design check
+grouped by type with its **EN 15512 / EN 1993 clause**, verification basis
+and a per-group **PASS / FAIL** statement.
 - **Section masters** page — import a master once, then edit or delete its
   sections.
 

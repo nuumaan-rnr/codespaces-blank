@@ -53,6 +53,13 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     with open(os.path.join(cdir, "report.md"), "w") as f:
         f.write(_project_header(project, system, conf) +
                 write_report(model, cases, checks))
+    # full Design Validation Report (self-contained HTML with model views)
+    from .report_html import design_validation_report
+    meta = {"project": project.name, "system": system.name,
+            "configuration": conf.name, "client": project.client,
+            "location": project.location, "engineer": project.engineer}
+    with open(os.path.join(cdir, "design_validation_report.html"), "w") as f:
+        f.write(design_validation_report(model, cases, checks, meta))
     # persist the full results so the interactive viewer / envelopes can be
     # shown later without re-running the analysis
     import pickle

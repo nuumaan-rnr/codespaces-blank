@@ -495,12 +495,35 @@ def render_view_config():
             st.rerun()
 
     with t_report:
+        hp = os.path.join(cdir, "design_validation_report.html")
+        if not os.path.exists(hp):
+            res = _load_results(cdir)
+            if res:
+                from rack15512.report_html import design_validation_report
+                meta = {"project": proj.name, "system": sysm.name,
+                        "configuration": conf.name, "client": proj.client,
+                        "location": proj.location, "engineer": proj.engineer}
+                html = design_validation_report(model, res["cases"],
+                                                res["checks"], meta)
+                with open(hp, "w", encoding="utf-8") as f:
+                    f.write(html)
+        if os.path.exists(hp):
+            html = open(hp, encoding="utf-8").read()
+            st.download_button(
+                "📄 Download Design Validation Report (HTML — print to PDF)",
+                html, f"{conf.id}_design_validation_report.html",
+                mime="text/html", type="primary", use_container_width=True)
+            st.caption("Full EN 15512 engineering report: model summary, "
+                       "supports & stiffness, load combinations, front / "
+                       "side / plan / 3D views with dimensions, and every "
+                       "check with its EN clause and pass/fail.")
         rp = os.path.join(cdir, "report.md")
         if os.path.exists(rp):
             txt = open(rp).read()
-            st.download_button("Download report.md", txt, "report.md")
-            st.markdown(txt)
-        else:
+            st.download_button("Download report.md (text)", txt, "report.md")
+            with st.expander("Preview check report"):
+                st.markdown(txt)
+        if not os.path.exists(hp) and not os.path.exists(rp):
             st.info("Run the configuration to generate the report.")
 
     with t_params:
