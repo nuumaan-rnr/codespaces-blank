@@ -14,24 +14,24 @@ import streamlit as st
 
 from . import branding as B
 
-# ---- palette ---------------------------------------------------------------
+# ---- palette (Vercel-clean: crisp surfaces, thin borders) ------------------
 _LIGHT = {
-    "bg": "#EEF3F4", "bg2": "#E2EBEC",
-    "surface": "#FFFFFF", "surface2": "#F4F8F8",
-    "text": "#16282C", "muted": "#5E7176", "border": "#DCE6E7",
+    "bg": "#FFFFFF", "bg2": "#FAFAFA",
+    "surface": "#FFFFFF", "surface2": "#FAFAFA",
+    "text": "#111111", "muted": "#666666", "border": "#EAEAEA",
     "teal": "#0C8490", "teal2": "#12A6B4", "grey": "#545454",
-    "shadow": "0 6px 24px rgba(12,132,144,.10)",
-    "shadow_hi": "0 12px 34px rgba(12,132,144,.18)",
-    "sidebar": "#0E2A2E", "sidebar_text": "#E7F2F2",
+    "shadow": "0 1px 2px rgba(0,0,0,.05)",
+    "shadow_hi": "0 6px 20px rgba(0,0,0,.10)",
+    "sidebar": "#0B0B0C", "sidebar_text": "#EDEDED",
 }
 _DARK = {
-    "bg": "#0C1315", "bg2": "#0A1012",
-    "surface": "#162024", "surface2": "#1C282C",
-    "text": "#E8EFF0", "muted": "#9AB0B4", "border": "#26343A",
-    "teal": "#21B3C2", "teal2": "#37C7D6", "grey": "#C7D2D4",
-    "shadow": "0 8px 28px rgba(0,0,0,.45)",
-    "shadow_hi": "0 14px 40px rgba(0,0,0,.55)",
-    "sidebar": "#0A1416", "sidebar_text": "#DCEAEC",
+    "bg": "#000000", "bg2": "#0A0A0A",
+    "surface": "#0A0A0A", "surface2": "#111111",
+    "text": "#EDEDED", "muted": "#8A8A8A", "border": "#262626",
+    "teal": "#22B8C6", "teal2": "#3AD0DE", "grey": "#C7D2D4",
+    "shadow": "0 1px 2px rgba(0,0,0,.6)",
+    "shadow_hi": "0 8px 28px rgba(0,0,0,.6)",
+    "sidebar": "#000000", "sidebar_text": "#EDEDED",
 }
 
 
@@ -55,12 +55,9 @@ html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"] {{
   font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
 }}
 .stApp, [data-testid="stAppViewContainer"] {{
-  background:
-    radial-gradient(1200px 600px at 100% -10%, {v['teal']}14, transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, {v['teal2']}10, transparent 55%),
-    var(--bg);
-  color:var(--text);
+  background:var(--bg); color:var(--text);
 }}
+[data-testid="stHeader"] {{ background:transparent; }}
 [data-testid="stMain"] .block-container {{
   padding-top:2.2rem; padding-bottom:4rem; max-width:1280px;
   animation:fade .5s ease;
@@ -98,23 +95,22 @@ hr {{ border-color:var(--border); }}
   transform:translateY(-1px); box-shadow:var(--shadow);
 }}
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {{
-  background:linear-gradient(135deg,{v['teal']},{v['teal2']});
-  color:#fff; border:none; box-shadow:0 6px 18px {v['teal']}55;
+  background:{v['teal']}; color:#fff; border:1px solid {v['teal']};
+  box-shadow:none;
 }}
 .stButton>button[kind="primary"]:hover {{
-  filter:brightness(1.06); transform:translateY(-2px);
-  box-shadow:0 10px 26px {v['teal']}66; color:#fff;
+  background:{v['teal2']}; border-color:{v['teal2']};
+  transform:translateY(-1px); color:#fff;
 }}
 
 /* cards = bordered containers */
 [data-testid="stVerticalBlockBorderWrapper"] {{
   background:var(--surface); border:1px solid var(--border)!important;
-  border-radius:18px; box-shadow:var(--shadow); padding:4px;
-  transition:.2s ease;
+  border-radius:12px; box-shadow:var(--shadow); padding:6px;
+  transition:.16s ease;
 }}
 [data-testid="stVerticalBlockBorderWrapper"]:hover {{
-  box-shadow:var(--shadow-hi); transform:translateY(-2px);
-  border-color:{v['teal']}66!important;
+  box-shadow:var(--shadow-hi); border-color:{v['muted']}66!important;
 }}
 
 /* inputs */
@@ -150,20 +146,28 @@ textarea {{
   border:1px solid var(--border); border-radius:14px; background:var(--surface);
 }}
 
-/* premium building blocks */
+/* premium building blocks - clean Vercel panel hero */
 .rnr-hero {{
-  position:relative; border-radius:22px; padding:26px 30px; margin-bottom:22px;
-  background:linear-gradient(120deg,{v['teal']},{v['teal2']} 60%, {v['teal']});
-  color:#fff; box-shadow:0 14px 40px {v['teal']}44; overflow:hidden;
+  position:relative; border-radius:14px; padding:30px 32px; margin-bottom:24px;
+  background:var(--surface); border:1px solid var(--border);
+  box-shadow:var(--shadow); overflow:hidden;
 }}
 .rnr-hero::after {{
-  content:""; position:absolute; right:-40px; top:-60px; width:240px;
-  height:240px; border-radius:50%; background:rgba(255,255,255,.10);
+  content:""; position:absolute; right:-80px; top:-120px; width:320px;
+  height:320px; border-radius:50%;
+  background:radial-gradient({v['teal']}1f, transparent 70%);
 }}
-.rnr-hero .eyebrow {{ font-size:.74rem; letter-spacing:.18em;
-  text-transform:uppercase; opacity:.85; font-weight:700; }}
-.rnr-hero h1 {{ color:#fff; margin:.1rem 0 .2rem; font-size:2rem; }}
-.rnr-hero .sub {{ opacity:.92; font-size:.98rem; }}
+.rnr-hero .eyebrow {{ font-size:.72rem; letter-spacing:.16em;
+  text-transform:uppercase; color:{v['teal']}; font-weight:700; }}
+.rnr-hero h1 {{ color:var(--text); margin:.25rem 0 .3rem; font-size:2.1rem;
+  font-weight:800; }}
+.rnr-hero .sub {{ color:var(--muted); font-size:1rem; max-width:74ch; }}
+.rnr-section {{ display:flex; align-items:center; gap:10px; margin:2px 0 10px;
+  font-weight:700; font-size:1.02rem; color:var(--text); }}
+.rnr-section .ic {{ width:30px; height:30px; border-radius:9px;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:{v['teal']}14; color:{v['teal']}; font-size:1rem;
+  border:1px solid {v['teal']}33; }}
 .rnr-pill {{ display:inline-flex; align-items:center; gap:6px;
   padding:4px 12px; border-radius:999px; font-weight:700; font-size:.8rem; }}
 .rnr-pill.pass {{ background:{v['teal']}1f; color:{v['teal']};
@@ -202,6 +206,12 @@ def pill(verdict: str) -> str:
 def tile(label: str, value: str) -> str:
     return (f'<div class="rnr-tile"><div class="k">{_html.escape(label)}</div>'
             f'<div class="v">{_html.escape(str(value))}</div></div>')
+
+
+def section(icon: str, title: str) -> None:
+    """An icon + title header for a form section card."""
+    st.markdown(f'<div class="rnr-section"><span class="ic">{icon}</span>'
+                f'{_html.escape(title)}</div>', unsafe_allow_html=True)
 
 
 def theme_toggle() -> None:

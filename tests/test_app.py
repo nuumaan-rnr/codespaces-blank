@@ -81,9 +81,10 @@ def test_view_saved_config_shows_results(tmp_path, monkeypatch):
            config_id=conf.id)
     at.run()
     assert not at.exception
-    metrics = {m.label: m.value for m in at.metric}
-    assert metrics.get("Verdict") == "PASS"
-    assert metrics.get("Governing") == "STRESS"
+    # results shown as branded tiles + verdict pill
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "rnr-pill" in md and "PASS" in md
+    assert "Governing" in md and "STRESS" in md
 
 
 if __name__ == "__main__":

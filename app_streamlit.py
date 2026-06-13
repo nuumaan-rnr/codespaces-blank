@@ -148,71 +148,75 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     br_names = lib.names("bracing") or lib.names()
     beam_names = lib.names("beam") or lib.names()
 
-    st.markdown("##### Geometry")
-    c = st.columns(4)
-    name = c[0].text_input("Configuration name", g("name", "Config 1"))
-    module = c[1].radio("Module", ["single", "back-to-back"],
-                        index=0 if g("module", "single") == "single" else 1)
-    n_bays = c[2].number_input("Bays", 1, 20, int(g("n_bays", 3)))
-    bay_width = c[3].number_input("Beam span [mm]", 1000.0, 4500.0,
-                                  float(g("bay_width", 2700.0)), 50.0)
-    c = st.columns(4)
-    depth = c[0].number_input("Frame depth [mm]", 600.0, 2000.0,
-                              float(g("depth", 1000.0)), 50.0)
-    b2b_gap = c[1].number_input("Back-to-back gap [mm]", 50.0, 600.0,
-                                float(g("b2b_gap", 250.0)), 10.0,
-                                disabled=module == "single")
-    up_sec = c[2].selectbox("Upright", up_names,
-                            index=_idx(up_names, g("upright_section", None)))
-    br_sec = c[3].selectbox("Bracing", br_names,
-                            index=_idx(br_names, g("brace_section", None)))
+    with st.container(border=True):
+        ui.section("📐", "Geometry")
+        c = st.columns(4)
+        name = c[0].text_input("Configuration name", g("name", "Config 1"))
+        module = c[1].radio("Module", ["single", "back-to-back"],
+                            index=0 if g("module", "single") == "single" else 1)
+        n_bays = c[2].number_input("Bays", 1, 20, int(g("n_bays", 3)))
+        bay_width = c[3].number_input("Beam span [mm]", 1000.0, 4500.0,
+                                      float(g("bay_width", 2700.0)), 50.0)
+        c = st.columns(4)
+        depth = c[0].number_input("Frame depth [mm]", 600.0, 2000.0,
+                                  float(g("depth", 1000.0)), 50.0)
+        b2b_gap = c[1].number_input("Back-to-back gap [mm]", 50.0, 600.0,
+                                    float(g("b2b_gap", 250.0)), 10.0,
+                                    disabled=module == "single")
+        up_sec = c[2].selectbox("Upright", up_names,
+                                index=_idx(up_names, g("upright_section", None)))
+        br_sec = c[3].selectbox("Bracing", br_names,
+                                index=_idx(br_names, g("brace_section", None)))
 
-    st.markdown("##### Beam levels (gap · section · load, per level)")
-    levels0 = g("levels", None)
-    n_levels = st.number_input("Number of beam levels", 1, 20,
-                               len(levels0) if levels0 else 3)
-    levels, elev = [], 0.0
-    for k in range(int(n_levels)):
-        l0 = levels0[k] if levels0 and k < len(levels0) else None
-        cc = st.columns([1, 1.6, 1])
-        gap = cc[0].number_input(f"L{k+1} gap [mm]", 300.0, 4000.0,
-                                 float(l0.gap if l0 else 1500.0), 50.0,
-                                 key=f"g{k}")
-        bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
-                             index=_idx(beam_names,
-                                        l0.beam_section if l0 else None),
-                             key=f"b{k}")
-        ld = cc[2].number_input(f"L{k+1} load [kN]", 0.0, 100.0,
-                                float((l0.pallet_load if l0 else 20000.0)/1e3),
-                                1.0, key=f"l{k}")
-        levels.append(LevelSpec(gap=gap, beam_section=bs, pallet_load=ld*1e3))
-        elev += gap
-    frame_h = st.number_input("Frame height [mm] (>= top level)",
-                              min_value=elev,
-                              value=float(g("frame_height", None) or elev+500),
-                              step=50.0)
+    with st.container(border=True):
+        ui.section("🪜", "Beam levels  ·  gap · section · load, per level")
+        levels0 = g("levels", None)
+        n_levels = st.number_input("Number of beam levels", 1, 20,
+                                   len(levels0) if levels0 else 3)
+        levels, elev = [], 0.0
+        for k in range(int(n_levels)):
+            l0 = levels0[k] if levels0 and k < len(levels0) else None
+            cc = st.columns([1, 1.6, 1])
+            gap = cc[0].number_input(f"L{k+1} gap [mm]", 300.0, 4000.0,
+                                     float(l0.gap if l0 else 1500.0), 50.0,
+                                     key=f"g{k}")
+            bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
+                                 index=_idx(beam_names,
+                                            l0.beam_section if l0 else None),
+                                 key=f"b{k}")
+            ld = cc[2].number_input(
+                f"L{k+1} load [kN]", 0.0, 100.0,
+                float((l0.pallet_load if l0 else 20000.0) / 1e3), 1.0,
+                key=f"l{k}")
+            levels.append(LevelSpec(gap=gap, beam_section=bs,
+                                    pallet_load=ld * 1e3))
+            elev += gap
+        frame_h = st.number_input(
+            "Frame height [mm] (>= top level)", min_value=elev,
+            value=float(g("frame_height", None) or elev + 500), step=50.0)
 
-    st.markdown("##### Cross-aisle bracing")
-    c = st.columns(4)
-    btype = c[0].radio("Pattern", ["D", "X"],
-                       index=0 if g("bracing_type", "D") == "D" else 1,
-                       help="D = zigzag, X = crossed pairs")
-    first_side = c[1].radio(
-        "First diagonal connects to", ["outer", "inner"],
-        index=0 if g("bracing_first_side", "outer") == "outer" else 1,
-        help="The first diagonal above the bottom horizontal connects to "
-             "the OUTER (aisle-side) or INNER upright of each frame; both "
-             "frames of a back-to-back module are mirrored accordingly.")
-    bstart = c[2].number_input("First horizontal [mm]", 50.0, 1000.0,
-                               float(g("bracing_start", 150.0)), 10.0)
-    bpitch = c[3].number_input("Diagonal pitch [mm]", 200.0, 2000.0,
-                               float(g("bracing_pitch", 600.0)), 50.0)
-    z1 = g("bracing_type_zone1", None)
-    zone1 = st.selectbox("Different pattern below level 1",
-                         ["same", "X", "D"],
-                         index={None: 0, "X": 1, "D": 2}.get(z1, 0))
+    with st.container(border=True):
+        ui.section("◣", "Cross-aisle bracing")
+        c = st.columns(4)
+        btype = c[0].radio("Pattern", ["D", "X"],
+                           index=0 if g("bracing_type", "D") == "D" else 1,
+                           help="D = zigzag, X = crossed pairs")
+        first_side = c[1].radio(
+            "First diagonal connects to", ["outer", "inner"],
+            index=0 if g("bracing_first_side", "outer") == "outer" else 1,
+            help="The first diagonal above the bottom horizontal connects to "
+                 "the OUTER (aisle-side) or INNER upright of each frame; both "
+                 "frames of a back-to-back module are mirrored accordingly.")
+        bstart = c[2].number_input("First horizontal [mm]", 50.0, 1000.0,
+                                   float(g("bracing_start", 150.0)), 10.0)
+        bpitch = c[3].number_input("Diagonal pitch [mm]", 200.0, 2000.0,
+                                   float(g("bracing_pitch", 600.0)), 50.0)
+        z1 = g("bracing_type_zone1", None)
+        zone1 = st.selectbox("Different pattern below level 1",
+                             ["same", "X", "D"],
+                             index={None: 0, "X": 1, "D": 2}.get(z1, 0))
 
-    with st.expander("Connections, base & checks"):
+    with st.expander("🔩  Connections, base & checks"):
         c = st.columns(3)
         fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
                                float(g("steel_fy", 355.0)), 5.0)
@@ -250,7 +254,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         pt = c[2].number_input("Plate t [mm] (0=std)", 0.0, 40.0,
                                float(g("plate_t", None) or 0.0))
 
-    with st.expander("Loads, imperfection & factors"):
+    with st.expander("⬇  Loads, imperfection & factors"):
         c = st.columns(3)
         dead = c[0].number_input("Beam dead load [N/mm]", 0.0, 1.0,
                                  float(g("dead_load_beam", 0.05)))
@@ -495,13 +499,20 @@ def render_view_config():
         if not rs:
             st.info("This configuration has not been run yet.")
         else:
-            c = st.columns(5)
-            c[0].metric("Verdict", rs["verdict"])
             gov = rs.get("governing") or {}
-            c[1].metric("Governing", gov.get("check", "-"))
-            c[2].metric("Utilization", gov.get("utilization", "-"))
-            c[3].metric("Max stress", rs.get("max_stress", "-"))
-            c[4].metric("Cases", rs.get("n_cases", "-"))
+            c = st.columns(5)
+            c[0].markdown("<div class='rnr-tile'><div class='k'>Verdict</div>"
+                          f"<div style='margin-top:4px'>{ui.pill(rs['verdict'])}"
+                          "</div></div>", unsafe_allow_html=True)
+            c[1].markdown(ui.tile("Governing", gov.get("check", "-")),
+                          unsafe_allow_html=True)
+            c[2].markdown(ui.tile("Utilization", gov.get("utilization", "-")),
+                          unsafe_allow_html=True)
+            c[3].markdown(ui.tile("Max stress", rs.get("max_stress", "-")),
+                          unsafe_allow_html=True)
+            c[4].markdown(ui.tile("Cases", rs.get("n_cases", "-")),
+                          unsafe_allow_html=True)
+            st.write("")
             if st.button("📋 Show load cases / combinations summary"):
                 _run_summary_dialog(rs)
 
