@@ -83,5 +83,30 @@ def test_design_validation_report_contents():
     assert "Load cases and combinations" in html
 
 
+@needs_master
+def test_docx_and_pdf_reports(tmp_path):
+    docx = pytest.importorskip("docx")
+    pytest.importorskip("reportlab")
+    from rack15512.report_doc import build_report_blocks, write_reports
+    m = _built()
+    cases = run_all(m)
+    checks = run_checks(m, cases)
+    blocks = build_report_blocks(m, cases, checks,
+                                 meta={"project": "P", "engineer": "E"})
+    kinds = {b[0] for b in blocks}
+    assert {"title", "verdict", "h2", "table", "image", "result"} <= kinds
+    dp = tmp_path / "r.docx"
+    pp = tmp_path / "r.pdf"
+    write_reports(m, cases, checks, {"project": "P"},
+                  docx_path=str(dp), pdf_path=str(pp))
+    assert dp.exists() and dp.stat().st_size > 10000
+    assert pp.exists() and pp.read_bytes()[:4] == b"%PDF"
+    # DOCX is a valid zip openable by python-docx, with our headings present
+    d = docx.Document(str(dp))
+    text = "\n".join(p.text for p in d.paragraphs)
+    assert "Design Validation Report" in text
+    assert any("EN 15512 design verifications" in p.text for p in d.paragraphs)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

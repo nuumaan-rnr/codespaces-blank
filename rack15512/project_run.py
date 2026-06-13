@@ -53,13 +53,23 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     with open(os.path.join(cdir, "report.md"), "w", encoding="utf-8") as f:
         f.write(_project_header(project, system, conf) +
                 write_report(model, cases, checks))
-    # full Design Validation Report (self-contained HTML with model views)
-    from .report_html import design_validation_report
+    # Design Validation Report: self-contained HTML + editable DOCX + PDF
     meta = {"project": project.name, "system": system.name,
             "configuration": conf.name, "client": project.client,
             "location": project.location, "engineer": project.engineer}
-    with open(os.path.join(cdir, "design_validation_report.html"), "w", encoding="utf-8") as f:
+    from .report_html import design_validation_report
+    with open(os.path.join(cdir, "design_validation_report.html"), "w",
+              encoding="utf-8") as f:
         f.write(design_validation_report(model, cases, checks, meta))
+    try:
+        from .report_doc import write_reports
+        write_reports(model, cases, checks, meta,
+                      docx_path=os.path.join(cdir,
+                                             "design_validation_report.docx"),
+                      pdf_path=os.path.join(cdir,
+                                            "design_validation_report.pdf"))
+    except Exception as exc:                # optional deps (docx/reportlab)
+        print(f"DOCX/PDF report skipped: {exc}")
     # persist the full results so the interactive viewer / envelopes can be
     # shown later without re-running the analysis
     import pickle

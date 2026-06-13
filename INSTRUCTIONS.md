@@ -84,9 +84,9 @@ and an **envelope / case selector** — pick the **ULS** or **SLS** envelope
 or an individual case. Moments are drawn on the tension side and the
 deformed shape shows the true member curvature.
 
-The **Report** tab offers a **Design Validation Report** download — a
-self-contained HTML engineering report (open in any browser, print to PDF)
-containing: the model summary and section properties; the **supports and
+The **Report** tab offers the **Design Validation Report** as **PDF**,
+editable **DOCX** and self-contained **HTML** (styled like the EN 15512
+worked example), containing: the model summary and section properties; the **supports and
 stiffness** documentation (base floor-connection rotational springs per
 support and the beam-to-upright connector stiffness per level — confirming
 both are in the analysis model per EN 15512 §8.4); the load cases and

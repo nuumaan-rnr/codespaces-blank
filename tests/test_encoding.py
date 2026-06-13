@@ -12,21 +12,38 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 PKG = os.path.join(os.path.dirname(__file__), "..", "rack15512")
 APP = os.path.join(os.path.dirname(__file__), "..", "app_streamlit.py")
 
-_OPEN = re.compile(r"\bopen\s*\(")
+# builtin open( only - not preceded by '.' (method) or a word char
+_OPEN = re.compile(r"(?<![.\w])open\s*\(")
+
+
+def _balanced_args(text, start):
+    """Return the substring of the argument list for an open( at `start`."""
+    depth, i = 0, start
+    while i < len(text):
+        c = text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:i]
+        i += 1
+    return text[start:]
 
 
 def _text_opens_without_encoding(path):
-    bad = []
     with open(path, encoding="utf-8") as f:
-        for n, line in enumerate(f, 1):
-            if not _OPEN.search(line):
-                continue
-            if '"rb"' in line or '"wb"' in line or "'rb'" in line \
-                    or "'wb'" in line:
-                continue            # binary mode is fine
-            if "encoding=" in line:
-                continue            # explicit encoding present
-            bad.append((n, line.strip()))
+        text = f.read()
+    bad = []
+    for mobj in _OPEN.finditer(text):
+        paren = mobj.end() - 1            # index of '('
+        args = _balanced_args(text, paren)
+        if any(b in args for b in ('"rb"', "'rb'", '"wb"', "'wb'")):
+            continue                      # binary mode is fine
+        if "encoding=" in args:
+            continue                      # explicit encoding present
+        line = text.count("\n", 0, mobj.start()) + 1
+        bad.append((line, args.replace("\n", " ").strip()[:80]))
     return bad
 
 

@@ -495,36 +495,60 @@ def render_view_config():
             st.rerun()
 
     with t_report:
-        hp = os.path.join(cdir, "design_validation_report.html")
-        if not os.path.exists(hp):
-            res = _load_results(cdir)
+        st.markdown("#### Design Validation Report (EN 15512)")
+        st.caption("Engineering calc-sheet: model summary, supports & "
+                   "stiffness, load combinations, front / side / plan / 3D "
+                   "views with dimensions, and every check with its EN "
+                   "clause and PASS/FAIL.")
+        res = _load_results(cdir)
+        meta = {"project": proj.name, "system": sysm.name,
+                "configuration": conf.name, "client": proj.client,
+                "location": proj.location, "engineer": proj.engineer}
+        if res and st.button("⚙ Generate / refresh report files",
+                             use_container_width=True):
+            from rack15512.report_doc import write_reports
+            from rack15512.report_html import design_validation_report
+            with open(os.path.join(cdir, "design_validation_report.html"),
+                      "w", encoding="utf-8") as f:
+                f.write(design_validation_report(model, res["cases"],
+                                                 res["checks"], meta))
+            try:
+                write_reports(model, res["cases"], res["checks"], meta,
+                              docx_path=os.path.join(
+                                  cdir, "design_validation_report.docx"),
+                              pdf_path=os.path.join(
+                                  cdir, "design_validation_report.pdf"))
+            except Exception as exc:
+                st.warning(f"DOCX/PDF needs python-docx + reportlab: {exc}")
+            st.rerun()
+
+        files = [("design_validation_report.pdf", "📕 Download PDF",
+                  "application/pdf"),
+                 ("design_validation_report.docx",
+                  "📘 Download DOCX (editable)",
+                  "application/vnd.openxmlformats-officedocument."
+                  "wordprocessingml.document"),
+                 ("design_validation_report.html",
+                  "🌐 Download HTML (print to PDF)", "text/html")]
+        cols = st.columns(len(files))
+        any_file = False
+        for col, (fname, label, mime) in zip(cols, files):
+            fp = os.path.join(cdir, fname)
+            if os.path.exists(fp):
+                any_file = True
+                with open(fp, "rb") as f:
+                    col.download_button(label, f.read(),
+                                        f"{conf.id}_{fname}", mime=mime,
+                                        use_container_width=True)
+        if not any_file:
             if res:
-                from rack15512.report_html import design_validation_report
-                meta = {"project": proj.name, "system": sysm.name,
-                        "configuration": conf.name, "client": proj.client,
-                        "location": proj.location, "engineer": proj.engineer}
-                html = design_validation_report(model, res["cases"],
-                                                res["checks"], meta)
-                with open(hp, "w", encoding="utf-8") as f:
-                    f.write(html)
-        if os.path.exists(hp):
-            html = open(hp, encoding="utf-8").read()
-            st.download_button(
-                "📄 Download Design Validation Report (HTML — print to PDF)",
-                html, f"{conf.id}_design_validation_report.html",
-                mime="text/html", type="primary", use_container_width=True)
-            st.caption("Full EN 15512 engineering report: model summary, "
-                       "supports & stiffness, load combinations, front / "
-                       "side / plan / 3D views with dimensions, and every "
-                       "check with its EN clause and pass/fail.")
+                st.info("Press *Generate / refresh report files* above.")
+            else:
+                st.info("Run the configuration to generate the report.")
         rp = os.path.join(cdir, "report.md")
         if os.path.exists(rp):
-            txt = open(rp, encoding="utf-8").read()
-            st.download_button("Download report.md (text)", txt, "report.md")
-            with st.expander("Preview check report"):
-                st.markdown(txt)
-        if not os.path.exists(hp) and not os.path.exists(rp):
-            st.info("Run the configuration to generate the report.")
+            with st.expander("Preview check report (text)"):
+                st.markdown(open(rp, encoding="utf-8").read())
 
     with t_params:
         st.json(conf.config)
