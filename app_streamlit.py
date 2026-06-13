@@ -516,42 +516,52 @@ def render_view_config():
             if st.button("📋 Show load cases / combinations summary"):
                 _run_summary_dialog(rs)
 
+            st.write("")
             results = _load_results(cdir)
             if results:
                 cases, checks = results["cases"], results["checks"]
                 envs = build_envelopes(model, cases, checks)
                 opts = ([f"Envelope: {e.name}" for e in envs]
                         + [f"Case: {c.name}" for c in cases])
-                cc = st.columns([3, 2])
-                sel = cc[0].selectbox("View envelope / case", opts)
-                scale = cc[1].slider("Deformation scale", 0, 200, 30, 5)
-                st.caption("Hover a member for its forces, a ◆ support for "
-                           "its reactions.")
-                if sel.startswith("Envelope:"):
-                    env = envs[opts.index(sel)]
-                    fig = figure_for_envelope(model, env, scale=scale)
-                    st.plotly_chart(fig, use_container_width=True)
-                    if env.governing:
-                        st.caption(f"Governing in this envelope: "
-                                   f"{env.governing.check} on "
-                                   f"{env.governing.target} = "
-                                   f"{env.governing.utilization:.3f}")
-                else:
-                    case = cases[opts.index(sel) - len(envs)]
-                    st.plotly_chart(figure_for_case(model, case, checks,
-                                                    scale=scale),
-                                    use_container_width=True)
-                    if not case.converged:
-                        st.error("This case did NOT converge.")
+                with st.container(border=True):
+                    ui.section("🧊", "Interactive model — coloured by "
+                                     "utilisation")
+                    cc = st.columns([3, 2])
+                    sel = cc[0].selectbox("View envelope / case", opts,
+                                          label_visibility="collapsed")
+                    scale = cc[1].slider("Deformation scale ×", 0, 200, 30, 5)
+                    if sel.startswith("Envelope:"):
+                        env = envs[opts.index(sel)]
+                        st.plotly_chart(figure_for_envelope(model, env,
+                                                            scale=scale),
+                                        use_container_width=True)
+                        if env.governing:
+                            st.markdown(
+                                f"<span class='rnr-muted'>Governing: "
+                                f"<b>{env.governing.check}</b> on "
+                                f"{env.governing.target} = "
+                                f"{env.governing.utilization:.3f}</span>",
+                                unsafe_allow_html=True)
+                    else:
+                        case = cases[opts.index(sel) - len(envs)]
+                        st.plotly_chart(figure_for_case(model, case, checks,
+                                                        scale=scale),
+                                        use_container_width=True)
+                        if not case.converged:
+                            st.error("This case did NOT converge.")
+                    st.caption("Hover a member for its forces, a ◆ support "
+                               "for its reactions.")
             else:
                 st.info("Re-run to enable the interactive viewer / envelopes.")
-            st.markdown("**Max utilization by check**")
-            st.dataframe([rs.get("max_utilization_by_check", {})],
-                         use_container_width=True)
+            with st.container(border=True):
+                ui.section("📊", "Maximum utilisation by check")
+                st.dataframe([rs.get("max_utilization_by_check", {})],
+                             use_container_width=True)
         if st.button("▶ Run / re-run analysis", type="primary"):
-            with st.spinner("Running OpenSees (this can take a few minutes)…"):
-                summary, _ = run_configuration(PSTORE, proj.id, sysm.id,
-                                               conf.id)
+            summary, _ = ui.run_with_status(
+                lambda progress: run_configuration(
+                    PSTORE, proj.id, sysm.id, conf.id, progress=progress),
+                label="OpenSees second-order analysis")
             st.success(f"{summary['verdict']}")
             st.rerun()
 
@@ -583,24 +593,39 @@ def render_view_config():
                 st.warning(f"DOCX/PDF needs python-docx + reportlab: {exc}")
             st.rerun()
 
-        files = [("design_validation_report.pdf", "📕 Download PDF",
-                  "application/pdf"),
-                 ("design_validation_report.docx",
-                  "📘 Download DOCX (editable)",
+        files = [("design_validation_report.pdf", "📕", "PDF",
+                  "Print-ready engineering report.", "application/pdf"),
+                 ("design_validation_report.docx", "📘", "DOCX",
+                  "Editable Word document for review / stamping.",
                   "application/vnd.openxmlformats-officedocument."
                   "wordprocessingml.document"),
-                 ("design_validation_report.html",
-                  "🌐 Download HTML (print to PDF)", "text/html")]
+                 ("design_validation_report.html", "🌐", "HTML",
+                  "Self-contained — open in any browser, print to PDF.",
+                  "text/html")]
         cols = st.columns(len(files))
         any_file = False
-        for col, (fname, label, mime) in zip(cols, files):
+        for col, (fname, icon, label, desc, mime) in zip(cols, files):
             fp = os.path.join(cdir, fname)
-            if os.path.exists(fp):
-                any_file = True
-                with open(fp, "rb") as f:
-                    col.download_button(label, f.read(),
-                                        f"{conf.id}_{fname}", mime=mime,
-                                        use_container_width=True)
+            with col:
+                with st.container(border=True):
+                    exists = os.path.exists(fp)
+                    st.markdown(
+                        f"<div style='font-size:1.6rem'>{icon}</div>"
+                        f"<div style='font-weight:700;font-size:1.05rem'>"
+                        f"{label}</div><div class='rnr-muted' "
+                        f"style='font-size:.82rem;min-height:2.4em'>{desc}"
+                        f"</div>", unsafe_allow_html=True)
+                    if exists:
+                        any_file = True
+                        with open(fp, "rb") as f:
+                            st.download_button(
+                                f"Download {label}", f.read(),
+                                f"{conf.id}_{fname}", mime=mime,
+                                use_container_width=True, type="primary",
+                                key=f"dl_{fname}")
+                    else:
+                        st.button(f"Download {label}", disabled=True,
+                                  use_container_width=True, key=f"dlx_{fname}")
         if not any_file:
             if res:
                 st.info("Press *Generate / refresh report files* above.")
@@ -656,9 +681,10 @@ def render_configure():
                             silent=True)
         if conf:
             ss.config_id = conf.id
-            with st.spinner("Running OpenSees (this can take a few minutes)…"):
-                summary, _ = run_configuration(PSTORE, proj.id, sysm.id,
-                                               conf.id)
+            summary, _ = ui.run_with_status(
+                lambda progress: run_configuration(
+                    PSTORE, proj.id, sysm.id, conf.id, progress=progress),
+                label="OpenSees second-order analysis")
             # popup with cases/combinations/convergence/stress + results link
             _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
 

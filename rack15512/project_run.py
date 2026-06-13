@@ -19,10 +19,17 @@ from .viewer import (plot_deformed, plot_frame_elevation, plot_model,
 
 def run_configuration(store: ProjectStore, project_id: str, system_id: str,
                       config_id: str, *, plots: bool = True,
-                      master_root: str = "masters") -> Tuple[dict, str]:
+                      master_root: str = "masters",
+                      progress=None) -> Tuple[dict, str]:
     """Build, analyse and check a stored configuration; write report and
     plots into its config directory; record and return the run summary.
-    Returns (summary, config_dir)."""
+    Returns (summary, config_dir).
+
+    progress: optional callable(stage:str, frac:float) for UI status."""
+    def step(stage, frac):
+        if progress:
+            progress(stage, frac)
+
     project = store.load(project_id)
     system = project.system(system_id)
     if system is None:
@@ -43,9 +50,13 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
         library = SectionLibrary.from_file(conf.master_path)
     cfg = conf.to_rackconfig(master=master, library=library)
 
+    step("Building the 3D model", 0.10)
     model = build_rack(cfg)
+    step("Running second-order analysis (all combinations)", 0.30)
     cases = run_all(model)
+    step("Verifying EN 15512 design checks", 0.75)
     checks = run_checks(model, cases)
+    step("Writing report and plots", 0.90)
 
     cdir = store.config_dir(project_id, system_id, config_id)
     os.makedirs(cdir, exist_ok=True)
@@ -88,6 +99,7 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
 
     summary = summarize_run(model, cases, checks)
     store.update_run_summary(project_id, system_id, config_id, summary)
+    step("Complete", 1.0)
     return summary, cdir
 
 

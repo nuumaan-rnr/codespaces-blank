@@ -214,5 +214,20 @@ def section(icon: str, title: str) -> None:
                 f'{_html.escape(title)}</div>', unsafe_allow_html=True)
 
 
+def run_with_status(run_fn, label="Running analysis"):
+    """Execute run_fn(progress=cb) showing a staged status box and a
+    progress bar; returns run_fn's result."""
+    box = st.status(f"⚙️  {label}…", expanded=True)
+    bar = box.progress(0.0)
+
+    def cb(stage, frac):
+        bar.progress(min(max(frac, 0.0), 1.0))
+        box.write(f"• {stage}")
+    result = run_fn(progress=cb)
+    box.update(label="✅  Analysis complete", state="complete",
+               expanded=False)
+    return result
+
+
 def theme_toggle() -> None:
     st.toggle("🌙 Dark mode", key="dark_mode")
