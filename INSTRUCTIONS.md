@@ -1,5 +1,7 @@
 # SPR Design Tool — Instruction Sheet
 
+*Racks & Rollers — Storage Technologies and Automation · www.racksandrollers.com*
+
 **Selective Pallet Racking (SPR) structural design per EN 15512** —
 3D second-order analysis (OpenSees engine) with semi-rigid connections,
 for **single-deep modules** or **back-to-back modules** within a row.

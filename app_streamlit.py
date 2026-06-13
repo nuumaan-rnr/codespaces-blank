@@ -15,6 +15,7 @@ import streamlit as st
 
 import pickle
 
+from rack15512 import branding as B
 from rack15512.analysis import run_all
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
@@ -29,8 +30,15 @@ from rack15512.project_run import run_configuration
 from rack15512.report import write_report
 from rack15512.viewer import plot_deformed, plot_frame_elevation, plot_model
 
-st.set_page_config(page_title="EN 15512 SPR Design", layout="wide",
+st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
                    initial_sidebar_state="expanded")
+
+# brand accents (teal headings / primary already set via .streamlit/config)
+st.markdown(f"""<style>
+ h1, h2, h3 {{ color: {B.GREY}; }}
+ [data-testid="stSidebar"] {{ border-right: 3px solid {B.TEAL}; }}
+ div[data-testid="stMetricValue"] {{ color: {B.TEAL}; }}
+</style>""", unsafe_allow_html=True)
 
 PSTORE = ProjectStore("projects")
 MSTORE = MasterStore("masters")
@@ -723,8 +731,10 @@ def render_masters():
 
 # ------------------------------------------------------------------- router
 with st.sidebar:
-    st.markdown("## 🏗 EN 15512 SPR")
-    st.caption("Selective pallet racking design")
+    if os.path.exists(B.LOGO_PATH):
+        st.image(B.LOGO_PATH, use_container_width=True)
+    st.markdown(f"#### {B.PRODUCT}")
+    st.caption(f"{B.TAGLINE}")
     st.divider()
     if st.button("🏠 Dashboard", use_container_width=True):
         goto("dashboard")
@@ -740,6 +750,7 @@ with st.sidebar:
     st.divider()
     st.caption("OpenSees 2nd-order · semi-rigid connections · units N, mm, "
                "MPa")
+    st.caption(f"© {B.COMPANY} · {B.WEBSITE}")
 
 _VIEWS = {
     "dashboard": render_dashboard,

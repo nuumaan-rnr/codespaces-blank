@@ -29,4 +29,4 @@ rack15512 = "rack15512.cli:main"
 include = ["rack15512*"]
 
 [tool.setuptools.package-data]
-rack15512 = ["data/*.csv"]
+rack15512 = ["data/*.csv", "assets/*.png"]

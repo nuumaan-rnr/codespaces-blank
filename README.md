@@ -1,5 +1,7 @@
 # rack15512 — 3D storage-rack analysis & EN 15512 design checks
 
+*Developed for **Racks & Rollers** — Storage Technologies and Automation · www.racksandrollers.com*
+
 Structural analysis app for steel storage racks (adjustable pallet racking)
 per **EN 15512**: full **3D** second-order elastic global analysis with
 **semi-rigid connections**, global sway imperfections in both rack

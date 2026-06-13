@@ -81,6 +81,22 @@ def test_design_validation_report_contents():
     # overall verdict + load combinations
     assert "OVERALL RESULT" in html
     assert "Load cases and combinations" in html
+    # Racks & Rollers branding: company, website, embedded logo, teal accent
+    from rack15512 import branding as B
+    import html as _h
+    assert _h.escape(B.COMPANY) in html        # "Racks &amp; Rollers"
+    assert B.WEBSITE in html
+    assert B.logo_data_uri()[:22] == "data:image/png;base64,"
+    assert B.logo_data_uri() in html           # logo embedded in the header
+    assert B.TEAL in html                       # brand colour in the CSS
+
+
+def test_branding_assets_present():
+    from rack15512 import branding as B
+    assert os.path.exists(B.LOGO_PATH)
+    assert B.logo_bytes()
+    assert B.TEAL == "#0C8490" and B.GREY == "#545454"
+    assert B.WEBSITE == "www.racksandrollers.com"
 
 
 @needs_master
@@ -94,7 +110,8 @@ def test_docx_and_pdf_reports(tmp_path):
     blocks = build_report_blocks(m, cases, checks,
                                  meta={"project": "P", "engineer": "E"})
     kinds = {b[0] for b in blocks}
-    assert {"title", "verdict", "h2", "table", "image", "result"} <= kinds
+    assert {"logo", "title", "verdict", "h2", "table", "image",
+            "result"} <= kinds        # logo header present
     dp = tmp_path / "r.docx"
     pp = tmp_path / "r.pdf"
     write_reports(m, cases, checks, {"project": "P"},
