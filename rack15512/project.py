@@ -164,12 +164,12 @@ class ProjectStore:
         return out
 
     def load(self, project_id: str) -> Project:
-        with open(self._proj_file(project_id)) as f:
+        with open(self._proj_file(project_id), encoding="utf-8") as f:
             return Project.from_dict(json.load(f))
 
     def save(self, project: Project) -> None:
         os.makedirs(self._proj_dir(project.id), exist_ok=True)
-        with open(self._proj_file(project.id), "w") as f:
+        with open(self._proj_file(project.id), "w", encoding="utf-8") as f:
             json.dump(project.to_dict(), f, indent=2)
 
     def exists(self, project_id: str) -> bool:
@@ -211,7 +211,7 @@ class ProjectStore:
         # also write a standalone config.json in the config directory
         cdir = self.config_dir(project_id, system_id, cid)
         os.makedirs(cdir, exist_ok=True)
-        with open(os.path.join(cdir, "config.json"), "w") as f:
+        with open(os.path.join(cdir, "config.json"), "w", encoding="utf-8") as f:
             json.dump({"name": name, "master_path": master_path,
                        "master_id": master_id, "config": conf.config},
                       f, indent=2)

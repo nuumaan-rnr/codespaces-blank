@@ -50,7 +50,7 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     cdir = store.config_dir(project_id, system_id, config_id)
     os.makedirs(cdir, exist_ok=True)
     save_model(model, os.path.join(cdir, "model.json"))
-    with open(os.path.join(cdir, "report.md"), "w") as f:
+    with open(os.path.join(cdir, "report.md"), "w", encoding="utf-8") as f:
         f.write(_project_header(project, system, conf) +
                 write_report(model, cases, checks))
     # full Design Validation Report (self-contained HTML with model views)
@@ -58,7 +58,7 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     meta = {"project": project.name, "system": system.name,
             "configuration": conf.name, "client": project.client,
             "location": project.location, "engineer": project.engineer}
-    with open(os.path.join(cdir, "design_validation_report.html"), "w") as f:
+    with open(os.path.join(cdir, "design_validation_report.html"), "w", encoding="utf-8") as f:
         f.write(design_validation_report(model, cases, checks, meta))
     # persist the full results so the interactive viewer / envelopes can be
     # shown later without re-running the analysis

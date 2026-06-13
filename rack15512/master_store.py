@@ -159,12 +159,12 @@ class MasterStore:
         return out
 
     def load(self, mid: str) -> StoredMaster:
-        with open(self._file(mid)) as f:
+        with open(self._file(mid), encoding="utf-8") as f:
             return StoredMaster.from_dict(json.load(f))
 
     def save(self, master: StoredMaster) -> None:
         os.makedirs(os.path.join(self.root, master.id), exist_ok=True)
-        with open(self._file(master.id), "w") as f:
+        with open(self._file(master.id), "w", encoding="utf-8") as f:
             json.dump(master.to_dict(), f, indent=2)
 
     def delete(self, mid: str) -> None:

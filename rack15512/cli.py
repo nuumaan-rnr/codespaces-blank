@@ -33,7 +33,7 @@ def _run(model: RackModel, outdir: str) -> int:
     checks = run_checks(model, cases)
 
     report = write_report(model, cases, checks)
-    with open(os.path.join(outdir, "report.md"), "w") as f:
+    with open(os.path.join(outdir, "report.md"), "w", encoding="utf-8") as f:
         f.write(report)
 
     plot_model(model, os.path.join(outdir, "model.png"))
@@ -299,11 +299,11 @@ def main(argv: List[str] | None = None) -> int:
                                    summarize)
         cases = _run_all(model)
         checks = run_checks(model, cases)
-        with open(os.path.join(a.outdir, "report.md"), "w") as f:
+        with open(os.path.join(a.outdir, "report.md"), "w", encoding="utf-8") as f:
             f.write(write_report(model, cases, checks))
         rfem_ref = read_rfem_results(a.data)
         comps = compare_results(model, cases, rfem_ref)
-        with open(os.path.join(a.outdir, "validation.md"), "w") as f:
+        with open(os.path.join(a.outdir, "validation.md"), "w", encoding="utf-8") as f:
             f.write(summarize(comps))
         plot_model(model, os.path.join(a.outdir, "model.png"))
         plot_utilization(model, checks, os.path.join(a.outdir, "utilization.png"))

@@ -69,10 +69,10 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
 
 
 def save(m: RackModel, path: str) -> None:
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(model_to_dict(m), f, indent=2)
 
 
 def load(path: str) -> RackModel:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return model_from_dict(json.load(f))

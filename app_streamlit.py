@@ -519,7 +519,7 @@ def render_view_config():
                        "check with its EN clause and pass/fail.")
         rp = os.path.join(cdir, "report.md")
         if os.path.exists(rp):
-            txt = open(rp).read()
+            txt = open(rp, encoding="utf-8").read()
             st.download_button("Download report.md (text)", txt, "report.md")
             with st.expander("Preview check report"):
                 st.markdown(txt)
