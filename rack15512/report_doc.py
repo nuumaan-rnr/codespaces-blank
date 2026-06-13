@@ -205,6 +205,56 @@ def build_report_blocks(model, cases, checks, meta=None) -> List[tuple]:
 
 
 # --------------------------------------------------------------- DOCX render
+def _add_page_field(paragraph):
+    """Insert a Word PAGE field (live page number) into a paragraph."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    run = paragraph.add_run()
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), "PAGE")
+    run._r.addprevious(fld)
+
+
+def _build_header_footer(doc):
+    """Small top-left logo header (pages 2+) and a company / page no /
+    copyright footer on every page."""
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_TAB_ALIGNMENT, WD_ALIGN_PARAGRAPH
+    from . import branding as B
+
+    sec = doc.sections[0]
+    sec.different_first_page_header_footer = True
+    usable = sec.page_width - sec.left_margin - sec.right_margin
+
+    # header logo on continuation pages (first page has the big body logo)
+    logo = B.logo_bytes()
+    if logo:
+        hp = sec.header.paragraphs[0]
+        hp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        try:
+            hp.add_run().add_picture(io.BytesIO(logo), width=Inches(1.4))
+        except Exception:
+            pass
+
+    from docx.shared import Emu
+
+    def footer_para(par):
+        par.paragraph_format.tab_stops.add_tab_stop(
+            Emu(int(usable / 2)), WD_TAB_ALIGNMENT.CENTER)
+        par.paragraph_format.tab_stops.add_tab_stop(
+            Emu(int(usable)), WD_TAB_ALIGNMENT.RIGHT)
+        r = par.add_run(f"{B.COMPANY}\tPage ")
+        r.font.size = Pt(7.5)
+        r.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+        _add_page_field(par)
+        r2 = par.add_run(f"\t© {B.COMPANY} · {B.WEBSITE}")
+        r2.font.size = Pt(7.5)
+        r2.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+
+    footer_para(sec.footer.paragraphs[0])
+    footer_para(sec.first_page_footer.paragraphs[0])
+
+
 def render_docx(blocks, path):
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
@@ -215,6 +265,7 @@ def render_docx(blocks, path):
     doc = Document()
     doc.styles["Normal"].font.name = "Calibri"
     doc.styles["Normal"].font.size = Pt(9)
+    _build_header_footer(doc)
 
     def shade(par, ok):
         par.runs[0].font.bold = True
@@ -302,23 +353,26 @@ def render_pdf(blocks, path):
                                    os.path.join(ttf, "DejaVuSans-Bold.ttf")))
     ss = getSampleStyleSheet()
     body = ParagraphStyle("body", parent=ss["Normal"], fontName="DejaVu",
-                          fontSize=8, leading=11)
-    note = ParagraphStyle("note", parent=body, fontSize=7,
+                          fontSize=8, leading=12, spaceAfter=2,
+                          wordWrap="CJK")     # break very long unbroken text
+    note = ParagraphStyle("note", parent=body, fontSize=7, leading=10,
                           textColor=colors.grey)
     h1 = ParagraphStyle("h1", parent=body, fontName="DejaVu-Bold",
-                        fontSize=17, spaceAfter=4,
+                        fontSize=18, leading=22, spaceBefore=4, spaceAfter=6,
                         textColor=colors.HexColor("#545454"))
     h2 = ParagraphStyle("h2", parent=body, fontName="DejaVu-Bold",
-                        fontSize=12, spaceBefore=10, spaceAfter=4,
-                        textColor=colors.HexColor("#0C8490"))
+                        fontSize=12.5, leading=16, spaceBefore=14,
+                        spaceAfter=6, textColor=colors.HexColor("#0C8490"))
     h3 = ParagraphStyle("h3", parent=body, fontName="DejaVu-Bold",
-                        fontSize=9.5, spaceBefore=6,
+                        fontSize=10, leading=14, spaceBefore=8, spaceAfter=3,
                         textColor=colors.HexColor("#545454"))
-    cell = ParagraphStyle("cell", parent=body, fontSize=6.5, leading=8)
+    cell = ParagraphStyle("cell", parent=body, fontSize=6.8, leading=8.5,
+                          spaceAfter=0, wordWrap="CJK")
     cellh = ParagraphStyle("cellh", parent=cell, fontName="DejaVu-Bold")
 
     story = []
-    avail = A4[0] - 30 * mm
+    LM = RM = 15 * mm
+    avail = A4[0] - LM - RM
 
     def add_table(data, widths=None):
         rows = [[Paragraph(str(c), cellh if i == 0 else cell)
@@ -328,10 +382,26 @@ def render_pdf(blocks, path):
             ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF3F4")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1),
              [colors.white, colors.HexColor("#f7f9fb")])]))
         story.append(t)
-        story.append(Spacer(1, 5))
+        story.append(Spacer(1, 6))
+
+    def col_widths(header):
+        """Weighted widths so a wide 'Detail' column wraps instead of
+        crushing the narrow columns."""
+        weights = []
+        for h in header:
+            hl = str(h).lower()
+            weights.append(3.2 if "detail" in hl
+                           else 1.6 if hl in ("case", "load factors")
+                           else 1.0)
+        tot = sum(weights)
+        return [avail * w / tot for w in weights]
 
     brand = ParagraphStyle("brand", parent=note,
                            textColor=colors.HexColor("#0C8490"))
@@ -342,50 +412,98 @@ def render_pdf(blocks, path):
             bio = io.BytesIO(blk[1])
             iw, ih = PILImage.open(bio).size
             bio.seek(0)
-            w = 75 * mm
-            story.append(Image(bio, width=w, height=w * ih / iw))
+            w = 70 * mm
+            img = Image(bio, width=w, height=w * ih / iw)
+            img.hAlign = "LEFT"
+            story.append(img)
             story.append(Paragraph("<i>%s</i>" % blk[2], brand))
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 10))
         elif kind == "title":
             story.append(Paragraph(blk[1], h1))
             story.append(Paragraph("<i>%s</i>" % blk[2], body))
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
         elif kind == "h2":
             story.append(Paragraph(blk[1], h2))
         elif kind == "h3":
             story.append(Paragraph(blk[1], h3))
         elif kind == "p":
-            story.append(Paragraph(blk[1], body)); story.append(Spacer(1, 3))
+            story.append(Paragraph(blk[1], body)); story.append(Spacer(1, 4))
         elif kind == "note":
             story.append(Paragraph("<i>%s</i>" % blk[1], note))
-            story.append(Spacer(1, 3))
+            story.append(Spacer(1, 4))
         elif kind in ("verdict", "result"):
             col = "#0C7080" if blk[2] else "#b71c1c"
             sz = 14 if kind == "verdict" else 9
+            story.append(Spacer(1, 2))
             story.append(Paragraph(
                 f'<para align="{"center" if kind=="verdict" else "left"}">'
                 f'<font color="{col}" size="{sz}"><b>{blk[1]}</b></font></para>',
                 body))
-            story.append(Spacer(1, 5))
+            story.append(Spacer(1, 6))
         elif kind == "kv":
             add_table([[k, v] for k, v in blk[1]],
                       widths=[45 * mm, avail - 45 * mm])
         elif kind == "table":
-            ncol = len(blk[1][0])
-            add_table(blk[1], widths=[avail / ncol] * ncol)
+            add_table(blk[1], widths=col_widths(blk[1][0]))
         elif kind == "image":
             bio = io.BytesIO(blk[1])
             from PIL import Image as PILImage
             iw, ih = PILImage.open(bio).size
             bio.seek(0)
+            aspect = ih / iw
             w = min(avail, 150 * mm)
-            story.append(Image(bio, width=w, height=w * ih / iw))
+            h = w * aspect
+            max_h = 190 * mm                 # fit within the page frame
+            if h > max_h:
+                h, w = max_h, max_h / aspect
+            img = Image(bio, width=w, height=h)
+            img.hAlign = "CENTER"
+            story.append(img)
             story.append(Paragraph("<i>%s</i>" % blk[2], note))
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
 
-    SimpleDocTemplate(path, pagesize=A4, leftMargin=15 * mm,
-                      rightMargin=15 * mm, topMargin=15 * mm,
-                      bottomMargin=15 * mm).build(story)
+    from . import branding as B
+    logo = B.logo_bytes()
+    logo_reader = None
+    if logo:
+        from reportlab.lib.utils import ImageReader
+        logo_reader = ImageReader(io.BytesIO(logo))
+
+    def _footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("DejaVu", 7)
+        canvas.setFillColor(colors.HexColor("#888888"))
+        y = 9 * mm
+        canvas.setStrokeColor(colors.HexColor("#cccccc"))
+        canvas.line(LM, y + 4 * mm, A4[0] - RM, y + 4 * mm)
+        canvas.drawString(LM, y, B.COMPANY)
+        canvas.drawCentredString(A4[0] / 2.0, y, f"Page {doc.page}")
+        canvas.drawRightString(A4[0] - RM, y,
+                               f"© {B.COMPANY} · {B.WEBSITE}")
+        canvas.restoreState()
+
+    def _on_first(canvas, doc):
+        _footer(canvas, doc)            # big logo is in the body on page 1
+
+    def _on_later(canvas, doc):
+        # small logo, top-left header, on every page after the first
+        if logo_reader is not None:
+            iw, ih = logo_reader.getSize()
+            w = 30 * mm
+            h = w * ih / iw
+            canvas.drawImage(logo_reader, LM, A4[1] - 11 * mm - h,
+                             width=w, height=h, mask="auto")
+            canvas.setStrokeColor(colors.HexColor("#0C8490"))
+            canvas.setLineWidth(1.0)
+            canvas.line(LM, A4[1] - 25 * mm, A4[0] - RM, A4[1] - 25 * mm)
+        _footer(canvas, doc)
+
+    # uniform 28 mm top margin leaves room for the later-page header band
+    doc = SimpleDocTemplate(path, pagesize=A4, leftMargin=LM, rightMargin=RM,
+                            topMargin=28 * mm, bottomMargin=18 * mm,
+                            title="Design Validation Report",
+                            author=B.COMPANY)
+    doc.build(story, onFirstPage=_on_first, onLaterPages=_on_later)
     return path
 
 

@@ -123,6 +123,14 @@ def test_docx_and_pdf_reports(tmp_path):
     text = "\n".join(p.text for p in d.paragraphs)
     assert "Design Validation Report" in text
     assert any("EN 15512 design verifications" in p.text for p in d.paragraphs)
+    # branded header (continuation logo) + footer with company / page field
+    sec = d.sections[0]
+    assert sec.different_first_page_header_footer
+    assert "graphic" in sec.header.paragraphs[0]._p.xml      # logo in header
+    foot = sec.footer.paragraphs[0]
+    assert "Racks & Rollers" in foot.text
+    assert "racksandrollers.com" in foot.text
+    assert "fldSimple" in foot._p.xml                         # live page no.
 
 
 if __name__ == "__main__":
