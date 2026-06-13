@@ -66,6 +66,50 @@ def _example_config(master_path: str | None) -> RackConfig:
     return RackConfig(library=_load_library(master_path))
 
 
+def _master_cmd(a) -> int:
+    from .master_store import MasterStore
+    store = MasterStore(a.root)
+    if a.mcmd == "import":
+        m = store.import_xlsx(a.path, name=a.name, description=a.description)
+        print(f"Imported master '{m.name}' (id: {m.id}): "
+              f"{len(m.sections)} sections, {len(m.base_tables)} base tables")
+        return 0
+    if a.mcmd == "list":
+        for m in store.list():
+            print(f"{m.id:24s} {m.name}  [{len(m.sections)} sections; "
+                  f"roles: {', '.join(m.roles())}]")
+        return 0
+    if a.mcmd == "show":
+        m = store.load(a.master_id)
+        print(f"Master: {m.name} (id: {m.id})  -  {m.description}")
+        for name in m.names(a.role):
+            s = m.sections[name]
+            print(f"  {name:22s} {s.get('role',''):8s} "
+                  f"A={s.get('A',0):8.1f}  fy={m.fy.get(name,'-')}")
+        return 0
+    if a.mcmd == "set":
+        m = store.load(a.master_id)
+        try:
+            val = float(a.value)
+        except ValueError:
+            val = a.value
+        m.update_fields(a.section, **{a.field: val})
+        store.save(m)
+        print(f"{a.master_id}: {a.section}.{a.field} = {val}")
+        return 0
+    if a.mcmd == "delete-section":
+        m = store.load(a.master_id)
+        m.delete_section(a.section)
+        store.save(m)
+        print(f"Deleted section '{a.section}' from {a.master_id}")
+        return 0
+    if a.mcmd == "delete":
+        store.delete(a.master_id)
+        print(f"Deleted master '{a.master_id}'")
+        return 0
+    return 1
+
+
 def _project_cmd(a) -> int:
     from .project import ProjectStore, rackconfig_to_dict
     store = ProjectStore(a.root)
@@ -80,11 +124,15 @@ def _project_cmd(a) -> int:
         print(f"Added system '{sysm.name}' (id: {sysm.id}) to {a.project_id}")
         return 0
     if a.pcmd == "add-config":
-        cfg = _example_config(a.master)
-        master_path = a.master
+        if a.master_id:
+            from .master_store import MasterStore
+            mw = MasterStore().load(a.master_id).to_workbook()
+            cfg = RackConfig(master=mw, base_stiffness="auto")
+        else:
+            cfg = _example_config(a.master)
         conf = store.add_configuration(a.project_id, a.system_id, a.name,
-                                       cfg, master_path=master_path,
-                                       notes=a.notes)
+                                       cfg, master_path=a.master,
+                                       master_id=a.master_id, notes=a.notes)
         print(f"Added configuration '{conf.name}' (id: {conf.id})")
         return 0
     if a.pcmd == "list":
@@ -166,6 +214,29 @@ def main(argv: List[str] | None = None) -> int:
                          "'CO - 4.1' result sheets (validation.md)")
     pf.add_argument("--save-json", help="also save the imported model as JSON")
 
+    pm = sub.add_parser("master", help="manage the in-app section masters")
+    pm.add_argument("--root", default="masters",
+                    help="masters directory (default: masters)")
+    msub = pm.add_subparsers(dest="mcmd", required=True)
+    mimp = msub.add_parser("import", help="import an Excel/CSV master once")
+    mimp.add_argument("path")
+    mimp.add_argument("--name")
+    mimp.add_argument("--description", default="")
+    mls = msub.add_parser("list", help="list stored masters")
+    msh = msub.add_parser("show", help="show a master's sections")
+    msh.add_argument("master_id")
+    msh.add_argument("--role")
+    mseti = msub.add_parser("set", help="update a section field")
+    mseti.add_argument("master_id")
+    mseti.add_argument("section")
+    mseti.add_argument("field")
+    mseti.add_argument("value")
+    mdels = msub.add_parser("delete-section", help="remove a section")
+    mdels.add_argument("master_id")
+    mdels.add_argument("section")
+    mdel = msub.add_parser("delete", help="delete a whole master")
+    mdel.add_argument("master_id")
+
     pp = sub.add_parser("project", help="manage projects / systems / "
                                         "configurations")
     pp.add_argument("--root", default="projects",
@@ -186,7 +257,8 @@ def main(argv: List[str] | None = None) -> int:
     pcfg.add_argument("project_id")
     pcfg.add_argument("system_id")
     pcfg.add_argument("name")
-    pcfg.add_argument("--master", help="section master .xlsx/.csv")
+    pcfg.add_argument("--master", help="external section master .xlsx/.csv")
+    pcfg.add_argument("--master-id", help="stored master id (MasterStore)")
     pcfg.add_argument("--notes", default="")
     plist = psub.add_parser("list", help="list projects (or a project's tree)")
     plist.add_argument("project_id", nargs="?")
@@ -198,6 +270,8 @@ def main(argv: List[str] | None = None) -> int:
     prun.add_argument("config_id")
 
     a = p.parse_args(argv)
+    if a.cmd == "master":
+        return _master_cmd(a)
     if a.cmd == "project":
         return _project_cmd(a)
     if a.cmd == "run":

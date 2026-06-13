@@ -65,6 +65,32 @@ python -m rack15512 sections --master examples/Master.xlsx --role upright
 python -m rack15512 rfem SPR_CHECK_Data.xlsx --master Master.xlsx --compare
 ```
 
+### Section masters (in-app database)
+
+Masters live **inside the system**, not in the spreadsheet: import an Excel
+master once into the store, then add / edit / delete sections in place. The
+data is held as JSON under a `masters/` directory; configurations reference
+a stored master by id, so a master update flows to everything that uses it.
+
+```bash
+python -m rack15512 master import examples/Master.xlsx --name "Standard SPR"
+python -m rack15512 master list
+python -m rack15512 master show standard-spr --role upright
+python -m rack15512 master set standard-spr UP0016 fy 355   # edit a field
+python -m rack15512 master delete-section standard-spr UP0026
+python -m rack15512 master delete standard-spr               # remove master
+```
+
+In the Streamlit app the **Section masters** tab imports, views, edits and
+deletes sections; the sidebar then offers any stored master as the source
+(no re-upload). Build configurations against `--master-id` so they always
+use the latest stored data:
+
+```bash
+python -m rack15512 project add-config <project> <system> "Cfg" \
+       --master-id standard-spr
+```
+
 ### Projects (record systems & configurations)
 
 Work is organised as **Project → System → Configuration**: a project (the

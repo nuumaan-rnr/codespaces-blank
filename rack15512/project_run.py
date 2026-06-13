@@ -18,7 +18,8 @@ from .viewer import (plot_deformed, plot_frame_elevation, plot_model,
 
 
 def run_configuration(store: ProjectStore, project_id: str, system_id: str,
-                      config_id: str, *, plots: bool = True) -> Tuple[dict, str]:
+                      config_id: str, *, plots: bool = True,
+                      master_root: str = "masters") -> Tuple[dict, str]:
     """Build, analyse and check a stored configuration; write report and
     plots into its config directory; record and return the run summary.
     Returns (summary, config_dir)."""
@@ -30,11 +31,14 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     if conf is None:
         raise KeyError(f"configuration '{config_id}' not found")
 
-    master = load_master(conf.master_path) \
-        if conf.master_path and conf.master_path.lower().endswith(
-            (".xlsx", ".xlsm")) else None
-    library = None
-    if conf.master_path and not master:
+    master, library = None, None
+    if conf.master_id:                       # stored master (preferred)
+        from .master_store import MasterStore
+        master = MasterStore(master_root).load(conf.master_id).to_workbook()
+    elif conf.master_path and conf.master_path.lower().endswith(
+            (".xlsx", ".xlsm")):
+        master = load_master(conf.master_path)
+    elif conf.master_path:
         from .library import SectionLibrary
         library = SectionLibrary.from_file(conf.master_path)
     cfg = conf.to_rackconfig(master=master, library=library)

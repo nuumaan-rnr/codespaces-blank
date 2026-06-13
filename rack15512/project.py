@@ -79,7 +79,8 @@ class Configuration:
     id: str
     name: str
     config: Dict[str, Any]                       # serialised RackConfig
-    master_path: Optional[str] = None            # section master file
+    master_path: Optional[str] = None            # external master file (legacy)
+    master_id: Optional[str] = None              # stored master (MasterStore)
     notes: str = ""
     created: str = field(default_factory=_now)
     updated: str = field(default_factory=_now)
@@ -193,6 +194,7 @@ class ProjectStore:
 
     def add_configuration(self, project_id: str, system_id: str, name: str,
                           cfg: RackConfig, master_path: Optional[str] = None,
+                          master_id: Optional[str] = None,
                           notes: str = "") -> Configuration:
         project = self.load(project_id)
         system = project.system(system_id)
@@ -203,14 +205,16 @@ class ProjectStore:
             taken={c.id for c in system.configurations})
         conf = Configuration(id=cid, name=name,
                              config=rackconfig_to_dict(cfg),
-                             master_path=master_path, notes=notes)
+                             master_path=master_path, master_id=master_id,
+                             notes=notes)
         system.configurations.append(conf)
         # also write a standalone config.json in the config directory
         cdir = self.config_dir(project_id, system_id, cid)
         os.makedirs(cdir, exist_ok=True)
         with open(os.path.join(cdir, "config.json"), "w") as f:
             json.dump({"name": name, "master_path": master_path,
-                       "config": conf.config}, f, indent=2)
+                       "master_id": master_id, "config": conf.config},
+                      f, indent=2)
         self.save(project)
         return conf
 

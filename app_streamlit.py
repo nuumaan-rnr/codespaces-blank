@@ -21,7 +21,9 @@ from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
 from rack15512.library import SectionLibrary
+from rack15512.master_store import MasterStore, StoredMaster
 from rack15512.master_xlsx import MasterWorkbook, load_master
+from rack15512.model import CrossSection
 from rack15512.project import ProjectStore
 from rack15512.project_run import run_configuration
 from rack15512.report import write_report
@@ -51,17 +53,43 @@ def load_master_cached(uploaded_bytes: bytes | None, filename: str):
     return SectionLibrary.from_file(path), None
 
 
+mstore = MasterStore("masters")
+
 with st.sidebar:
     st.header("Section master")
-    up_file = st.file_uploader("Master file (.xlsx, .csv or .json)",
-                               type=["xlsx", "xlsm", "csv", "json"])
-    try:
-        lib, master = load_master_cached(
-            up_file.getvalue() if up_file else None,
-            up_file.name if up_file else "")
-    except (ValueError, KeyError) as e:
-        st.error(str(e))
-        st.stop()
+    stored = mstore.list()
+    src_options = (["Stored master"] if stored else []) + ["Upload / import"]
+    src = st.radio("Source", src_options, horizontal=True)
+    up_file = None
+    master_id = None
+    if src == "Stored master":
+        labels = [f"{m.name} [{m.id}]" for m in stored]
+        sel = st.selectbox("Master", labels)
+        sm = stored[labels.index(sel)]
+        master_id = sm.id
+        master = sm.to_workbook()
+        lib = master.library
+    else:
+        up_file = st.file_uploader("Master file (.xlsx, .csv or .json)",
+                                   type=["xlsx", "xlsm", "csv", "json"])
+        import_name = st.text_input("Save into store as",
+                                    up_file.name if up_file else "")
+        if up_file and st.button("Import into store"):
+            suffix = os.path.splitext(up_file.name)[1] or ".xlsx"
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp.write(up_file.getvalue())
+            tmp.close()
+            m = mstore.import_xlsx(tmp.name, name=import_name or up_file.name)
+            st.success(f"Imported as '{m.id}' ({len(m.sections)} sections). "
+                       "Select it under 'Stored master'.")
+            st.rerun()
+        try:
+            lib, master = load_master_cached(
+                up_file.getvalue() if up_file else None,
+                up_file.name if up_file else "")
+        except (ValueError, KeyError) as e:
+            st.error(str(e))
+            st.stop()
     st.caption(f"{len(lib.sections)} sections, roles: {', '.join(lib.roles())}"
                + (f" - base-stiffness tables: {len(master.base_tables)}"
                   if master else ""))
@@ -288,15 +316,17 @@ if save_proj:
                 sid = cur_proj.systems[sys_labels.index(sys_sel) - 1].id
             cname, cnotes = config_name, config_notes
         conf = store.add_configuration(pid, sid, cname, cfg,
-                                       master_path=master_path, notes=cnotes)
+                                       master_path=master_path,
+                                       master_id=master_id, notes=cnotes)
         st.success(f"Saved to project '{pid}' / system '{sid}' / "
                    f"config '{conf.id}'. Run it from the Projects tab or "
                    f"`rack15512 project run {pid} {sid} {conf.id}`.")
     except (ValueError, KeyError) as e:
         st.error(f"Could not save: {e}")
 
-tab_model, tab_results, tab_checks, tab_report, tab_projects = st.tabs(
-    ["Model", "Results", "EN 15512 checks", "Report", "Projects"])
+tab_model, tab_results, tab_checks, tab_report, tab_projects, tab_masters = \
+    st.tabs(["Model", "Results", "EN 15512 checks", "Report", "Projects",
+             "Section masters"])
 
 with tab_model:
     st.pyplot(plot_model(model))
@@ -427,3 +457,60 @@ with tab_projects:
                         st.success(f"{summary['verdict']} — artifacts in "
                                    f"{cdir}")
                         st.json(summary)
+
+with tab_masters:
+    st.subheader("Section masters")
+    st.caption("Masters are stored inside the system. Import an Excel "
+               "master once, then edit or delete sections here — no need "
+               "to re-read the spreadsheet.")
+    up_imp = st.file_uploader("Import a master file", key="master_import",
+                              type=["xlsx", "xlsm", "csv", "json"])
+    imp_name = st.text_input("Store as", up_imp.name if up_imp else "")
+    if up_imp and st.button("Import"):
+        suffix = os.path.splitext(up_imp.name)[1] or ".xlsx"
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp.write(up_imp.getvalue())
+        tmp.close()
+        m = mstore.import_xlsx(tmp.name, name=imp_name or up_imp.name)
+        st.success(f"Imported '{m.id}' with {len(m.sections)} sections.")
+        st.rerun()
+
+    for sm in mstore.list():
+        with st.expander(f"{sm.name}  ({sm.id}) — {len(sm.sections)} sections"):
+            c1, c2 = st.columns([3, 1])
+            c1.text(f"roles: {', '.join(sm.roles())}; "
+                    f"base tables: {len(sm.base_tables)}; updated {sm.updated}")
+            if c2.button("Delete master", key=f"delm_{sm.id}"):
+                mstore.delete(sm.id)
+                st.rerun()
+            role = st.selectbox("Role", ["upright", "beam", "bracing"],
+                                key=f"role_{sm.id}")
+            names = sm.names(role)
+            if names:
+                rows = []
+                for n in names:
+                    s = sm.sections[n]
+                    rows.append({"name": n, "A": s.get("A"),
+                                 "Iy": s.get("Iy"), "Iz": s.get("Iz"),
+                                 "J": s.get("J"), "fy": sm.fy.get(n)})
+                st.dataframe(rows, use_container_width=True)
+                edit = st.selectbox("Edit / delete section", names,
+                                    key=f"sec_{sm.id}")
+                fld = st.selectbox("Field", ["A", "Iy", "Iz", "J", "Wely",
+                                             "Welz", "fy", "e1", "e2", "t"],
+                                   key=f"fld_{sm.id}")
+                cur = (sm.fy.get(edit) if fld == "fy"
+                       else sm.sections[edit].get(fld))
+                newv = st.number_input(f"{edit}.{fld}",
+                                       value=float(cur or 0.0),
+                                       key=f"val_{sm.id}")
+                cc1, cc2 = st.columns(2)
+                if cc1.button("Update field", key=f"upd_{sm.id}"):
+                    sm.update_fields(edit, **{fld: newv})
+                    mstore.save(sm)
+                    st.success(f"{edit}.{fld} = {newv}")
+                    st.rerun()
+                if cc2.button("Delete section", key=f"dels_{sm.id}"):
+                    sm.delete_section(edit)
+                    mstore.save(sm)
+                    st.rerun()
