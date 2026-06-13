@@ -43,6 +43,8 @@ class Envelope:
     # worst non-informative check over the set, and per check kind
     governing: Optional[CheckResult] = None
     util_by_check: Dict[str, float] = field(default_factory=dict)
+    # worst EN 15512 utilisation per member over the set (member id -> util)
+    member_util: Dict[int, float] = field(default_factory=dict)
 
     @property
     def converged(self) -> bool:
@@ -112,6 +114,10 @@ def build_envelopes(model, cases: List[CaseResult],
         for c in rel:
             e.util_by_check[c.check] = max(e.util_by_check.get(c.check, 0.0),
                                            c.utilization)
+            if c.target.startswith("member"):
+                mid = int(c.target.split()[1])
+                e.member_util[mid] = max(e.member_util.get(mid, 0.0),
+                                         c.utilization)
         e.governing = max(rel, key=lambda c: c.utilization) if rel else None
         return e
 

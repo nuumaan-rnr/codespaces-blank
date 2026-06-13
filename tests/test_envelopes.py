@@ -70,6 +70,11 @@ def test_envelopes_group_uls_sls():
     # reactions enveloped per node
     assert uls.reactions
     assert uls.governing is not None
+    # real per-member EN 15512 utilisation is carried for colouring
+    assert uls.member_util
+    # the worst member utilisation equals the governing utilisation
+    assert max(uls.member_util.values()) == pytest.approx(
+        uls.governing.utilization, rel=1e-6)
 
 
 def test_interactive_figures_build():
@@ -82,9 +87,12 @@ def test_interactive_figures_build():
     f2 = figure_for_envelope(m, envs[0], scale=25)
     # undeformed + deformed + member-markers + supports
     assert len(f1.data) == 4 and len(f2.data) == 4
-    # member hover text carries forces; support hover carries reactions
-    assert any("member" in t and "kN" in t for t in f1.data[2].text)
+    # member hover text carries utilisation + forces; supports carry reactions
+    assert any("utilisation" in t and "kN" in t for t in f1.data[2].text)
     assert any("reactions" in t for t in f1.data[3].text)
+    # members coloured by numeric utilisation with a colour bar
+    assert f2.data[2].marker.colorbar.title.text == "utilisation"
+    assert len(f2.data[2].marker.color) == len(m.members)
 
 
 def test_beam_moment_and_load_direction():

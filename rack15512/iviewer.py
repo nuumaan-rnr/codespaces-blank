@@ -15,16 +15,6 @@ import plotly.graph_objects as go
 from .viewer import _deformed_curve
 
 
-def _util_color(u: float) -> str:
-    """RdYlGn_r-ish hex for a utilisation 0..>1."""
-    u = max(0.0, min(u, 1.2)) / 1.2
-    if u < 0.5:
-        r, g, b = int(2 * u * 255), 200, 60
-    else:
-        r, g, b = 220, int((1 - (u - 0.5) * 2) * 200), 50
-    return f"rgb({r},{g},{b})"
-
-
 def _core_figure(model, deformed_case, member_vals, node_reactions, util,
                  scale, title):
     fig = go.Figure()
@@ -39,9 +29,10 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
                                line=dict(color="lightgray", width=2),
                                hoverinfo="skip", name="undeformed"))
 
-    # deformed members + per-member hover markers at midpoint
+    # deformed members + per-member hover markers at midpoint, coloured by
+    # EN 15512 utilisation (numeric -> RdYlGn reversed, with a colour bar)
     dx, dy, dz = [], [], []
-    mxs, mys, mzs, mtext, mcolor = [], [], [], [], []
+    mxs, mys, mzs, mtext, muval = [], [], [], [], []
     for m in model.members.values():
         if deformed_case is not None:
             xs, ys, zs = _deformed_curve(model, deformed_case, m, scale)
@@ -55,20 +46,24 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
         mxs.append(xs[mid]); mys.append(ys[mid]); mzs.append(zs[mid])
         v = member_vals.get(m.id, {})
         u = util.get(m.id, 0.0)
-        mcolor.append(_util_color(u))
+        muval.append(u)
+        flag = " ⚠ FAIL" if u > 1.0 else ""
         mtext.append(
             f"<b>member {m.id}</b> ({m.member_set}, {m.mtype})<br>"
+            f"utilisation = {u:.3f}{flag}<br>"
             f"N = {v.get('N', 0)/1e3:.2f} kN<br>"
             f"My = {v.get('My', 0)/1e6:.2f} kNm  "
             f"Mz = {v.get('Mz', 0)/1e6:.2f} kNm<br>"
-            f"V = {v.get('V', 0)/1e3:.2f} kN<br>"
-            f"utilisation = {u:.3f}")
+            f"V = {v.get('V', 0)/1e3:.2f} kN")
     fig.add_trace(go.Scatter3d(x=dx, y=dy, z=dz, mode="lines",
                                line=dict(color="#1f77b4", width=4),
                                hoverinfo="skip", name="deformed"))
     fig.add_trace(go.Scatter3d(
         x=mxs, y=mys, z=mzs, mode="markers",
-        marker=dict(size=4, color=mcolor),
+        marker=dict(size=5, color=muval, colorscale="RdYlGn",
+                    reversescale=True, cmin=0.0, cmax=1.2,
+                    colorbar=dict(title="utilisation", thickness=14,
+                                  len=0.6)),
         text=mtext, hoverinfo="text", name="members"))
 
     # support nodes with reaction hover
@@ -122,29 +117,14 @@ def figure_for_case(model, case, checks, scale=1.0):
 
 
 def figure_for_envelope(model, env, scale=1.0):
-    member_vals, util = {}, {}
+    member_vals = {}
     for mid, e in env.members.items():
         member_vals[mid] = {"N": e.N_min if abs(e.N_min) > abs(e.N_max)
                             else e.N_max,
                             "My": e.My_absmax, "Mz": e.Mz_absmax,
                             "V": e.V_absmax}
-    # worst utilisation per member across the envelope's checks
-    for c in [x for x in [env.governing] if x]:
-        pass
+    # colour by the real EN 15512 utilisation enveloped over the set
     rep = env.representative_case()
     return _core_figure(model, rep, member_vals, env.reactions,
-                        _envelope_member_util(env),
+                        env.member_util,
                         scale, f"{env.name} envelope (×{scale:g})")
-
-
-def _envelope_member_util(env) -> Dict[int, float]:
-    # approximate per-member utilisation from the enveloped extremes is not
-    # recomputed here; colour by relative moment magnitude instead so the
-    # plot still highlights the worked members.  (Exact per-member util is
-    # available in the checks table.)
-    out: Dict[int, float] = {}
-    mmax = max((e.Mz_absmax + e.My_absmax for e in env.members.values()),
-               default=1.0) or 1.0
-    for mid, e in env.members.items():
-        out[mid] = (e.Mz_absmax + e.My_absmax) / mmax
-    return out

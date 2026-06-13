@@ -62,10 +62,21 @@ def _load_results(cdir):
 
 
 @st.dialog("Analysis run summary", width="large")
-def _run_summary_dialog(rs):
+def _run_summary_dialog(rs, target=None):
     v = rs.get("verdict", "?")
+    gov = rs.get("governing") or {}
     st.markdown(f"### {'🟢' if v == 'PASS' else '🔴'} {v}  ·  "
                 f"max member stress utilisation = {rs.get('max_stress', '-')}")
+    if gov:
+        st.markdown(f"Governing: **{gov.get('check')}** on "
+                    f"{gov.get('target')} = **{gov.get('utilization')}** "
+                    f"({gov.get('case')})")
+    if target is not None:
+        if st.button("📊 View results (model coloured by utilisation, "
+                     "hover for forces/reactions) →", type="primary",
+                     use_container_width=True):
+            ss.project_id, ss.system_id, ss.config_id = target
+            goto("view_config")
     st.markdown(f"**{rs.get('n_cases', 0)} analysis cases** from "
                 f"{len(rs.get('combinations', []))} load combinations on "
                 f"{len(rs.get('load_cases', []))} load cases.")
@@ -533,9 +544,8 @@ def render_configure():
         with st.spinner("Running OpenSees (this can take a few minutes)…"):
             summary, _ = run_configuration(PSTORE, proj.id, sysm.id, conf.id)
         # post-run popup with the cases / combinations / convergence / stress
-        _run_summary_dialog(summary)
-        ss.config_id = conf.id
-        ss.view = "view_config"
+        # and a button to open the results view (model coloured by util)
+        _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
 
 
 def _save_config(pid, sid, cfg, master_id, notes, silent=False):
