@@ -330,6 +330,21 @@ def render_dashboard():
             if cc[3].button("Open →", key=f"open_{proj.id}",
                             use_container_width=True):
                 goto("project", project_id=proj.id)
+            if cc[3].button("🗑 Delete", key=f"delp_{proj.id}",
+                            use_container_width=True):
+                ss[f"confirm_delp_{proj.id}"] = True
+            if ss.get(f"confirm_delp_{proj.id}"):
+                st.warning(f"Permanently delete project '{proj.name}' and all "
+                           f"its systems / configurations / results?")
+                wc = st.columns(2)
+                if wc[0].button("Yes, delete project", key=f"delpy_{proj.id}",
+                                type="primary"):
+                    PSTORE.delete_project(proj.id)
+                    ss[f"confirm_delp_{proj.id}"] = False
+                    st.rerun()
+                if wc[1].button("Cancel", key=f"delpn_{proj.id}"):
+                    ss[f"confirm_delp_{proj.id}"] = False
+                    st.rerun()
 
 
 def render_new_project():
@@ -377,7 +392,23 @@ def render_project():
         return
 
     for sysm in proj.systems:
-        st.subheader(f"System: {sysm.name}")
+        sc = st.columns([6, 2])
+        sc[0].subheader(f"System: {sysm.name}")
+        if sc[1].button("🗑 Delete system", key=f"dsys_{sysm.id}",
+                        use_container_width=True):
+            ss[f"confirm_dsys_{sysm.id}"] = True
+        if ss.get(f"confirm_dsys_{sysm.id}"):
+            st.warning(f"Delete system '{sysm.name}' and its "
+                       f"{len(sysm.configurations)} configuration(s)?")
+            wc = st.columns(2)
+            if wc[0].button("Yes, delete system", key=f"dsysy_{sysm.id}",
+                            type="primary"):
+                PSTORE.delete_system(proj.id, sysm.id)
+                ss[f"confirm_dsys_{sysm.id}"] = False
+                goto("project", project_id=proj.id)
+            if wc[1].button("Cancel", key=f"dsysn_{sysm.id}"):
+                ss[f"confirm_dsys_{sysm.id}"] = False
+                st.rerun()
         if sysm.description:
             st.caption(sysm.description)
         if st.button("➕ New configuration", key=f"newcfg_{sysm.id}"):
@@ -390,7 +421,7 @@ def render_project():
             rs = conf.run_summary or {}
             gov = rs.get("governing") or {}
             with st.container(border=True):
-                cc = st.columns([3, 2, 2, 2])
+                cc = st.columns([3, 2, 1.6, 1.6, 1.6])
                 cc[0].markdown(f"**{conf.name}**  \n`{conf.id}`"
                                + (f"  \n{conf.notes}" if conf.notes else ""))
                 verdict = rs.get("verdict", "not run")
@@ -409,6 +440,19 @@ def render_project():
                     cfg0 = rackconfig_from_dict(conf.config)
                     goto("configure", project_id=proj.id, system_id=sysm.id,
                          config_id=conf.id, edit_cfg=cfg0)
+                if cc[4].button("🗑 Delete", key=f"dc_{conf.id}",
+                                use_container_width=True):
+                    ss[f"confirm_dc_{conf.id}"] = True
+                if ss.get(f"confirm_dc_{conf.id}"):
+                    if cc[4].button("Confirm delete", key=f"dcy_{conf.id}",
+                                    type="primary", use_container_width=True):
+                        PSTORE.delete_configuration(proj.id, sysm.id, conf.id)
+                        ss[f"confirm_dc_{conf.id}"] = False
+                        goto("project", project_id=proj.id)
+                    if cc[4].button("Cancel", key=f"dcn_{conf.id}",
+                                    use_container_width=True):
+                        ss[f"confirm_dc_{conf.id}"] = False
+                        st.rerun()
 
 
 # ------------------------------------------------------- view a saved config

@@ -260,6 +260,38 @@ class ProjectStore:
         conf.updated = _now()
         self.save(project)
 
+    def delete_configuration(self, project_id: str, system_id: str,
+                             config_id: str) -> None:
+        """Remove a configuration and its artifacts directory."""
+        import shutil
+        project = self.load(project_id)
+        system = project.system(system_id)
+        if system is None:
+            return
+        system.configurations = [c for c in system.configurations
+                                 if c.id != config_id]
+        self.save(project)
+        cdir = self.config_dir(project_id, system_id, config_id)
+        if os.path.isdir(cdir):
+            shutil.rmtree(cdir, ignore_errors=True)
+
+    def delete_system(self, project_id: str, system_id: str) -> None:
+        """Remove a system (with all its configurations) and its directory."""
+        import shutil
+        project = self.load(project_id)
+        project.systems = [s for s in project.systems if s.id != system_id]
+        self.save(project)
+        sdir = os.path.join(self._proj_dir(project_id), system_id)
+        if os.path.isdir(sdir):
+            shutil.rmtree(sdir, ignore_errors=True)
+
+    def delete_project(self, project_id: str) -> None:
+        """Remove an entire project and its directory."""
+        import shutil
+        d = self._proj_dir(project_id)
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+
     @staticmethod
     def _unique_id(parent: str, base: str,
                    taken: Optional[set] = None) -> str:

@@ -99,6 +99,36 @@ def test_update_configuration_in_place(tmp_path):
     assert len(store.load(proj.id).system(sysm.id).configurations) == 1
 
 
+def test_delete_configuration_system_project(tmp_path):
+    store = ProjectStore(str(tmp_path / "projects"))
+    proj = store.create_project("Job")
+    s1 = store.add_system(proj.id, "Aisle 1")
+    s2 = store.add_system(proj.id, "Aisle 2")
+    c1 = store.add_configuration(proj.id, s1.id, "A", RackConfig())
+    store.add_configuration(proj.id, s1.id, "B", RackConfig())
+    cdir = store.config_dir(proj.id, s1.id, c1.id)
+    assert os.path.isdir(cdir)
+
+    # delete one configuration (and its directory), the other survives
+    store.delete_configuration(proj.id, s1.id, c1.id)
+    reloaded = store.load(proj.id)
+    ids = [c.id for c in reloaded.system(s1.id).configurations]
+    assert c1.id not in ids and len(ids) == 1
+    assert not os.path.isdir(cdir)
+
+    # delete a whole system
+    store.delete_system(proj.id, s1.id)
+    reloaded = store.load(proj.id)
+    assert reloaded.system(s1.id) is None
+    assert reloaded.system(s2.id) is not None
+    assert not os.path.isdir(os.path.join(store._proj_dir(proj.id), s1.id))
+
+    # delete the project
+    store.delete_project(proj.id)
+    assert not store.exists(proj.id)
+    assert proj.id not in [p.id for p in store.list_projects()]
+
+
 def test_unique_ids_and_run_summary(tmp_path):
     store = ProjectStore(str(tmp_path / "projects"))
     p1 = store.create_project("Job")
