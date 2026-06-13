@@ -208,9 +208,17 @@ def test_brace_bolt_and_baseplate_checks_in_pipeline():
     assert bolts and all(c.member_set in ("bracing", "row spacers")
                          for c in bolts)
     assert any("governs" in c.detail for c in bolts)
-    # strip method: a typical 4 mm plate verifies (EN 1993-1-8 6.2.5)
+    # EN 15512 contact pressure: fj = 2.5 fck/gc and a typical 4 mm plate
+    # verifies (the old 0.85 fck method wrongly failed it)
     assert plates and all(c.ok for c in plates)
-    assert all("A_eff" in c.detail and "t_req" in c.detail for c in plates)
+    assert all("fj=2.5*fck" in c.detail and "Abas" in c.detail
+               for c in plates)
+    # base partial-restraint and anchorage checks present
+    assert any(c.check == "BASE_RESTRAINT" for c in checks)
+    assert any(c.check == "ANCHORAGE" for c in checks)
+    # bracing members get their own buckling check
+    bb = [c for c in checks if c.check == "BRACE_BUCKLING"]
+    assert bb and all(c.member_set in ("bracing", "row spacers") for c in bb)
 
 
 def test_back_to_back_rear_bracing_mirrored():
@@ -376,6 +384,48 @@ def test_accidental_load_case_and_factor_report():
     assert "## Load combinations" in report
     assert "1.3 x dead + 1.4 x pallets" in report
     assert "1 x dead + 1 x pallets + 1 x accidental_x" in report
+
+
+def test_flexural_torsional_buckling_worked_example():
+    """EN 15512 worked example upright U1 (100/75/2.5): Ncr,y=492.2 kN,
+    Ncr,T=1162 kN (LeT=0.7x95cm), Ncr,FT=373 kN, Nb,Rd,FT=167.3 kN."""
+    from rack15512.checks import buckling
+    E, G, A, Aeff, fy = 210000.0, 80770.0, 700.0, 640.0, 355.0
+    Iy, Iz, It, Iw, y0 = 880000.0, 330000.0, 1200.0, 1.3e9, 60.0
+    i0_sq = (Iy + Iz) / A + y0 ** 2
+    Ncr_y = buckling.n_cr(E, Iy, 1925.0)
+    Ncr_T = buckling.n_cr_torsional(E, G, It, Iw, i0_sq, 0.7 * 950.0)
+    Ncr_FT = buckling.n_cr_flex_tors(Ncr_y, Ncr_T, y0, i0_sq)
+    chi = buckling.chi(buckling.lambda_bar(Aeff, fy, Ncr_FT), "b")
+    Nb = chi * Aeff * fy
+    assert Ncr_y / 1e3 == pytest.approx(492.2, rel=0.01)
+    assert Ncr_T / 1e3 == pytest.approx(1162.0, rel=0.02)
+    assert Ncr_FT / 1e3 == pytest.approx(373.0, rel=0.03)
+    assert Nb / 1e3 == pytest.approx(167.3, rel=0.03)
+
+
+def test_base_plate_en15512_contact_pressure():
+    """EN 15512 9.10.1: fj = 2.5 fck/gc; a standard 100x176x4 footplate
+    on a 120 upright verifies (the old 0.85 fck method failed it)."""
+    master = __import__("rack15512.master_xlsx",
+                        fromlist=["load_master"]).load_master(
+        os.path.join(os.path.dirname(__file__), "..", "examples",
+                     "Master.xlsx"))
+    from rack15512.model import BasePlate
+    assert BasePlate(f_ck=25.0).bearing_strength() == pytest.approx(41.67,
+                                                                    rel=0.01)
+    cfg = RackConfig(n_bays=2, beam_levels=[1500.0, 3000.0, 4500.0, 6000.0],
+                     master=master, upright_section="UP0016",
+                     beam_section="RHS 112x50x2.0",
+                     brace_section="C 36X21X1.5", base_stiffness="auto")
+    model = build_rack(cfg)
+    assert model.base_plate.m_rd_n is not None      # base moment table
+    cases = run_all(model)
+    checks = run_checks(model, cases)
+    plate = max((c for c in checks if c.check == "BASEPLATE"),
+                key=lambda c: c.utilization)
+    assert plate.ok                                 # 4 mm plate passes
+    assert plate.utilization < 1.0
 
 
 def test_overloaded_rack_fails_checks():

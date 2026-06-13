@@ -90,9 +90,12 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
         if case.kind == "ULS":
             out += _stress_checks(model, case)
             out += _buckling_checks(model, case)
+            out += _brace_buckling_checks(model, case)
             out += _connector_checks(model, case)
             out += _brace_bolt_checks(model, case)
             out += _base_plate_checks(model, case)
+            out += _base_restraint_checks(model, case)
+            out += _anchorage_checks(model, case)
             out += _splice_checks(model, case)
             a = _alpha_cr_check(model, case)
             if a:
@@ -162,6 +165,17 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         chi_y = buckling.chi(lam_y, sec.buckling_curve_y)
         chi_z = buckling.chi(lam_z, sec.buckling_curve_z)
         chi_min = min(chi_y, chi_z)
+        gov = "y" if chi_y <= chi_z else "z"
+        # flexural-torsional buckling (EN 15512 9.7.5) when the gross
+        # torsion / warping / shear-centre data is available
+        ft_txt = ""
+        # torsional restraint at the cross-aisle bracing nodes: the
+        # torsional length is the bracing-node spacing (Lcr_z)
+        L_tors = m.L_buckling_y or mr.length
+        chi_ft = _chi_ft(sec, mat, L_tors, Ncr_y, model.checks.beta_T)
+        if chi_ft is not None and chi_ft < chi_min:
+            chi_min, gov = chi_ft, "FT"
+            ft_txt = f", chi_FT={chi_ft:.3f}"
         Nb_rd = chi_min * sec.area_eff * mat.fy / g
         My_rd = sec.mod_y_eff * mat.fy / g
         Mz_rd = sec.mod_z_eff * mat.fy / g
@@ -169,16 +183,74 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         eta = Nc / Nb_rd
         if m.mtype == "beam":
             eta += kM * mr.My_absmax / My_rd + kM * mr.Mz_absmax / Mz_rd
-        gov = "y" if chi_y <= chi_z else "z"
         detail = (f"Nc={Nc/1e3:.1f} kN, My={mr.My_absmax/1e6:.2f} kNm, "
                   f"Mz={mr.Mz_absmax/1e6:.2f} kNm; "
                   f"Lcr_y={Lcr_y:.0f}, Lcr_z={Lcr_z:.0f} mm, "
                   f"lambda_y={lam_y:.2f}, lambda_z={lam_z:.2f}, "
-                  f"chi={chi_min:.3f} (about {gov}, curve "
-                  f"{sec.buckling_curve_y if gov == 'y' else sec.buckling_curve_z}), "
+                  f"chi_min={chi_min:.3f} (gov {gov}){ft_txt}, "
                   f"Nb_Rd={Nb_rd/1e3:.1f} kN")
         res.append(CheckResult("BUCKLING", case.name, f"member {mid}",
                                m.member_set, eta, detail))
+    return res
+
+
+def _chi_ft(sec: CrossSection, mat, length: float, Ncr_y: float,
+            beta_T: float = 0.7) -> Optional[float]:
+    """Flexural-torsional buckling reduction factor (EN 15512 9.7.5), or
+    None when the gross torsion/warping/shear-centre data is unavailable.
+    The torsional buckling length is beta_T * length (fig 24)."""
+    if sec.It_gross is None or sec.Iw_gross is None or sec.y0 is None:
+        return None
+    Iy_g = sec.Iy_gross if sec.Iy_gross is not None else sec.Iy
+    Iz_g = sec.Iz_gross if sec.Iz_gross is not None else sec.Iz
+    A = sec.A
+    i0_sq = (Iy_g + Iz_g) / A + sec.y0 ** 2
+    L_T = beta_T * length
+    Ncr_T = buckling.n_cr_torsional(mat.E, mat.G, sec.It_gross,
+                                    sec.Iw_gross, i0_sq, L_T)
+    Ncr_FT = buckling.n_cr_flex_tors(Ncr_y, Ncr_T, sec.y0, i0_sq)
+    if Ncr_FT <= 0:
+        return None
+    lam = buckling.lambda_bar(sec.area_eff, mat.fy, Ncr_FT)
+    return buckling.chi(lam, sec.buckling_curve_y)
+
+
+def _brace_buckling_checks(model: RackModel,
+                           case: CaseResult) -> List[CheckResult]:
+    """Compression buckling of the frame-bracing members (EN 15512 10.4):
+    flexural about both axes plus flexural-torsional, buckling curve from
+    the bracing master (typically 'c'), system length = member length.
+    Uses the FULL brace area (the 0.15 analysis factor models connection
+    flexibility only, not a strength reduction)."""
+    res = []
+    g = model.checks.gamma_M1
+    for mid, mr in case.members.items():
+        m = model.members[mid]
+        if m.member_set not in ("bracing", "row spacers"):
+            continue
+        if mr.N_min >= 0.0:
+            continue
+        sec = model.section_of(m)
+        mat = model.material_of(m)
+        L = mr.length
+        Ncr_y = buckling.n_cr(mat.E, sec.Iy, L)
+        Ncr_z = buckling.n_cr(mat.E, sec.Iz, L)
+        chi_y = buckling.chi(buckling.lambda_bar(sec.A, mat.fy, Ncr_y),
+                             sec.buckling_curve_y)
+        chi_z = buckling.chi(buckling.lambda_bar(sec.A, mat.fy, Ncr_z),
+                             sec.buckling_curve_z)
+        chi_min, gov = (chi_y, "y") if chi_y <= chi_z else (chi_z, "z")
+        chi_ft = _chi_ft(sec, mat, L, Ncr_y, beta_T=1.0)   # brace: betaT=1
+        if chi_ft is not None and chi_ft < chi_min:
+            chi_min, gov = chi_ft, "FT"
+        Nb_rd = chi_min * sec.A * mat.fy / g
+        Nc = abs(mr.N_min)
+        res.append(CheckResult(
+            "BRACE_BUCKLING", case.name, f"member {mid}", m.member_set,
+            Nc / Nb_rd,
+            f"Nc={Nc/1e3:.2f} kN, L={L:.0f} mm, chi_min={chi_min:.3f} "
+            f"(gov {gov}, curve {sec.buckling_curve_z}), "
+            f"Nb_Rd={Nb_rd/1e3:.2f} kN"))
     return res
 
 
@@ -186,6 +258,9 @@ def _connector_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     res = []
     for mid, mr in case.members.items():
         m = model.members[mid]
+        sec = model.section_of(m)
+        v_rd = sec.connector_v_rd
+        a_arm = sec.connector_arm
         for end, hinge in (("i", m.hinge_i), ("j", m.hinge_j)):
             if hinge is None:
                 continue
@@ -194,11 +269,24 @@ def _connector_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
                                   ("y", hinge.m_rd_y, st.My)):
                 if m_rd is None:
                     continue
+                # EN 15512 9.5.4 combined bending + shear at the connector:
+                #   M_Sd/M_Rd + (V_Sd - M_Rd/a)/V_Rd <= 1
+                # falls back to pure bending when V_Rd is not in the master
+                V = math.hypot(st.Vy, st.Vz)
+                if v_rd and axis == "z":
+                    util = abs(M) / m_rd + max(V - m_rd / a_arm, 0.0) / v_rd
+                    detail = (f"M{axis},Ed={abs(M)/1e6:.3f} kNm, "
+                              f"V_Ed={V/1e3:.2f} kN; M_Rd={m_rd/1e6:.3f} kNm, "
+                              f"V_Rd={v_rd/1e3:.2f} kN, a={a_arm:.0f} mm "
+                              f"(EN 15512 9.5.4 interaction)")
+                else:
+                    util = abs(M) / m_rd
+                    detail = (f"M{axis},Ed={abs(M)/1e6:.3f} kNm, "
+                              f"M{axis},Rd={m_rd/1e6:.3f} kNm")
                 res.append(CheckResult(
-                    "CONNECTOR", case.name, f"member {mid} end {end} ({axis})",
-                    m.member_set, abs(M) / m_rd,
-                    f"M{axis},Ed={abs(M)/1e6:.3f} kNm, "
-                    f"M{axis},Rd={m_rd/1e6:.3f} kNm"))
+                    "CONNECTOR", case.name,
+                    f"member {mid} end {end} ({axis})",
+                    m.member_set, util, detail))
     return res
 
 
@@ -288,84 +376,115 @@ def _brace_bolt_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     return res
 
 
+def _upright_at(model: RackModel, node: int):
+    for m in model.members.values():
+        if node in (m.node_i, m.node_j):
+            sec = model.section_of(m)
+            if m.member_set == "uprights" or sec.role == "upright":
+                return sec
+    return None
+
+
 def _base_plate_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
-    """Footplate per EN 1993-1-8 6.2.5 (T-stub in compression): the plate
-    bears on STRIPS of width c on each side of the upright's walls,
-
-        c = t_p * sqrt(fy_p / (3 * f_jd * gamma_M0)),
-        A_eff = L_p * (t_wall + 2c)   (L_p = developed wall length = A/t),
-
-    and must carry the governing base demand N_eq = N + 6*M/d (elastic
-    peak-pressure equivalent of the concurrent base moment).  The required
-    thickness follows from inverting c; typical rack plates of 3-4 mm
-    verify."""
+    """Contact pressure on the floor + base plate (EN 15512 9.9 / 9.10.1,
+    10.5.3/4): the upright compression spreads under the wall over a strip
+    of half-width e = t_p*sqrt(fy_p/(3 fj)) (capped at the plate overhang),
+    giving Abas = L_p*(t_wall + 2e) (<= plate area); check N_Sd <= fj*Abas.
+    fj = 2.5*f_ck/gamma_c.  The base moment is NOT included here - it is the
+    separate BASE_RESTRAINT check (EN 15512 10.5.1)."""
     bp = model.base_plate
     if bp is None or not case.reactions:
         return []
-    f_jd = bp.bearing_strength()
-    g0 = model.checks.gamma_M0
+    fj = bp.bearing_strength()
 
-    # upright section at each support, for wall thickness / footprint
-    def upright_at(node: int):
-        for m in model.members.values():
-            if node in (m.node_i, m.node_j):
-                sec = model.section_of(m)
-                if m.member_set == "uprights" or sec.role == "upright":
-                    return sec
-        return None
-
-    # governing support: max equivalent axial incl. the base moment
-    best = None
-    for node, r in case.reactions.items():
-        N = max(r[2], 0.0)
-        M = math.hypot(r[3], r[4])
-        sec = upright_at(node)
-        d_h = (sec.depth_h if sec and sec.depth_h else 100.0)
-        N_eq = N + 6.0 * M / d_h
-        if best is None or N_eq > best[0]:
-            best = (N_eq, N, M, node, sec)
-    N_eq, N, M, node, sec = best
-
+    node, r = max(case.reactions.items(), key=lambda kv: kv[1][2])
+    N = max(r[2], 0.0)
+    sec = _upright_at(model, node)
     note = ""
     if sec is None or not sec.t:
-        sec_t, sec_A = 2.0, 600.0
-        note = " (upright wall data missing in master, t=2/A=600 assumed)"
+        sec_t, sec_A, foot_w, foot_d = 2.0, 600.0, 100.0, 100.0
+        note = " (upright data missing in master; t=2, A=600 assumed)"
     else:
         sec_t, sec_A = sec.t, sec.A
-    foot_w = sec.depth_h if sec and sec.depth_h else 100.0
-    foot_d = sec.width_b if sec and sec.width_b else 100.0
-    L_p = sec_A / sec_t                      # developed wall length
+        foot_w = sec.depth_h or 100.0        # along X
+        foot_d = sec.width_b or 100.0        # plate width, along Y
+    L_p = sec_A / sec_t                       # developed wall length
 
-    A_req = N_eq / f_jd
-    c_req = max(0.0, (A_req / L_p - sec_t) / 2.0)
-    t_req = c_req * math.sqrt(3.0 * f_jd * g0 / bp.fy_plate)
-    # minimum plate stated with the aspect of the actual plate (or the
-    # upright footprint); standard rack plates may be narrower than the
-    # upright depth - the section is allowed to overhang
-    aspect = (bp.b / bp.d) if bp.b and bp.d else (foot_w / foot_d)
-    min_b = math.sqrt(A_req * aspect)
-    min_d = A_req / min_b
-    min_txt = (f"N={N/1e3:.1f} kN, M={M/1e6:.2f} kNm -> N_eq={N_eq/1e3:.1f} kN "
-               f"at node {node}; f_jd={f_jd:.2f} MPa, A_req={A_req:.0f} mm2, "
-               f"strip c_req={c_req:.1f} mm -> t_req={t_req:.1f} mm "
-               f"(use >= {max(t_req, 3.0):.1f} mm), "
-               f"min plate area {min_b:.0f}x{min_d:.0f} mm{note}")
-
+    A_req = N / fj
     if bp.b and bp.d and bp.t:
-        c_t = bp.t * math.sqrt(bp.fy_plate / (3.0 * f_jd * g0))
-        A_eff = min(L_p * (sec_t + 2.0 * c_t), bp.b * bp.d)
-        util = A_req / A_eff if A_eff > 0 else 99.0
-        over = ""
-        if bp.b + 1.0 < foot_w or bp.d + 1.0 < foot_d:
-            over = (f" (upright {foot_w:.0f}x{foot_d:.0f} overhangs the "
-                    "plate; A_eff capped by the plate area)")
-        return [CheckResult(
-            "BASEPLATE", case.name, f"node {node}", "-", util,
-            f"plate {bp.b:.0f}x{bp.d:.0f}x{bp.t:.1f}: c={c_t:.1f} mm, "
-            f"A_eff={A_eff:.0f} mm2 vs A_req={A_req:.0f} mm2{over}; "
-            f"{min_txt}")]
-    return [CheckResult("BASEPLATE", case.name, f"node {node}", "-", 0.0,
-                        min_txt, informative=True)]
+        # overhang from the upright wall to the nearest plate edge caps e
+        over_x = max((bp.b - foot_w) / 2.0, 0.0)
+        over_y = max((bp.d - foot_d) / 2.0, 0.0)
+        e_cap = max(min(over_x, over_y), 0.0) or max(over_x, over_y)
+        e = bp.t * math.sqrt(bp.fy_plate / (3.0 * fj))
+        e_eff = min(e, e_cap) if e_cap > 0 else e
+        Abas = min(L_p * (sec_t + 2.0 * e_eff), bp.b * bp.d)
+        util = A_req / Abas if Abas > 0 else 99.0
+        # thickness needed so the strip reaches the plate edge (full Abas)
+        t_min = (foot_w * 0.0)  # placeholder, computed from e_cap below
+        t_for_edge = (e_cap / math.sqrt(bp.fy_plate / (3.0 * fj))
+                      if e_cap > 0 else bp.t)
+        detail = (f"N={N/1e3:.1f} kN at node {node}; fj=2.5*fck/gc="
+                  f"{fj:.1f} MPa, plate {bp.b:.0f}x{bp.d:.0f}x{bp.t:.1f}, "
+                  f"e={e:.1f} mm (cap {e_cap:.1f}), Abas={Abas:.0f} mm2, "
+                  f"fj*Abas={fj*Abas/1e3:.1f} kN >= N? "
+                  f"util={util:.3f}; t to fill plate ~{t_for_edge:.1f} mm"
+                  f"{note}")
+        return [CheckResult("BASEPLATE", case.name, f"node {node}", "-",
+                            util, detail)]
+    # no plate given: report the minimum bearing area needed
+    return [CheckResult(
+        "BASEPLATE", case.name, f"node {node}", "-", 0.0,
+        f"N={N/1e3:.1f} kN, fj={fj:.1f} MPa -> min contact area "
+        f"Abas={A_req:.0f} mm2; a standard footplate (3-4 mm) normally "
+        f"suffices{note}", informative=True)]
+
+
+def _base_restraint_checks(model: RackModel,
+                           case: CaseResult) -> List[CheckResult]:
+    """Partial restraint of the upright base (EN 15512 10.5.1):
+    MSd,y / MRd(NSd) <= 1, with MRd(NSd) interpolated from the
+    floor-connection moment-resistance table (BASE_STIFFNESS sheet)."""
+    bp = model.base_plate
+    if bp is None or not bp.m_rd_n or not case.reactions:
+        return []
+    res = []
+    worst = None
+    for node, r in case.reactions.items():
+        N = max(r[2], 0.0)
+        M = math.hypot(r[3], r[4])           # base restraint moment
+        m_rd = bp.m_rd_at(N)
+        if not m_rd:
+            continue
+        util = M / m_rd
+        if worst is None or util > worst.utilization:
+            worst = CheckResult(
+                "BASE_RESTRAINT", case.name, f"node {node}", "uprights",
+                util, f"N={N/1e3:.1f} kN, M_Sd={M/1e6:.2f} kNm, "
+                      f"M_Rd(N)={m_rd/1e6:.2f} kNm")
+    if worst:
+        res.append(worst)
+    return res
+
+
+def _anchorage_checks(model: RackModel,
+                      case: CaseResult) -> List[CheckResult]:
+    """Anchorage / overturning (EN 15512 7.6, 9.10.4): each upright-floor
+    connection must resist a minimum tension and shear; net base uplift
+    (where the vertical reaction goes into tension) is checked against the
+    anchor tension capacity."""
+    bp = model.base_plate
+    if bp is None or not case.reactions:
+        return []
+    # most-tensioned base (negative vertical reaction = uplift)
+    node, r = min(case.reactions.items(), key=lambda kv: kv[1][2])
+    uplift = max(-r[2], 0.0)
+    util = uplift / bp.anchor_tension if bp.anchor_tension else 0.0
+    return [CheckResult(
+        "ANCHORAGE", case.name, f"node {node}", "uprights", util,
+        f"uplift={uplift/1e3:.2f} kN vs anchor tension capacity "
+        f"{bp.anchor_tension/1e3:.1f} kN (EN 15512 9.10.4 min 3 kN "
+        f"tension + 5 kN shear must also be provided)")]
 
 
 def _splice_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:

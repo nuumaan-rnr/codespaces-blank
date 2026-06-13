@@ -319,15 +319,26 @@ def load_rfem(path: str, fy: float = 250.0, master=None) -> RackModel:
     # ---- load-dependent base springs from the master (see docstring) ---------
     if master is not None and model.supports:
         N_est = _estimate_support_axial(model)
+        base_upright = None
         for idx, sup in enumerate(model.supports):
             upright = support_upright.get(idx, "")
             if upright not in master.base_tables:
                 continue
+            base_upright = upright
             k_b, _ = master.base_stiffness(upright, N_est)
             if sup.rx is False:
                 sup.rx = k_b
             if sup.ry is False:
                 sup.ry = k_b
+        # base moment table for the partial-restraint check (EN 15512 10.5.1)
+        if base_upright:
+            from .model import BasePlate
+            m_rd_n = [(N, m_rd)
+                      for N, k_b, m_rd in master.base_tables[base_upright]]
+            if model.base_plate is None:
+                model.base_plate = BasePlate(m_rd_n=m_rd_n)
+            else:
+                model.base_plate.m_rd_n = m_rd_n
 
     return model
 

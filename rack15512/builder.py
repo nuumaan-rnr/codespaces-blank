@@ -440,8 +440,14 @@ def build_rack(cfg: RackConfig) -> RackModel:
         std = standard_footplate(up.depth_h)
         if std:
             pb, pd_, pt = std
+    # base moment-resistance table MRd(N) from the floor-connection tests
+    # (BASE_STIFFNESS sheet) for the partial-restraint check
+    m_rd_n = None
+    if cfg.master and up.name in cfg.master.base_tables:
+        m_rd_n = [(N, m_rd)
+                  for N, k_b, m_rd in cfg.master.base_tables[up.name]]
     m.base_plate = BasePlate(f_ck=cfg.concrete_fck, fy_plate=cfg.plate_fy,
-                             b=pb, d=pd_, t=pt)
+                             b=pb, d=pd_, t=pt, m_rd_n=m_rd_n)
 
     # upright splice connection check
     if splice_z:

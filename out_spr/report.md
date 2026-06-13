@@ -38,9 +38,9 @@
 | SLS1 | SLS | yes | 0.90 | 0.13 | 235.69 |
 | SLS2 | SLS | yes | 13.53 | 0.13 | 4.45 |
 
-## Verdict: **FAIL**
+## Verdict: **PASS**
 
-Governing: BASEPLATE on node 100000 (-) in 'ULS2 (imp +x)' - utilization **1.166**
+Governing: STRESS on member 309 (pallet beams) in 'ULS2 (imp -y)' - utilization **0.766**
 
 ## Utilization by level
 
@@ -103,47 +103,93 @@ Beams and connectors at the level; uprights and bracing of the storey below it.
 
 | target | set | case | utilization | status | detail |
 |---|---|---|---|---|---|
-| member 141 | uprights | ULS2 (imp +x) | 0.707 | PASS | Nc=56.7 kN, My=0.00 kNm, Mz=0.61 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 73 | uprights | ULS2 (imp +x) | 0.707 | PASS | Nc=56.8 kN, My=0.00 kNm, Mz=0.60 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 69 | uprights | ULS2 (imp +x) | 0.702 | PASS | Nc=57.0 kN, My=0.01 kNm, Mz=0.55 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 137 | uprights | ULS2 (imp +x) | 0.701 | PASS | Nc=56.9 kN, My=0.01 kNm, Mz=0.55 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 137 | uprights | ULS2 (imp -y) | 0.697 | PASS | Nc=59.0 kN, My=0.06 kNm, Mz=0.28 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 69 | uprights | ULS2 (imp -y) | 0.696 | PASS | Nc=59.0 kN, My=0.06 kNm, Mz=0.28 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 140 | uprights | ULS2 (imp +x) | 0.682 | PASS | Nc=56.8 kN, My=0.00 kNm, Mz=0.50 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 72 | uprights | ULS2 (imp +x) | 0.682 | PASS | Nc=56.9 kN, My=0.00 kNm, Mz=0.50 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 70 | uprights | ULS2 (imp +x) | 0.668 | PASS | Nc=56.9 kN, My=0.00 kNm, Mz=0.44 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 138 | uprights | ULS2 (imp +x) | 0.668 | PASS | Nc=56.8 kN, My=0.00 kNm, Mz=0.44 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 90 | uprights | ULS3 (imp -x) | 0.661 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 90 | uprights | ULS3 (imp +x) | 0.660 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 107 | uprights | ULS2 (imp -x) | 0.659 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 90 | uprights | ULS2 (imp -x) | 0.658 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 175 | uprights | ULS2 (imp -x) | 0.658 | PASS | Nc=56.9 kN, My=0.03 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 158 | uprights | ULS2 (imp -x) | 0.658 | PASS | Nc=56.9 kN, My=0.03 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 158 | uprights | ULS3 (imp +x) | 0.658 | PASS | Nc=56.7 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 158 | uprights | ULS3 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 158 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 107 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 175 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 90 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 175 | uprights | ULS3 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 90 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 175 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 107 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 158 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 175 | uprights | ULS3 (imp -x) | 0.656 | PASS | Nc=56.9 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 158 | uprights | ULS2 (imp +x) | 0.656 | PASS | Nc=56.7 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 175 | uprights | ULS2 (imp +x) | 0.656 | PASS | Nc=56.7 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 90 | uprights | ULS2 (imp +x) | 0.656 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 107 | uprights | ULS2 (imp +x) | 0.655 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 107 | uprights | ULS3 (imp -x) | 0.654 | PASS | Nc=56.6 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 107 | uprights | ULS3 (imp +x) | 0.654 | PASS | Nc=56.6 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 89 | uprights | ULS3 (imp -x) | 0.653 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 89 | uprights | ULS3 (imp +x) | 0.653 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 89 | uprights | ULS2 (imp -x) | 0.652 | PASS | Nc=56.8 kN, My=0.04 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 157 | uprights | ULS2 (imp -x) | 0.652 | PASS | Nc=56.9 kN, My=0.04 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 106 | uprights | ULS2 (imp -x) | 0.652 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
-| member 174 | uprights | ULS2 (imp -x) | 0.651 | PASS | Nc=56.9 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi=0.740 (about y, curve b), Nb_Rd=101.0 kN |
+| member 141 | uprights | ULS2 (imp +x) | 0.707 | PASS | Nc=56.7 kN, My=0.00 kNm, Mz=0.61 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 73 | uprights | ULS2 (imp +x) | 0.707 | PASS | Nc=56.8 kN, My=0.00 kNm, Mz=0.60 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 69 | uprights | ULS2 (imp +x) | 0.702 | PASS | Nc=57.0 kN, My=0.01 kNm, Mz=0.55 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 137 | uprights | ULS2 (imp +x) | 0.701 | PASS | Nc=56.9 kN, My=0.01 kNm, Mz=0.55 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 137 | uprights | ULS2 (imp -y) | 0.697 | PASS | Nc=59.0 kN, My=0.06 kNm, Mz=0.28 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 69 | uprights | ULS2 (imp -y) | 0.696 | PASS | Nc=59.0 kN, My=0.06 kNm, Mz=0.28 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 140 | uprights | ULS2 (imp +x) | 0.682 | PASS | Nc=56.8 kN, My=0.00 kNm, Mz=0.50 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 72 | uprights | ULS2 (imp +x) | 0.682 | PASS | Nc=56.9 kN, My=0.00 kNm, Mz=0.50 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 70 | uprights | ULS2 (imp +x) | 0.668 | PASS | Nc=56.9 kN, My=0.00 kNm, Mz=0.44 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 138 | uprights | ULS2 (imp +x) | 0.668 | PASS | Nc=56.8 kN, My=0.00 kNm, Mz=0.44 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 90 | uprights | ULS3 (imp -x) | 0.661 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 90 | uprights | ULS3 (imp +x) | 0.660 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 107 | uprights | ULS2 (imp -x) | 0.659 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 90 | uprights | ULS2 (imp -x) | 0.658 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 175 | uprights | ULS2 (imp -x) | 0.658 | PASS | Nc=56.9 kN, My=0.03 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 158 | uprights | ULS2 (imp -x) | 0.658 | PASS | Nc=56.9 kN, My=0.03 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 158 | uprights | ULS3 (imp +x) | 0.658 | PASS | Nc=56.7 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 158 | uprights | ULS3 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 158 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 107 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 175 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 90 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 175 | uprights | ULS3 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 90 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 175 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 107 | uprights | ULS1 (imp +x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 158 | uprights | ULS1 (imp -x) | 0.657 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 175 | uprights | ULS3 (imp -x) | 0.656 | PASS | Nc=56.9 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 158 | uprights | ULS2 (imp +x) | 0.656 | PASS | Nc=56.7 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 175 | uprights | ULS2 (imp +x) | 0.656 | PASS | Nc=56.7 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 90 | uprights | ULS2 (imp +x) | 0.656 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 107 | uprights | ULS2 (imp +x) | 0.655 | PASS | Nc=56.8 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 107 | uprights | ULS3 (imp -x) | 0.654 | PASS | Nc=56.6 kN, My=0.02 kNm, Mz=0.33 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 107 | uprights | ULS3 (imp +x) | 0.654 | PASS | Nc=56.6 kN, My=0.02 kNm, Mz=0.32 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 89 | uprights | ULS3 (imp -x) | 0.653 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 89 | uprights | ULS3 (imp +x) | 0.653 | PASS | Nc=57.0 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 89 | uprights | ULS2 (imp -x) | 0.652 | PASS | Nc=56.8 kN, My=0.04 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 157 | uprights | ULS2 (imp -x) | 0.652 | PASS | Nc=56.9 kN, My=0.04 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 106 | uprights | ULS2 (imp -x) | 0.652 | PASS | Nc=56.8 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
+| member 174 | uprights | ULS2 (imp -x) | 0.651 | PASS | Nc=56.9 kN, My=0.03 kNm, Mz=0.27 kNm; Lcr_y=1200, Lcr_z=1500 mm, lambda_y=0.77, lambda_z=0.45, chi_min=0.740 (gov y), Nb_Rd=101.0 kN |
 | ... | | | | | 3371 more rows omitted |
+
+## BRACE_BUCKLING checks
+
+| target | set | case | utilization | status | detail |
+|---|---|---|---|---|---|
+| member 359 | bracing | ULS3 (imp +y) | 0.186 | PASS | Nc=1.02 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 371 | bracing | ULS3 (imp -y) | 0.178 | PASS | Nc=0.98 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 359 | bracing | ULS2 (imp +y) | 0.174 | PASS | Nc=0.96 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 371 | bracing | ULS2 (imp -y) | 0.174 | PASS | Nc=0.95 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 359 | bracing | ULS1 (imp +y) | 0.173 | PASS | Nc=0.95 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 383 | bracing | ULS1 (imp +y) | 0.173 | PASS | Nc=0.95 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 347 | bracing | ULS1 (imp -y) | 0.173 | PASS | Nc=0.95 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 371 | bracing | ULS1 (imp -y) | 0.173 | PASS | Nc=0.95 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 383 | bracing | ULS2 (imp +y) | 0.173 | PASS | Nc=0.95 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 347 | bracing | ULS2 (imp -y) | 0.173 | PASS | Nc=0.95 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 383 | bracing | ULS3 (imp +y) | 0.169 | PASS | Nc=0.93 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 335 | bracing | ULS3 (imp +y) | 0.162 | PASS | Nc=0.89 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 321 | bracing | ULS5 acc Y (imp +y) | 0.162 | PASS | Nc=1.09 kN, L=1000 mm, chi_min=0.246 (gov FT, curve c), Nb_Rd=6.78 kN |
+| member 347 | bracing | ULS3 (imp -y) | 0.160 | PASS | Nc=0.88 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 335 | bracing | ULS5 acc Y (imp +y) | 0.143 | PASS | Nc=0.78 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 337 | bracing | ULS3 (imp +y) | 0.136 | PASS | Nc=0.75 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 324 | bracing | ULS3 (imp +y) | 0.134 | PASS | Nc=0.74 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 361 | bracing | ULS3 (imp +y) | 0.133 | PASS | Nc=0.73 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 359 | bracing | ULS5 acc Y (imp +y) | 0.127 | PASS | Nc=0.70 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 348 | bracing | ULS3 (imp +y) | 0.125 | PASS | Nc=0.69 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 373 | bracing | ULS3 (imp -y) | 0.123 | PASS | Nc=0.68 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 326 | bracing | ULS3 (imp +y) | 0.120 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 361 | bracing | ULS2 (imp +y) | 0.120 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 373 | bracing | ULS2 (imp -y) | 0.120 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 361 | bracing | ULS1 (imp +y) | 0.120 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 385 | bracing | ULS1 (imp +y) | 0.120 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 373 | bracing | ULS1 (imp -y) | 0.120 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 349 | bracing | ULS1 (imp -y) | 0.120 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 385 | bracing | ULS2 (imp +y) | 0.119 | PASS | Nc=0.66 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 349 | bracing | ULS2 (imp -y) | 0.119 | PASS | Nc=0.65 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 383 | bracing | ULS5 acc Y (imp +y) | 0.118 | PASS | Nc=0.65 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 385 | bracing | ULS3 (imp +y) | 0.116 | PASS | Nc=0.64 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 384 | bracing | ULS3 (imp -y) | 0.116 | PASS | Nc=0.64 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 339 | bracing | ULS3 (imp +y) | 0.115 | PASS | Nc=0.63 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 324 | bracing | ULS5 acc Y (imp +y) | 0.112 | PASS | Nc=0.62 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 348 | bracing | ULS2 (imp +y) | 0.112 | PASS | Nc=0.61 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 384 | bracing | ULS2 (imp -y) | 0.111 | PASS | Nc=0.61 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 348 | bracing | ULS1 (imp +y) | 0.111 | PASS | Nc=0.61 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 372 | bracing | ULS1 (imp +y) | 0.111 | PASS | Nc=0.61 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| member 360 | bracing | ULS1 (imp -y) | 0.111 | PASS | Nc=0.61 kN, L=1166 mm, chi_min=0.200 (gov FT, curve c), Nb_Rd=5.50 kN |
+| ... | | | | | 770 more rows omitted |
 
 ## CONNECTOR checks
 
@@ -241,20 +287,58 @@ Beams and connectors at the level; uprights and bracing of the storey below it.
 
 | target | set | case | utilization | status | detail |
 |---|---|---|---|---|---|
-| node 100000 | - | ULS2 (imp +x) | 1.166 | FAIL | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=5970 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=57.0 kN, M=0.55 kNm -> N_eq=84.6 kN at node 100000; f_jd=14.17 MPa, A_req=5970 mm2, strip c_req=11.4 mm -> t_req=4.7 mm (use >= 4.7 mm), min plate area 58x103 mm |
-| node 200000 | - | ULS2 (imp -y) | 1.009 | FAIL | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=5167 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=59.0 kN, M=0.28 kNm -> N_eq=73.2 kN at node 200000; f_jd=14.17 MPa, A_req=5167 mm2, strip c_req=9.8 mm -> t_req=4.0 mm (use >= 4.0 mm), min plate area 54x95 mm |
-| node 130000 | - | ULS3 (imp -x) | 0.981 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=5025 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=57.2 kN, M=0.28 kNm -> N_eq=71.2 kN at node 130000; f_jd=14.17 MPa, A_req=5025 mm2, strip c_req=9.5 mm -> t_req=3.9 mm (use >= 3.9 mm), min plate area 53x94 mm |
-| node 130000 | - | ULS3 (imp +x) | 0.981 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=5021 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=57.2 kN, M=0.28 kNm -> N_eq=71.1 kN at node 130000; f_jd=14.17 MPa, A_req=5021 mm2, strip c_req=9.5 mm -> t_req=3.9 mm (use >= 3.9 mm), min plate area 53x94 mm |
-| node 130000 | - | ULS1 (imp -x) | 0.976 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4999 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=56.9 kN, M=0.28 kNm -> N_eq=70.8 kN at node 130000; f_jd=14.17 MPa, A_req=4999 mm2, strip c_req=9.5 mm -> t_req=3.9 mm (use >= 3.9 mm), min plate area 53x94 mm |
-| node 230000 | - | ULS1 (imp +x) | 0.976 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4999 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=56.9 kN, M=0.28 kNm -> N_eq=70.8 kN at node 230000; f_jd=14.17 MPa, A_req=4999 mm2, strip c_req=9.5 mm -> t_req=3.9 mm (use >= 3.9 mm), min plate area 53x94 mm |
-| node 130000 | - | ULS2 (imp -x) | 0.976 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4995 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=56.9 kN, M=0.28 kNm -> N_eq=70.8 kN at node 130000; f_jd=14.17 MPa, A_req=4995 mm2, strip c_req=9.4 mm -> t_req=3.9 mm (use >= 3.9 mm), min plate area 53x94 mm |
-| node 200000 | - | ULS2 (imp +y) | 0.946 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4844 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=54.8 kN, M=0.28 kNm -> N_eq=68.6 kN at node 200000; f_jd=14.17 MPa, A_req=4844 mm2, strip c_req=9.1 mm -> t_req=3.8 mm (use >= 3.8 mm), min plate area 52x92 mm |
-| node 130000 | - | ULS3 (imp +y) | 0.866 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4435 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=59.3 kN, M=0.07 kNm -> N_eq=62.8 kN at node 130000; f_jd=14.17 MPa, A_req=4435 mm2, strip c_req=8.3 mm -> t_req=3.4 mm (use >= 3.4 mm), min plate area 50x88 mm |
-| node 200000 | - | ULS3 (imp -y) | 0.861 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4409 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=59.1 kN, M=0.07 kNm -> N_eq=62.5 kN at node 200000; f_jd=14.17 MPa, A_req=4409 mm2, strip c_req=8.2 mm -> t_req=3.4 mm (use >= 3.4 mm), min plate area 50x88 mm |
-| node 100000 | - | ULS1 (imp -y) | 0.859 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4395 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=59.0 kN, M=0.06 kNm -> N_eq=62.3 kN at node 100000; f_jd=14.17 MPa, A_req=4395 mm2, strip c_req=8.2 mm -> t_req=3.4 mm (use >= 3.4 mm), min plate area 50x88 mm |
-| node 230000 | - | ULS1 (imp +y) | 0.859 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=4395 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=59.0 kN, M=0.06 kNm -> N_eq=62.3 kN at node 230000; f_jd=14.17 MPa, A_req=4395 mm2, strip c_req=8.2 mm -> t_req=3.4 mm (use >= 3.4 mm), min plate area 50x88 mm |
-| node 200000 | - | ULS4 acc X (imp +x) | 0.721 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=3691 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=40.7 kN, M=0.23 kNm -> N_eq=52.3 kN at node 200000; f_jd=14.17 MPa, A_req=3691 mm2, strip c_req=6.8 mm -> t_req=2.8 mm (use >= 3.0 mm), min plate area 46x81 mm |
-| node 130000 | - | ULS5 acc Y (imp +y) | 0.615 | PASS | plate 100x176x4.0: c=9.7 mm, A_eff=5119 mm2 vs A_req=3148 mm2 (upright 120x63 overhangs the plate; A_eff capped by the plate area); N=42.2 kN, M=0.05 kNm -> N_eq=44.6 kN at node 130000; f_jd=14.17 MPa, A_req=3148 mm2, strip c_req=5.7 mm -> t_req=2.3 mm (use >= 3.0 mm), min plate area 42x74 mm |
+| node 130000 | - | ULS3 (imp +y) | 0.452 | PASS | N=59.3 kN at node 130000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.452; t to fill plate ~40.0 mm |
+| node 200000 | - | ULS3 (imp -y) | 0.451 | PASS | N=59.1 kN at node 200000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.451; t to fill plate ~40.0 mm |
+| node 100000 | - | ULS2 (imp -y) | 0.450 | PASS | N=59.0 kN at node 100000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.450; t to fill plate ~40.0 mm |
+| node 130000 | - | ULS2 (imp +y) | 0.450 | PASS | N=59.0 kN at node 130000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.450; t to fill plate ~40.0 mm |
+| node 200000 | - | ULS1 (imp -y) | 0.450 | PASS | N=59.0 kN at node 200000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.450; t to fill plate ~40.0 mm |
+| node 230000 | - | ULS1 (imp +y) | 0.450 | PASS | N=59.0 kN at node 230000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.450; t to fill plate ~40.0 mm |
+| node 130000 | - | ULS3 (imp +x) | 0.436 | PASS | N=57.2 kN at node 130000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.436; t to fill plate ~40.0 mm |
+| node 130000 | - | ULS3 (imp -x) | 0.436 | PASS | N=57.2 kN at node 130000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.436; t to fill plate ~40.0 mm |
+| node 130000 | - | ULS2 (imp +x) | 0.435 | PASS | N=57.0 kN at node 130000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.435; t to fill plate ~40.0 mm |
+| node 200000 | - | ULS1 (imp -x) | 0.434 | PASS | N=56.9 kN at node 200000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.434; t to fill plate ~40.0 mm |
+| node 100000 | - | ULS1 (imp +x) | 0.434 | PASS | N=56.9 kN at node 100000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.434; t to fill plate ~40.0 mm |
+| node 230000 | - | ULS2 (imp -x) | 0.434 | PASS | N=56.9 kN at node 230000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.434; t to fill plate ~40.0 mm |
+| node 130000 | - | ULS5 acc Y (imp +y) | 0.322 | PASS | N=42.2 kN at node 130000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.322; t to fill plate ~40.0 mm |
+| node 130000 | - | ULS4 acc X (imp +x) | 0.310 | PASS | N=40.7 kN at node 130000; fj=2.5*fck/gc=41.7 MPa, plate 100x176x4.0, e=5.7 mm (cap 56.5), Abas=3148 mm2, fj*Abas=131.2 kN >= N? util=0.310; t to fill plate ~40.0 mm |
+
+## BASE_RESTRAINT checks
+
+| target | set | case | utilization | status | detail |
+|---|---|---|---|---|---|
+| node 300000 | uprights | ULS2 (imp +x) | 0.290 | PASS | N=29.5 kN, M_Sd=0.58 kNm, M_Rd(N)=2.00 kNm |
+| node 310000 | uprights | ULS3 (imp +x) | 0.158 | PASS | N=28.7 kN, M_Sd=0.32 kNm, M_Rd(N)=2.00 kNm |
+| node 10000 | uprights | ULS2 (imp -x) | 0.158 | PASS | N=28.7 kN, M_Sd=0.32 kNm, M_Rd(N)=2.00 kNm |
+| node 310000 | uprights | ULS1 (imp +x) | 0.158 | PASS | N=28.7 kN, M_Sd=0.32 kNm, M_Rd(N)=2.00 kNm |
+| node 10000 | uprights | ULS1 (imp -x) | 0.158 | PASS | N=28.7 kN, M_Sd=0.32 kNm, M_Rd(N)=2.00 kNm |
+| node 0 | uprights | ULS3 (imp -x) | 0.158 | PASS | N=26.8 kN, M_Sd=0.32 kNm, M_Rd(N)=2.00 kNm |
+| node 300000 | uprights | ULS2 (imp -y) | 0.157 | PASS | N=30.1 kN, M_Sd=0.32 kNm, M_Rd(N)=2.01 kNm |
+| node 300000 | uprights | ULS2 (imp +y) | 0.156 | PASS | N=27.8 kN, M_Sd=0.31 kNm, M_Rd(N)=2.00 kNm |
+| node 0 | uprights | ULS5 acc Y (imp +y) | 0.140 | PASS | N=19.4 kN, M_Sd=0.28 kNm, M_Rd(N)=2.00 kNm |
+| node 300000 | uprights | ULS4 acc X (imp +x) | 0.129 | PASS | N=20.6 kN, M_Sd=0.26 kNm, M_Rd(N)=2.00 kNm |
+| node 30000 | uprights | ULS3 (imp +y) | 0.039 | PASS | N=31.4 kN, M_Sd=0.08 kNm, M_Rd(N)=2.07 kNm |
+| node 300000 | uprights | ULS3 (imp -y) | 0.030 | PASS | N=29.5 kN, M_Sd=0.06 kNm, M_Rd(N)=2.00 kNm |
+| node 0 | uprights | ULS1 (imp -y) | 0.029 | PASS | N=29.5 kN, M_Sd=0.06 kNm, M_Rd(N)=2.00 kNm |
+| node 330000 | uprights | ULS1 (imp +y) | 0.029 | PASS | N=29.5 kN, M_Sd=0.06 kNm, M_Rd(N)=2.00 kNm |
+
+## ANCHORAGE checks
+
+| target | set | case | utilization | status | detail |
+|---|---|---|---|---|---|
+| node 20000 | uprights | ULS1 (imp +x) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 320000 | uprights | ULS1 (imp -x) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 20000 | uprights | ULS1 (imp +y) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 310000 | uprights | ULS1 (imp -y) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 0 | uprights | ULS2 (imp +x) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 330000 | uprights | ULS2 (imp -x) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 0 | uprights | ULS2 (imp +y) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 10000 | uprights | ULS2 (imp -y) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 20000 | uprights | ULS3 (imp +x) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 20000 | uprights | ULS3 (imp -x) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 20000 | uprights | ULS3 (imp +y) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 310000 | uprights | ULS3 (imp -y) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 20000 | uprights | ULS4 acc X (imp +x) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
+| node 20000 | uprights | ULS5 acc Y (imp +y) | 0.000 | PASS | uplift=0.00 kN vs anchor tension capacity 3.0 kN (EN 15512 9.10.4 min 3 kN tension + 5 kN shear must also be provided) |
 
 ## DEFLECTION checks
 

@@ -117,15 +117,33 @@ def _num(v, default: Optional[float] = None) -> Optional[float]:
 
 def _parse_uprights(ws):
     out = []
-    header_seen = False
+    header = None
+    # optional gross torsion/warping/shear-centre columns for FT buckling,
+    # found by header text (any position): IT/J, Iw, y0, Iyy_g, Izz_g
+    cols = {}
     for r in _rows(ws):
         cells = r[1:]                       # data starts in column B
-        if not header_seen:
+        if header is None:
             if cells and str(cells[0]).strip() == "Section":
-                header_seen = True
+                header = [str(c or "").strip().lower() for c in cells]
+                for idx, h in enumerate(header):
+                    if ("it" in h or h.startswith("j")) and "cm4" in h:
+                        cols["It"] = idx
+                    elif "iw" in h or "warping" in h:
+                        cols["Iw"] = idx
+                    elif h.startswith("y0") or "shear cen" in h:
+                        cols["y0"] = idx
             continue
         if not cells or not cells[0]:
             continue
+
+        def opt(key, fac):
+            idx = cols.get(key)
+            if idx is None or idx >= len(cells):
+                return None
+            v = _num(cells[idx])
+            return v * fac if v else None
+
         name = str(cells[0]).strip()
         desc = str(cells[1] or "").strip()
         A_eff = _num(cells[5]) * CM2
@@ -135,7 +153,8 @@ def _parse_uprights(ws):
         Wy_eff = _num(cells[11]) * CM3      # Weff,z -> Wely
         fy = _num(cells[12], 35.0) * KNCM2
         t = _num(cells[14], 0.2) * 10.0     # t wall cm -> mm
-        J = A_eff * t * t / 3.0             # open-section estimate
+        It = opt("It", CM4)
+        J = It if It else A_eff * t * t / 3.0     # open-section estimate
         out.append((CrossSection(
             name=name, material="steel", role="upright",
             A=A_eff, Iy=Iy, Iz=Iz, J=J,
@@ -144,7 +163,10 @@ def _parse_uprights(ws):
             buckling_curve_y="b", buckling_curve_z="b",
             t=t, e1=_num(cells[15]), e2=_num(cells[16]),
             depth_h=_num(cells[2]), width_b=_num(cells[3]),
-            description=f"{desc} (A=Aeff; J estimated A*t^2/3)"), fy))
+            It_gross=It, Iw_gross=opt("Iw", 1.0e6),   # cm6 -> mm6
+            y0=opt("y0", 10.0),                       # cm -> mm
+            Iy_gross=Iy, Iz_gross=Iz,
+            description=f"{desc} (A=Aeff)"), fy))
     return out
 
 
@@ -223,6 +245,8 @@ _BRACE_ROW_KEYS = (
     ("thk", "t", 1.0),                      # mm
     ("end dist. e1", "e1", 1.0),            # mm
     ("end dist. e2", "e2", 1.0),
+    ("iw", "Iw", 1.0e6),                    # cm6 -> mm6
+    ("y0", "y0", 10.0),                     # cm -> mm
 )
 
 
@@ -253,6 +277,9 @@ def _parse_bracings(ws):
             buckling_curve_y="c", buckling_curve_z="c",
             t=p("t", None), e1=p("e1", None), e2=p("e2", None),
             fu=p("fu", None) or None,
+            It_gross=p("J", None) or None, Iw_gross=p("Iw", None) or None,
+            y0=p("y0", None), Iy_gross=p("Iy") or None,
+            Iz_gross=p("Iz") or None,
             description="cold-formed C brace"), p("fy", 270.0)))
     return out
 

@@ -82,8 +82,18 @@ class CrossSection:
     # from EN 15512 Annex A tests); used automatically for the hinges of
     # every beam of this section
     connector_k: Optional[float] = None          # [N*mm/rad]
-    connector_m_rd: Optional[float] = None       # [N*mm]
-    connector_looseness: Optional[float] = None  # [rad]
+    connector_m_rd: Optional[float] = None        # [N*mm]
+    connector_looseness: Optional[float] = None   # [rad]
+    connector_v_rd: Optional[float] = None        # connector shear resist [N]
+    connector_arm: float = 400.0                  # test cantilever arm a [mm]
+    # gross-section torsion / warping properties for flexural-torsional
+    # buckling (EN 15512 9.7.5); optional - FT buckling is included only
+    # when present.  Iy_gross/Iz_gross default to Iy/Iz.
+    It_gross: Optional[float] = None              # St-Venant torsion [mm^4]
+    Iw_gross: Optional[float] = None              # warping constant [mm^6]
+    y0: Optional[float] = None                    # shear-centre offset [mm]
+    Iy_gross: Optional[float] = None
+    Iz_gross: Optional[float] = None
 
     @property
     def area_eff(self) -> float:
@@ -313,6 +323,10 @@ class CheckSettings:
     sway_limit_ratio: float = 200.0       # max sway <= H / ratio (SLS)
     beam_defl_limit_ratio: float = 200.0  # beam deflection <= L / ratio (SLS)
     alpha_cr_warn: float = 10.0
+    # torsional buckling length factor beta_T (EN 15512 9.7.5.2 / fig 24):
+    # 1.0 with full torsional restraint at bracing, 0.7 with the typical
+    # bolted brace connection; applied to the member torsional length
+    beta_T: float = 0.7
     # member sets to verify for flexural buckling.  Per EN 15512 practice
     # buckling is checked on the uprights (columns) only; beams are checked
     # for stress / moments / deflection.  None = automatic: member sets
@@ -333,27 +347,48 @@ class CheckSettings:
 
 @dataclass
 class BasePlate:
-    """Footplate (base plate) check inputs per EN 1993-1-8 6.2.5 (rigid
-    plate, cantilever-projection method).
+    """Footplate (base plate) check inputs per EN 15512 9.9 / 9.10 (contact
+    pressure on the floor and base plate, strip method).
 
-    f_jd = design bearing strength of the floor joint; if not given it is
-    taken as alpha_cc * f_ck / gamma_c.  When the actual plate b x d x t is
-    given the check verifies it; the report always states the minimum
-    required plate size and thickness for the governing base reaction.
+    Floor design strength fj = 2.5 * f_ck / gamma_c (EN 15512 9.10.1); the
+    bearing stress under the upright wall spreads over a strip of half-width
+    e = t * sqrt(fy / (3 fj)) (capped at the plate overhang), giving the
+    effective contact area Abas.  The base partial-restraint moment is a
+    SEPARATE check (m_rd_n table from the floor-connection tests).
     """
 
     f_ck: float = 25.0                 # concrete grade [MPa]
     gamma_c: float = 1.5
-    alpha_cc: float = 0.85
     f_jd: Optional[float] = None       # direct override [MPa]
     fy_plate: float = 250.0            # plate steel [MPa]
     b: Optional[float] = None          # actual plate width (X) [mm]
     d: Optional[float] = None          # actual plate depth (Y) [mm]
     t: Optional[float] = None          # actual plate thickness [mm]
+    # load-dependent base moment resistance MRd(N) from the floor-connection
+    # tests (EN 15512 9.4.4.3 / BASE_STIFFNESS sheet): [(N [N], M_Rd [N*mm])]
+    m_rd_n: Optional[List[Tuple[float, float]]] = None
+    # overturning / anchorage (EN 15512 7.6, 9.10.4)
+    anchor_tension: float = 3000.0     # min connection tension [N]
+    anchor_shear: float = 5000.0       # min connection shear [N]
 
     def bearing_strength(self) -> float:
+        """Floor design bearing strength fj [MPa] (EN 15512 9.10.1)."""
         return self.f_jd if self.f_jd is not None \
-            else self.alpha_cc * self.f_ck / self.gamma_c
+            else 2.5 * self.f_ck / self.gamma_c
+
+    def m_rd_at(self, N: float) -> Optional[float]:
+        """Base moment resistance at axial load N [N], interpolated."""
+        tbl = self.m_rd_n
+        if not tbl:
+            return None
+        if N <= tbl[0][0]:
+            return tbl[0][1]
+        if N >= tbl[-1][0]:
+            return tbl[-1][1]
+        for (n0, m0), (n1, m1) in zip(tbl, tbl[1:]):
+            if n0 <= N <= n1:
+                return m0 + (m1 - m0) * (N - n0) / (n1 - n0)
+        return tbl[-1][1]
 
 
 @dataclass
