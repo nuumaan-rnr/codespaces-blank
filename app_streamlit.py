@@ -16,6 +16,7 @@ import streamlit as st
 import pickle
 
 from rack15512 import branding as B
+from rack15512 import ui
 from rack15512.analysis import run_all
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
@@ -33,13 +34,6 @@ from rack15512.viewer import plot_deformed, plot_frame_elevation, plot_model
 st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
                    initial_sidebar_state="expanded")
 
-# brand accents (teal headings / primary already set via .streamlit/config)
-st.markdown(f"""<style>
- h1, h2, h3 {{ color: {B.GREY}; }}
- [data-testid="stSidebar"] {{ border-right: 3px solid {B.TEAL}; }}
- div[data-testid="stMetricValue"] {{ color: {B.TEAL}; }}
-</style>""", unsafe_allow_html=True)
-
 PSTORE = ProjectStore("projects")
 MSTORE = MasterStore("masters")
 
@@ -49,6 +43,9 @@ ss.setdefault("project_id", None)
 ss.setdefault("system_id", None)
 ss.setdefault("config_id", None)
 ss.setdefault("edit_cfg", None)        # RackConfig pre-fill when editing
+ss.setdefault("dark_mode", False)
+
+ui.apply_theme()
 
 
 def goto(view, **kw):
@@ -305,11 +302,12 @@ def _idx(options, value):
 
 # --------------------------------------------------------------- dashboard
 def render_dashboard():
-    st.title("Storage rack design — projects")
-    st.caption("EN 15512 selective pallet racking · OpenSees 2nd-order")
+    ui.hero("Storage Rack Design", "Design, verify and document selective "
+            "pallet racking to EN 15512 — second-order analysis with "
+            "semi-rigid connections.", eyebrow=f"{B.COMPANY} · {B.PRODUCT}")
 
     top = st.columns([3, 1])
-    top[0].subheader("Saved projects")
+    top[0].subheader("Projects")
     if top[1].button("➕ Create new project", use_container_width=True,
                      type="primary"):
         goto("new_project")
@@ -323,20 +321,23 @@ def render_dashboard():
         verdicts = [c.run_summary["verdict"]
                     for s in proj.systems for c in s.configurations
                     if c.run_summary]
-        status = ("✅ all pass" if verdicts and all(v == "PASS"
-                  for v in verdicts) else
-                  ("⚠️ has failures" if any(v == "FAIL" for v in verdicts)
-                   else "— not run"))
+        status = ("PASS" if verdicts and all(v == "PASS" for v in verdicts)
+                  else ("FAIL" if any(v == "FAIL" for v in verdicts)
+                        else "not run"))
         with st.container(border=True):
-            cc = st.columns([4, 2, 2, 1.4])
+            cc = st.columns([4, 2, 2, 1.6])
             meta = " · ".join(x for x in (proj.client, proj.location,
                                           proj.engineer) if x)
-            cc[0].markdown(f"### {proj.name}\n{meta or '_no metadata_'}")
-            cc[1].metric("Systems", len(proj.systems))
-            cc[2].metric("Configurations", n_cfg)
-            cc[3].markdown(f"**{status}**")
+            cc[0].markdown(f"#### {proj.name}\n<span class='rnr-muted'>"
+                           f"{meta or 'no metadata'}</span>",
+                           unsafe_allow_html=True)
+            cc[1].markdown(ui.tile("Systems", len(proj.systems)),
+                           unsafe_allow_html=True)
+            cc[2].markdown(ui.tile("Configurations", n_cfg),
+                           unsafe_allow_html=True)
+            cc[3].markdown(ui.pill(status), unsafe_allow_html=True)
             if cc[3].button("Open →", key=f"open_{proj.id}",
-                            use_container_width=True):
+                            use_container_width=True, type="primary"):
                 goto("project", project_id=proj.id)
             if cc[3].button("🗑 Delete", key=f"delp_{proj.id}",
                             use_container_width=True):
@@ -356,9 +357,10 @@ def render_dashboard():
 
 
 def render_new_project():
-    st.title("Create new project")
     if st.button("← Back to dashboard"):
         goto("dashboard")
+    ui.hero("Create New Project", "Set up the job details and the first "
+            "system.", eyebrow="New project")
     with st.form("newproj"):
         name = st.text_input("Project name *", "")
         c = st.columns(2)
@@ -384,10 +386,9 @@ def render_project():
     proj = PSTORE.load(ss.project_id)
     if st.button("← Back to dashboard"):
         goto("dashboard")
-    st.title(proj.name)
     meta = " · ".join(x for x in (proj.client, proj.location, proj.engineer,
                                   proj.standard) if x)
-    st.caption(meta)
+    ui.hero(proj.name, meta, eyebrow="Project")
 
     with st.expander("➕ Add a system"):
         sn = st.text_input("System name", key="newsysname")
@@ -433,14 +434,12 @@ def render_project():
                 cc[0].markdown(f"**{conf.name}**  \n`{conf.id}`"
                                + (f"  \n{conf.notes}" if conf.notes else ""))
                 verdict = rs.get("verdict", "not run")
-                cc[1].markdown(
-                    ("🟢 " if verdict == "PASS" else
-                     "🔴 " if verdict == "FAIL" else "⚪ ") + verdict)
+                cc[1].markdown(ui.pill(verdict), unsafe_allow_html=True)
                 if gov:
                     cc[1].caption(f"gov {gov.get('check')} "
                                   f"{gov.get('utilization')}")
                 if cc[2].button("Open", key=f"oc_{conf.id}",
-                                use_container_width=True):
+                                use_container_width=True, type="primary"):
                     goto("view_config", project_id=proj.id,
                          system_id=sysm.id, config_id=conf.id)
                 if cc[3].button("Edit", key=f"ec_{conf.id}",
@@ -470,8 +469,7 @@ def render_view_config():
     conf = sysm.configuration(ss.config_id)
     if st.button("← Back to project"):
         goto("project", project_id=proj.id)
-    st.title(f"{conf.name}")
-    st.caption(f"{proj.name} · {sysm.name}")
+    ui.hero(conf.name, f"{proj.name} · {sysm.name}", eyebrow="Results")
 
     lib, master, _ = resolve_master(conf.master_id, conf.master_path)
     cfg = rackconfig_from_dict(conf.config, master=master)
@@ -612,8 +610,9 @@ def render_configure():
     sysm = proj.system(ss.system_id)
     if st.button("← Back to project"):
         goto("project", project_id=proj.id)
-    st.title("Configuration")
-    st.caption(f"{proj.name} · {sysm.name}")
+    ui.hero("Configuration", f"{proj.name} · {sysm.name}",
+            eyebrow="Edit configuration" if ss.config_id else "New "
+            "configuration")
 
     cur_mid = (sysm.configuration(ss.config_id).master_id
                if ss.config_id else None)
@@ -678,9 +677,9 @@ def _save_config(pid, sid, cfg, master_id, notes, silent=False):
 
 # ----------------------------------------------------------------- masters
 def render_masters():
-    st.title("Section masters")
-    st.caption("Masters live inside the system. Import once, then edit or "
-               "delete sections — no need to re-read the spreadsheet.")
+    ui.hero("Section Masters", "Import a master once, then edit or delete "
+            "sections in place — no need to re-read the spreadsheet.",
+            eyebrow="Section library")
     up = st.file_uploader("Import a master (.xlsx / .csv / .json)",
                           type=["xlsx", "xlsm", "csv", "json"])
     nm = st.text_input("Store as", up.name if up else "")
@@ -733,23 +732,26 @@ def render_masters():
 with st.sidebar:
     if os.path.exists(B.LOGO_PATH):
         st.image(B.LOGO_PATH, use_container_width=True)
-    st.markdown(f"#### {B.PRODUCT}")
-    st.caption(f"{B.TAGLINE}")
+    st.markdown(f"<div style='font-weight:800;font-size:1.02rem;margin-top:2px'>"
+                f"{B.PRODUCT}</div>"
+                f"<div class='rnr-muted' style='font-size:.8rem'>{B.TAGLINE}"
+                f"</div>", unsafe_allow_html=True)
     st.divider()
-    if st.button("🏠 Dashboard", use_container_width=True):
+    if st.button("🏠  Dashboard", use_container_width=True):
         goto("dashboard")
-    if st.button("📚 Section masters", use_container_width=True):
+    if st.button("📚  Section masters", use_container_width=True):
         goto("masters")
     st.divider()
+    ui.theme_toggle()
     if ss.project_id and ss.view in ("project", "configure", "view_config"):
+        st.divider()
         st.caption("Current project")
         try:
             st.info(PSTORE.load(ss.project_id).name)
         except Exception:
             pass
     st.divider()
-    st.caption("OpenSees 2nd-order · semi-rigid connections · units N, mm, "
-               "MPa")
+    st.caption("OpenSees 2nd-order · semi-rigid · units N, mm, MPa")
     st.caption(f"© {B.COMPANY} · {B.WEBSITE}")
 
 _VIEWS = {

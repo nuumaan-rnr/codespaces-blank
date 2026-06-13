@@ -24,9 +24,11 @@ def test_dashboard_opens_on_load(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     at = AppTest.from_file(APP, default_timeout=60).run()
     assert not at.exception
-    assert at.title[0].value.lower().startswith("storage rack")
+    # hero title rendered as branded markdown
+    assert any("Storage Rack Design" in (m.value or "") for m in at.markdown)
+    assert any("rnr-hero" in (m.value or "") for m in at.markdown)
     # left menu + create-new-project on the right
-    assert "🏠 Dashboard" in [b.label for b in at.sidebar.button]
+    assert any("Dashboard" in b.label for b in at.sidebar.button)
     assert any("Create new project" in b.label for b in at.button)
 
 
