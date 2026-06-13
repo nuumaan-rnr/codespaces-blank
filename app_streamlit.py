@@ -1,516 +1,555 @@
-"""Interactive web app for 3D EN 15512 storage-rack analysis.
+"""Dashboard web app for 3D EN 15512 storage-rack design.
 
 Run with:  streamlit run app_streamlit.py
 
-Upload your section master (.xlsx workbook or CSV/JSON), pick sections by
-role, define the rack in the sidebar (geometry, beam level by level, D/X
-bracing, semi-rigid connections, loads, imperfections, factors), run the
-second-order OpenSees analysis and browse results, plots and EN 15512
-checks.
+Opens on a dashboard: a left menu and the saved projects on the right.
+Create a new project or open an existing one to view its model and results
+(if a configuration has been run), or enter a new configuration. Section
+masters are managed in their own page and held inside the system.
 """
 
-import json
 import os
 import tempfile
 
 import streamlit as st
 
-from rack15512 import io_json
 from rack15512.analysis import run_all
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
 from rack15512.library import SectionLibrary
-from rack15512.master_store import MasterStore, StoredMaster
-from rack15512.master_xlsx import MasterWorkbook, load_master
+from rack15512.master_store import MasterStore
 from rack15512.model import CrossSection
-from rack15512.project import ProjectStore
+from rack15512.project import ProjectStore, rackconfig_from_dict
 from rack15512.project_run import run_configuration
 from rack15512.report import write_report
-from rack15512.viewer import (plot_deformed, plot_diagram, plot_model,
-                              plot_utilization)
+from rack15512.viewer import plot_deformed, plot_frame_elevation, plot_model
 
-st.set_page_config(page_title="EN 15512 Rack Check", layout="wide")
-st.title("Storage rack analysis & EN 15512 checks (3D)")
-st.caption("Engine: OpenSees (second-order elastic, semi-rigid connections). "
-           "Units: N, mm, MPa. Axes: X down-aisle, Y cross-aisle, Z up.")
+st.set_page_config(page_title="EN 15512 SPR Design", layout="wide",
+                   initial_sidebar_state="expanded")
 
+PSTORE = ProjectStore("projects")
+MSTORE = MasterStore("masters")
 
-@st.cache_data
-def load_master_cached(uploaded_bytes: bytes | None, filename: str):
-    """Returns (SectionLibrary, MasterWorkbook | None)."""
-    if uploaded_bytes is None:
-        return SectionLibrary.bundled(), None
-    lower = filename.lower()
-    suffix = ".xlsx" if lower.endswith((".xlsx", ".xlsm")) else (
-        ".json" if lower.endswith(".json") else ".csv")
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-        f.write(uploaded_bytes)
-        path = f.name
-    if suffix == ".xlsx":
-        mw = load_master(path)
-        return mw.library, mw
-    return SectionLibrary.from_file(path), None
+ss = st.session_state
+ss.setdefault("view", "dashboard")
+ss.setdefault("project_id", None)
+ss.setdefault("system_id", None)
+ss.setdefault("config_id", None)
+ss.setdefault("edit_cfg", None)        # RackConfig pre-fill when editing
 
 
-mstore = MasterStore("masters")
+def goto(view, **kw):
+    ss.view = view
+    for k, v in kw.items():
+        ss[k] = v
+    st.rerun()
 
-with st.sidebar:
-    st.header("Section master")
-    stored = mstore.list()
-    src_options = (["Stored master"] if stored else []) + ["Upload / import"]
-    src = st.radio("Source", src_options, horizontal=True)
-    up_file = None
-    master_id = None
-    if src == "Stored master":
-        labels = [f"{m.name} [{m.id}]" for m in stored]
-        sel = st.selectbox("Master", labels)
-        sm = stored[labels.index(sel)]
-        master_id = sm.id
-        master = sm.to_workbook()
-        lib = master.library
-    else:
-        up_file = st.file_uploader("Master file (.xlsx, .csv or .json)",
-                                   type=["xlsx", "xlsm", "csv", "json"])
-        import_name = st.text_input("Save into store as",
-                                    up_file.name if up_file else "")
-        if up_file and st.button("Import into store"):
-            suffix = os.path.splitext(up_file.name)[1] or ".xlsx"
-            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-            tmp.write(up_file.getvalue())
-            tmp.close()
-            m = mstore.import_xlsx(tmp.name, name=import_name or up_file.name)
-            st.success(f"Imported as '{m.id}' ({len(m.sections)} sections). "
-                       "Select it under 'Stored master'.")
+
+# ----------------------------------------------------------------- masters
+def resolve_master(master_id, master_path=None):
+    """Return (library, MasterWorkbook|None, master_id) for a config."""
+    if master_id and MSTORE.exists(master_id):
+        mw = MSTORE.load(master_id).to_workbook()
+        return mw.library, mw, master_id
+    if master_path and os.path.exists(master_path):
+        if master_path.lower().endswith((".xlsx", ".xlsm")):
+            from rack15512.master_xlsx import load_master
+            mw = load_master(master_path)
+            return mw.library, mw, None
+        lib = SectionLibrary.from_file(master_path)
+        return lib, None, None
+    return SectionLibrary.bundled(), None, None
+
+
+def master_selector(default_id=None):
+    """Sidebar/main master picker; returns (library, workbook, master_id)."""
+    stored = MSTORE.list()
+    if not stored:
+        st.warning("No section masters stored yet. Import one in the "
+                   "**Section masters** page first (bundled demo used "
+                   "meanwhile).")
+        return SectionLibrary.bundled(), None, None
+    labels = [f"{m.name} [{m.id}]" for m in stored]
+    idx = next((i for i, m in enumerate(stored) if m.id == default_id), 0)
+    sel = st.selectbox("Section master", labels, index=idx)
+    sm = stored[labels.index(sel)]
+    mw = sm.to_workbook()
+    return mw.library, mw, sm.id
+
+
+# ----------------------------------------------------------- configuration
+def configuration_form(lib, master, cfg0: RackConfig | None):
+    """Render the full configuration form; return a RackConfig (master not
+    attached). cfg0 pre-fills the widgets when editing."""
+    g = lambda f, d: getattr(cfg0, f, d) if cfg0 else d
+    up_names = lib.names("upright") or lib.names()
+    br_names = lib.names("bracing") or lib.names()
+    beam_names = lib.names("beam") or lib.names()
+
+    st.markdown("##### Geometry")
+    c = st.columns(4)
+    name = c[0].text_input("Configuration name", g("name", "Config 1"))
+    module = c[1].radio("Module", ["single", "back-to-back"],
+                        index=0 if g("module", "single") == "single" else 1)
+    n_bays = c[2].number_input("Bays", 1, 20, int(g("n_bays", 3)))
+    bay_width = c[3].number_input("Beam span [mm]", 1000.0, 4500.0,
+                                  float(g("bay_width", 2700.0)), 50.0)
+    c = st.columns(4)
+    depth = c[0].number_input("Frame depth [mm]", 600.0, 2000.0,
+                              float(g("depth", 1000.0)), 50.0)
+    b2b_gap = c[1].number_input("Back-to-back gap [mm]", 50.0, 600.0,
+                                float(g("b2b_gap", 250.0)), 10.0,
+                                disabled=module == "single")
+    up_sec = c[2].selectbox("Upright", up_names,
+                            index=_idx(up_names, g("upright_section", None)))
+    br_sec = c[3].selectbox("Bracing", br_names,
+                            index=_idx(br_names, g("brace_section", None)))
+
+    st.markdown("##### Beam levels (gap · section · load, per level)")
+    levels0 = g("levels", None)
+    n_levels = st.number_input("Number of beam levels", 1, 20,
+                               len(levels0) if levels0 else 3)
+    levels, elev = [], 0.0
+    for k in range(int(n_levels)):
+        l0 = levels0[k] if levels0 and k < len(levels0) else None
+        cc = st.columns([1, 1.6, 1])
+        gap = cc[0].number_input(f"L{k+1} gap [mm]", 300.0, 4000.0,
+                                 float(l0.gap if l0 else 1500.0), 50.0,
+                                 key=f"g{k}")
+        bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
+                             index=_idx(beam_names,
+                                        l0.beam_section if l0 else None),
+                             key=f"b{k}")
+        ld = cc[2].number_input(f"L{k+1} load [kN]", 0.0, 100.0,
+                                float((l0.pallet_load if l0 else 20000.0)/1e3),
+                                1.0, key=f"l{k}")
+        levels.append(LevelSpec(gap=gap, beam_section=bs, pallet_load=ld*1e3))
+        elev += gap
+    frame_h = st.number_input("Frame height [mm] (>= top level)",
+                              min_value=elev,
+                              value=float(g("frame_height", None) or elev+500),
+                              step=50.0)
+
+    st.markdown("##### Cross-aisle bracing")
+    c = st.columns(4)
+    btype = c[0].radio("Pattern", ["D", "X"],
+                       index=0 if g("bracing_type", "D") == "D" else 1,
+                       help="D = zigzag, X = crossed pairs")
+    first_side = c[1].radio(
+        "First diagonal connects to", ["outer", "inner"],
+        index=0 if g("bracing_first_side", "outer") == "outer" else 1,
+        help="The first diagonal above the bottom horizontal connects to "
+             "the OUTER (aisle-side) or INNER upright of each frame; both "
+             "frames of a back-to-back module are mirrored accordingly.")
+    bstart = c[2].number_input("First horizontal [mm]", 50.0, 1000.0,
+                               float(g("bracing_start", 150.0)), 10.0)
+    bpitch = c[3].number_input("Diagonal pitch [mm]", 200.0, 2000.0,
+                               float(g("bracing_pitch", 600.0)), 50.0)
+    z1 = g("bracing_type_zone1", None)
+    zone1 = st.selectbox("Different pattern below level 1",
+                         ["same", "X", "D"],
+                         index={None: 0, "X": 1, "D": 2}.get(z1, 0))
+
+    with st.expander("Connections, base & checks"):
+        c = st.columns(3)
+        fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
+                               float(g("steel_fy", 355.0)), 5.0)
+        base_auto = c[1].checkbox("Base stiffness from master table",
+                                  isinstance(g("base_stiffness", "auto"), str))
+        kbase = c[2].number_input("Floor stiffness [kNm/rad] (if not auto)",
+                                  0.0, 5000.0,
+                                  float(g("base_stiffness", 5e8) / 1e6
+                                        if not isinstance(
+                                            g("base_stiffness", "auto"), str)
+                                        else 500.0), disabled=base_auto)
+        c = st.columns(3)
+        brace_factor = c[0].number_input("Bracing area factor", 0.05, 1.0,
+                                         float(g("brace_area_factor", 0.15)),
+                                         0.05)
+        bolt = c[1].selectbox("Brace bolt", ["M8", "M10", "M12", "M14", "M16"],
+                              index=_idx(["8", "10", "12", "14", "16"],
+                                         str(int(g("bolt_d", 12.0)))))
+        grade = c[2].selectbox("Bolt grade",
+                               ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
+                               index=_idx(["4.6", "4.8", "5.6", "5.8", "8.8",
+                                           "10.9"], g("bolt_grade", "4.6")))
+        c = st.columns(3)
+        fck = c[0].number_input("Concrete f_ck [MPa]", 15.0, 60.0,
+                                float(g("concrete_fck", 25.0)), 5.0)
+        plate_fy = c[1].number_input("Plate fy [MPa]", 200.0, 460.0,
+                                     float(g("plate_fy", 250.0)), 5.0)
+        c[2].caption("Footplate auto: 90→100×145×4, 120→100×176×4 "
+                     "(blank fields below)")
+        c = st.columns(3)
+        pb = c[0].number_input("Plate b [mm] (0=std)", 0.0, 500.0,
+                               float(g("plate_b", None) or 0.0))
+        pd_ = c[1].number_input("Plate d [mm] (0=std)", 0.0, 500.0,
+                                float(g("plate_d", None) or 0.0))
+        pt = c[2].number_input("Plate t [mm] (0=std)", 0.0, 40.0,
+                               float(g("plate_t", None) or 0.0))
+
+    with st.expander("Loads, imperfection & factors"):
+        c = st.columns(3)
+        dead = c[0].number_input("Beam dead load [N/mm]", 0.0, 1.0,
+                                 float(g("dead_load_beam", 0.05)))
+        place = c[1].number_input("Placement load [kN]", 0.0, 5.0,
+                                  float(g("placement_load", 500.0) / 1e3))
+        phi_s = c[2].number_input("Out-of-plumb (1/x)", 100.0, 1000.0, 350.0)
+        c = st.columns(3)
+        ax = c[0].number_input("Accidental X [kN]", 0.0, 10.0,
+                               float(g("accidental_load_x", 1250.0) / 1e3))
+        ay = c[1].number_input("Accidental Y [kN]", 0.0, 10.0,
+                               float(g("accidental_load_y", 2500.0) / 1e3))
+        ah = c[2].number_input("Accidental height [mm]", 100.0, 1000.0,
+                               float(g("accidental_height", 400.0)), 50.0)
+        c = st.columns(3)
+        gG = c[0].number_input("gamma_G", 1.0, 2.0, float(g("gamma_G", 1.3)))
+        gQ = c[1].number_input("gamma_Q", 1.0, 2.0, float(g("gamma_Q", 1.4)))
+
+    cfg = RackConfig(
+        name=name, module=module, n_bays=int(n_bays), bay_width=bay_width,
+        depth=depth, b2b_gap=b2b_gap, levels=levels, frame_height=frame_h,
+        bracing_first_side=first_side, bracing_type=btype,
+        bracing_start=bstart, bracing_pitch=bpitch,
+        bracing_type_zone1=None if zone1 == "same" else zone1,
+        upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
+        base_stiffness="auto" if base_auto else kbase * 1e6,
+        brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
+        bolt_grade=grade, concrete_fck=fck, plate_fy=plate_fy,
+        plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
+        dead_load_beam=dead, placement_load=place * 1e3,
+        accidental_load_x=ax * 1e3, accidental_load_y=ay * 1e3,
+        accidental_height=ah, gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s)
+    cfg.master = master
+    return cfg
+
+
+def _idx(options, value):
+    try:
+        return options.index(value) if value in options else 0
+    except (ValueError, AttributeError):
+        return 0
+
+
+# --------------------------------------------------------------- dashboard
+def render_dashboard():
+    st.title("Storage rack design — projects")
+    st.caption("EN 15512 selective pallet racking · OpenSees 2nd-order")
+
+    top = st.columns([3, 1])
+    top[0].subheader("Saved projects")
+    if top[1].button("➕ Create new project", use_container_width=True,
+                     type="primary"):
+        goto("new_project")
+
+    projects = PSTORE.list_projects()
+    if not projects:
+        st.info("No projects yet. Click **Create new project** to start.")
+        return
+    for proj in projects:
+        n_cfg = sum(len(s.configurations) for s in proj.systems)
+        verdicts = [c.run_summary["verdict"]
+                    for s in proj.systems for c in s.configurations
+                    if c.run_summary]
+        status = ("✅ all pass" if verdicts and all(v == "PASS"
+                  for v in verdicts) else
+                  ("⚠️ has failures" if any(v == "FAIL" for v in verdicts)
+                   else "— not run"))
+        with st.container(border=True):
+            cc = st.columns([4, 2, 2, 1.4])
+            meta = " · ".join(x for x in (proj.client, proj.location,
+                                          proj.engineer) if x)
+            cc[0].markdown(f"### {proj.name}\n{meta or '_no metadata_'}")
+            cc[1].metric("Systems", len(proj.systems))
+            cc[2].metric("Configurations", n_cfg)
+            cc[3].markdown(f"**{status}**")
+            if cc[3].button("Open →", key=f"open_{proj.id}",
+                            use_container_width=True):
+                goto("project", project_id=proj.id)
+
+
+def render_new_project():
+    st.title("Create new project")
+    if st.button("← Back to dashboard"):
+        goto("dashboard")
+    with st.form("newproj"):
+        name = st.text_input("Project name *", "")
+        c = st.columns(2)
+        client = c[0].text_input("Client", "")
+        location = c[1].text_input("Location", "")
+        engineer = c[0].text_input("Engineer", "")
+        desc = st.text_area("Description", "")
+        sysname = st.text_input("First system name", "Aisle 1")
+        if st.form_submit_button("Create project", type="primary"):
+            if not name.strip():
+                st.error("Project name is required.")
+            else:
+                proj = PSTORE.create_project(name, client=client,
+                                             location=location,
+                                             engineer=engineer,
+                                             description=desc)
+                sysm = PSTORE.add_system(proj.id, sysname or "System 1")
+                goto("project", project_id=proj.id, system_id=sysm.id)
+
+
+# ----------------------------------------------------------------- project
+def render_project():
+    proj = PSTORE.load(ss.project_id)
+    if st.button("← Back to dashboard"):
+        goto("dashboard")
+    st.title(proj.name)
+    meta = " · ".join(x for x in (proj.client, proj.location, proj.engineer,
+                                  proj.standard) if x)
+    st.caption(meta)
+
+    with st.expander("➕ Add a system"):
+        sn = st.text_input("System name", key="newsysname")
+        if st.button("Add system") and sn.strip():
+            sysm = PSTORE.add_system(proj.id, sn)
+            goto("project", project_id=proj.id, system_id=sysm.id)
+
+    if not proj.systems:
+        st.info("Add a system, then create a configuration in it.")
+        return
+
+    for sysm in proj.systems:
+        st.subheader(f"System: {sysm.name}")
+        if sysm.description:
+            st.caption(sysm.description)
+        if st.button("➕ New configuration", key=f"newcfg_{sysm.id}"):
+            goto("configure", project_id=proj.id, system_id=sysm.id,
+                 config_id=None, edit_cfg=None)
+        if not sysm.configurations:
+            st.caption("_No configurations yet._")
+            continue
+        for conf in sysm.configurations:
+            rs = conf.run_summary or {}
+            gov = rs.get("governing") or {}
+            with st.container(border=True):
+                cc = st.columns([3, 2, 2, 2])
+                cc[0].markdown(f"**{conf.name}**  \n`{conf.id}`"
+                               + (f"  \n{conf.notes}" if conf.notes else ""))
+                verdict = rs.get("verdict", "not run")
+                cc[1].markdown(
+                    ("🟢 " if verdict == "PASS" else
+                     "🔴 " if verdict == "FAIL" else "⚪ ") + verdict)
+                if gov:
+                    cc[1].caption(f"gov {gov.get('check')} "
+                                  f"{gov.get('utilization')}")
+                if cc[2].button("Open", key=f"oc_{conf.id}",
+                                use_container_width=True):
+                    goto("view_config", project_id=proj.id,
+                         system_id=sysm.id, config_id=conf.id)
+                if cc[3].button("Edit", key=f"ec_{conf.id}",
+                                use_container_width=True):
+                    cfg0 = rackconfig_from_dict(conf.config)
+                    goto("configure", project_id=proj.id, system_id=sysm.id,
+                         config_id=conf.id, edit_cfg=cfg0)
+
+
+# ------------------------------------------------------- view a saved config
+def render_view_config():
+    proj = PSTORE.load(ss.project_id)
+    sysm = proj.system(ss.system_id)
+    conf = sysm.configuration(ss.config_id)
+    if st.button("← Back to project"):
+        goto("project", project_id=proj.id)
+    st.title(f"{conf.name}")
+    st.caption(f"{proj.name} · {sysm.name}")
+
+    lib, master, _ = resolve_master(conf.master_id, conf.master_path)
+    cfg = rackconfig_from_dict(conf.config, master=master)
+    try:
+        model = build_rack(cfg)
+    except (ValueError, KeyError) as e:
+        st.error(f"Could not rebuild the model: {e}")
+        return
+
+    cdir = PSTORE.config_dir(proj.id, sysm.id, conf.id)
+    t_model, t_results, t_report, t_params = st.tabs(
+        ["Model", "Results", "Report", "Parameters"])
+
+    with t_model:
+        c = st.columns(2)
+        c[0].pyplot(plot_model(model))
+        c[1].pyplot(plot_frame_elevation(model, 0.0))
+        st.caption(f"{len(model.nodes)} nodes · {len(model.members)} members "
+                   f"· bracing first diagonal: {cfg.bracing_first_side}")
+
+    with t_results:
+        rs = conf.run_summary
+        if not rs:
+            st.info("This configuration has not been run yet.")
+        else:
+            c = st.columns(4)
+            c[0].metric("Verdict", rs["verdict"])
+            gov = rs.get("governing") or {}
+            c[1].metric("Governing", gov.get("check", "-"))
+            c[2].metric("Utilization", gov.get("utilization", "-"))
+            c[3].metric("Cases", rs.get("n_cases", "-"))
+            st.markdown("**Max utilization by check**")
+            st.dataframe([rs.get("max_utilization_by_check", {})],
+                         use_container_width=True)
+            for img in ("utilization.png", "deformed.png"):
+                p = os.path.join(cdir, img)
+                if os.path.exists(p):
+                    st.image(p)
+        if st.button("▶ Run / re-run analysis", type="primary"):
+            with st.spinner("Running OpenSees (this can take a few minutes)…"):
+                summary, _ = run_configuration(PSTORE, proj.id, sysm.id,
+                                               conf.id)
+            st.success(f"{summary['verdict']}")
             st.rerun()
+
+    with t_report:
+        rp = os.path.join(cdir, "report.md")
+        if os.path.exists(rp):
+            txt = open(rp).read()
+            st.download_button("Download report.md", txt, "report.md")
+            st.markdown(txt)
+        else:
+            st.info("Run the configuration to generate the report.")
+
+    with t_params:
+        st.json(conf.config)
+
+
+# ----------------------------------------------------- create/edit a config
+def render_configure():
+    proj = PSTORE.load(ss.project_id)
+    sysm = proj.system(ss.system_id)
+    if st.button("← Back to project"):
+        goto("project", project_id=proj.id)
+    st.title("Configuration")
+    st.caption(f"{proj.name} · {sysm.name}")
+
+    cur_mid = (sysm.configuration(ss.config_id).master_id
+               if ss.config_id else None)
+    lib, master, master_id = master_selector(default_id=cur_mid)
+
+    cfg = configuration_form(lib, master, ss.edit_cfg)
+    notes = st.text_input("Notes", "")
+
+    c = st.columns(3)
+    if c[0].button("👁 Preview model", use_container_width=True):
         try:
-            lib, master = load_master_cached(
-                up_file.getvalue() if up_file else None,
-                up_file.name if up_file else "")
+            model = build_rack(cfg)
+            st.session_state["_preview"] = True
+            cc = st.columns(2)
+            cc[0].pyplot(plot_model(model))
+            cc[1].pyplot(plot_frame_elevation(model, 0.0))
+            st.caption(f"{len(model.nodes)} nodes · {len(model.members)} "
+                       f"members · first diagonal: {cfg.bracing_first_side}")
         except (ValueError, KeyError) as e:
             st.error(str(e))
-            st.stop()
-    st.caption(f"{len(lib.sections)} sections, roles: {', '.join(lib.roles())}"
-               + (f" - base-stiffness tables: {len(master.base_tables)}"
-                  if master else ""))
+    if c[1].button("💾 Save configuration", use_container_width=True):
+        _save_config(proj.id, sysm.id, cfg, master_id, notes)
+    if c[2].button("💾▶ Save & run", type="primary",
+                   use_container_width=True):
+        conf = _save_config(proj.id, sysm.id, cfg, master_id, notes,
+                            silent=True)
+        with st.spinner("Running OpenSees (this can take a few minutes)…"):
+            summary, _ = run_configuration(PSTORE, proj.id, sysm.id, conf.id)
+        st.success(f"Saved and run: {summary['verdict']}")
+        goto("view_config", project_id=proj.id, system_id=sysm.id,
+             config_id=conf.id)
 
-    def pick(label, role):
-        names = lib.names(role) or lib.names()
-        return st.selectbox(label, names)
 
-    upright_sec = pick("Upright", "upright")
-    brace_sec = pick("Bracing", "bracing")
-
-    st.header("Geometry")
-    module = st.radio("Module type", ["Single", "Back-to-back"],
-                      horizontal=True)
-    n_bays = st.number_input("Bays (down-aisle)", 1, 12, 3)
-    bay_width = st.number_input("Beam span / bay width [mm]",
-                                1000.0, 4500.0, 2700.0, 50.0)
-    depth = st.number_input("Frame depth [mm]", 600.0, 2000.0, 1100.0, 50.0)
-    b2b_gap = st.number_input("Back-to-back gap [mm]", 50.0, 600.0, 250.0,
-                              10.0, disabled=module == "Single")
-
-    st.subheader("Beam levels (gap, section and load per level)")
-    n_levels = int(st.number_input("Number of beam levels", 1, 20, 3))
-    beam_names = lib.names("beam") or lib.names()
-    level_specs = []
-    elev = 0.0
-    for k in range(n_levels):
-        c1, c2, c3 = st.columns([1, 1.4, 1])
-        gap = c1.number_input(f"L{k + 1} gap [mm]", 300.0, 4000.0, 2000.0,
-                              50.0, key=f"gap{k}")
-        sec = c2.selectbox(f"L{k + 1} beam", beam_names, key=f"sec{k}")
-        load = c3.number_input(f"L{k + 1} load [kN]", 0.0, 100.0, 20.0,
-                               1.0, key=f"load{k}")
-        level_specs.append(LevelSpec(gap=gap, beam_section=sec,
-                                     pallet_load=load * 1e3))
-        elev += gap
-    st.caption(f"Top beam level at {elev:.0f} mm")
-    frame_h = st.number_input("Frame height [mm] (>= top level)",
-                              min_value=elev, value=elev + 500.0, step=50.0)
-
-    st.subheader("Cross-aisle bracing")
-    btype = st.radio("Type", ["D (zigzag)", "X (crossed)"], horizontal=True)
-    zone1 = st.selectbox("Different pattern below level 1",
-                         ["same", "X (crossed)", "D (zigzag)"], 0,
-                         help="e.g. X bracing up to the first beam level "
-                              "for accidental loads; the CA buckling "
-                              "length follows the actual bracing per level")
-    bstart = st.number_input("First horizontal above floor [mm]",
-                             50.0, 1000.0, 150.0, 10.0)
-    bpitch = st.number_input("Diagonal pitch [mm]", 200.0, 2000.0, 600.0, 50.0)
-    n_pts = len(bracing_elevations(
-        RackConfig(bracing_start=bstart, bracing_pitch=bpitch), frame_h))
-    st.caption(f"-> {max(n_pts - 1, 0)} diagonal panels, top horizontal at "
-               f"{bstart + max(n_pts - 1, 0) * bpitch:.0f} mm")
-
-    st.header("Steel & connections")
-    fy = st.number_input("Default fy [MPa] (sections without own fy)",
-                         200.0, 700.0, 355.0, 5.0)
-    st.caption("Connector stiffness / M_Rd / looseness are taken "
-               "AUTOMATICALLY from the BEAM master per selected beam; the "
-               "values below are fallbacks for beams without connector "
-               "data in the master.")
-    kc = st.number_input("Fallback connector stiffness [kNm/rad]",
-                         1.0, 1000.0, 100.0)
-    mrd = st.number_input("Fallback connector M_Rd [kNm]", 0.1, 50.0, 2.5)
-    phi_l = st.number_input("Fallback connector looseness phi_l [mrad]",
-                            0.0, 20.0, 0.0)
-    if master:
-        base_auto = st.checkbox("Base stiffness from master BASE_STIFFNESS "
-                                "table (at estimated upright load)", True)
-    else:
-        base_auto = False
-    kbase = st.number_input("Floor connection stiffness [kNm/rad] "
-                            "(0 = pinned)", 0.0, 5000.0, 500.0,
-                            disabled=base_auto)
-
-    st.header("Bracing connection & footplate")
-    brace_factor = st.number_input(
-        "Bracing area factor in analysis (connection flexibility)",
-        0.05, 1.0, 0.15, 0.05)
-    bolt_size = st.selectbox("Connection bolt size",
-                             ["M8", "M10", "M12", "M14", "M16"], index=2)
-    bolt_grade = st.selectbox("Bolt grade",
-                              ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"], 0)
-    n_bolts = st.number_input("Bolts per brace end", 1, 4, 1)
-    fck = st.number_input("Floor concrete f_ck [MPa]", 15.0, 60.0, 25.0, 5.0)
-    plate_fy = st.number_input("Base plate fy [MPa]", 200.0, 460.0, 250.0, 5.0)
-    with st.expander("Base plate (0 = standard footplate for the upright: "
-                     "90 -> 100x145x4, 120 -> 100x176x4)"):
-        pb = st.number_input("Plate width X [mm] (0 = standard)", 0.0, 500.0, 0.0)
-        pd_ = st.number_input("Plate depth Y [mm] (0 = standard)", 0.0, 500.0, 0.0)
-        pt = st.number_input("Plate thickness [mm] (0 = standard)", 0.0, 40.0, 0.0)
-
-    splice_auto = frame_h > 11000.0
-    with st.expander(f"Upright splice "
-                     f"({'REQUIRED, H > 11 m' if splice_auto else 'optional'})",
-                     expanded=splice_auto):
-        sp_on = st.checkbox("Add splice + connection check", splice_auto)
-        sp_z = st.number_input("Splice elevation [mm]", 500.0, 15000.0,
-                               round(frame_h / 2 / 50) * 50.0, 50.0,
-                               disabled=not sp_on)
-        sp_bolt = st.selectbox("Splice bolt size",
-                               ["M8", "M10", "M12", "M14", "M16"], 2,
-                               disabled=not sp_on)
-        sp_grade = st.selectbox("Splice bolt grade",
-                                ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
-                                0, disabled=not sp_on)
-        c1, c2 = st.columns(2)
-        sp_rows = c1.number_input("Bolt rows / side (pitch p1)", 1, 6, 2,
-                                  disabled=not sp_on)
-        sp_cols = c2.number_input("Bolt columns (pitch p2)", 1, 4, 1,
-                                  disabled=not sp_on)
-        sp_e1 = c1.number_input("e1 [mm]", 10.0, 100.0, 30.0, disabled=not sp_on)
-        sp_e2 = c2.number_input("e2 [mm]", 10.0, 100.0, 20.0, disabled=not sp_on)
-        sp_p1 = c1.number_input("p1 [mm]", 0.0, 200.0, 60.0, disabled=not sp_on)
-        sp_p2 = c2.number_input("p2 [mm]", 0.0, 200.0, 0.0, disabled=not sp_on)
-        sp_t = st.number_input("Sleeve thickness [mm] (0 = upright wall)",
-                               0.0, 10.0, 0.0, disabled=not sp_on)
-
-    st.header("Loads")
-    dead_w = st.number_input("Beam dead load [N/mm]", 0.0, 1.0, 0.05)
-    place = st.number_input("Placement load [kN]", 0.0, 5.0, 0.5)
-    acc_x = st.number_input("Accidental load X (down-aisle) [kN]",
-                            0.0, 10.0, 1.25,
-                            help="EN 15512 impact on the corner upright; "
-                                 "combined at gamma = 1.0 (0 disables)")
-    acc_y = st.number_input("Accidental load Y (cross-aisle) [kN]",
-                            0.0, 10.0, 2.5)
-    acc_h = st.number_input("Accidental load height [mm]",
-                            100.0, 1000.0, 400.0, 50.0)
-
-    st.header("Imperfection & factors")
-    phi_s = st.number_input("Out-of-plumb phi_s (1/x)", 100.0, 1000.0, 350.0)
-    gG = st.number_input("gamma_G", 1.0, 2.0, 1.3)
-    gQ = st.number_input("gamma_Q", 1.0, 2.0, 1.4)
-    order = st.selectbox("Analysis", ["Second order (EN 15512)", "First order"])
-
-    go = st.button("Run analysis", type="primary", use_container_width=True)
-
-    st.header("Project")
-    st.caption("Record this configuration under a project / system. "
-               "Each system can hold many configurations.")
-    store = ProjectStore("projects")
-    projects = store.list_projects()
-    proj_labels = ["(new project)"] + [f"{p.name} [{p.id}]" for p in projects]
-    proj_sel = st.selectbox("Project", proj_labels)
-    if proj_sel == "(new project)":
-        new_proj_name = st.text_input("New project name", "My project")
-        new_client = st.text_input("Client", "")
-        new_engineer = st.text_input("Engineer", "")
-    else:
-        cur_proj = projects[proj_labels.index(proj_sel) - 1]
-        sys_labels = ["(new system)"] + [f"{s.name} [{s.id}]"
-                                         for s in cur_proj.systems]
-        sys_sel = st.selectbox("System", sys_labels)
-        if sys_sel == "(new system)":
-            new_sys_name = st.text_input("New system name", "Aisle 1")
-        config_name = st.text_input("Configuration name", "Config 1")
-        config_notes = st.text_input("Notes", "")
-    save_proj = st.button("Save configuration to project",
-                          use_container_width=True)
-
-cfg = RackConfig(
-    module="back-to-back" if module.startswith("Back") else "single",
-    b2b_gap=b2b_gap,
-    n_bays=int(n_bays), bay_width=bay_width, depth=depth,
-    levels=level_specs, frame_height=frame_h,
-    bracing_type="X" if btype.startswith("X") else "D",
-    bracing_type_zone1=(None if zone1 == "same"
-                        else ("X" if zone1.startswith("X") else "D")),
-    bracing_start=bstart, bracing_pitch=bpitch,
-    splice_z=sp_z if sp_on else None,
-    splice_above=0.0 if sp_on else 1.0e9,
-    splice_bolt_d=float(sp_bolt[1:]), splice_bolt_grade=sp_grade,
-    splice_rows=int(sp_rows), splice_cols=int(sp_cols),
-    splice_e1=sp_e1, splice_e2=sp_e2, splice_p1=sp_p1, splice_p2=sp_p2,
-    splice_t=sp_t or None,
-    library=lib, master=master,
-    upright_section=upright_sec,
-    brace_section=brace_sec, steel_fy=fy,
-    connector_stiffness=kc * 1e6, connector_m_rd=mrd * 1e6,
-    connector_looseness=phi_l / 1000.0,
-    base_stiffness="auto" if base_auto else kbase * 1e6,
-    brace_area_factor=brace_factor,
-    bolt_d=float(bolt_size[1:]), bolt_grade=bolt_grade,
-    bolts_per_connection=int(n_bolts),
-    concrete_fck=fck, plate_fy=plate_fy,
-    plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
-    dead_load_beam=dead_w,
-    placement_load=place * 1e3,
-    accidental_load_x=acc_x * 1e3, accidental_load_y=acc_y * 1e3,
-    accidental_height=acc_h,
-    gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
-)
-try:
-    model = build_rack(cfg)
-except (ValueError, KeyError) as e:
-    st.error(str(e))
-    st.stop()
-if order.startswith("First"):
-    model.analysis.order = 1
-
-if save_proj:
-    # persist the uploaded master so the configuration can be re-run later
-    master_path = None
-    if up_file is not None:
-        os.makedirs("projects/_masters", exist_ok=True)
-        master_path = os.path.join("projects/_masters", up_file.name)
-        with open(master_path, "wb") as f:
-            f.write(up_file.getvalue())
+def _save_config(pid, sid, cfg, master_id, notes, silent=False):
     try:
-        if proj_sel == "(new project)":
-            proj = store.create_project(new_proj_name, client=new_client,
-                                        engineer=new_engineer)
-            sysm = store.add_system(proj.id, "System 1")
-            pid, sid = proj.id, sysm.id
-            cname, cnotes = "Config 1", ""
-        else:
-            pid = cur_proj.id
-            if sys_sel == "(new system)":
-                sysm = store.add_system(pid, new_sys_name)
-                sid = sysm.id
-            else:
-                sid = cur_proj.systems[sys_labels.index(sys_sel) - 1].id
-            cname, cnotes = config_name, config_notes
-        conf = store.add_configuration(pid, sid, cname, cfg,
-                                       master_path=master_path,
-                                       master_id=master_id, notes=cnotes)
-        st.success(f"Saved to project '{pid}' / system '{sid}' / "
-                   f"config '{conf.id}'. Run it from the Projects tab or "
-                   f"`rack15512 project run {pid} {sid} {conf.id}`.")
+        cfg_save = RackConfig(**{k: v for k, v in cfg.__dict__.items()
+                                 if k not in ("library", "master")})
+        cfg_save.levels = cfg.levels
+        conf = PSTORE.add_configuration(pid, sid, cfg.name, cfg_save,
+                                        master_id=master_id, notes=notes)
+        if not silent:
+            st.success(f"Saved configuration '{conf.name}' ({conf.id}).")
+        return conf
     except (ValueError, KeyError) as e:
         st.error(f"Could not save: {e}")
+        st.stop()
 
-tab_model, tab_results, tab_checks, tab_report, tab_projects, tab_masters = \
-    st.tabs(["Model", "Results", "EN 15512 checks", "Report", "Projects",
-             "Section masters"])
 
-with tab_model:
-    st.pyplot(plot_model(model))
-    sec_rows = [{"name": s.name, "role": s.role,
-                 "material fy [MPa]": model.materials[s.material].fy,
-                 "A": s.A, "Iy": s.Iy, "Iz": s.Iz, "J": round(s.J, 1),
-                 "A_eff": s.area_eff,
-                 "curve y/z": f"{s.buckling_curve_y}/{s.buckling_curve_z}",
-                 "connector k [kNm/rad]":
-                     round(s.connector_k / 1e6, 1) if s.connector_k
-                     else ("fallback" if s.role == "beam" else "-"),
-                 "connector M_Rd [kNm]":
-                     round(s.connector_m_rd / 1e6, 2) if s.connector_m_rd
-                     else ("fallback" if s.role == "beam" else "-")}
-                for s in model.sections.values()]
-    st.subheader("Selected sections (from master)")
-    st.dataframe(sec_rows)
-    if isinstance(model.supports[0].rx, float):
-        st.caption(f"Floor connection stiffness in the model: "
-                   f"{model.supports[0].rx/1e6:.1f} kNm/rad"
-                   + (" (interpolated from BASE_STIFFNESS)" if base_auto else ""))
-    st.download_button("Download model JSON",
-                       json.dumps(io_json.model_to_dict(model), indent=2),
-                       "rack_model.json")
-
-if go:
-    with st.spinner("Running OpenSees..."):
-        cases = run_all(model)
-        checks = run_checks(model, cases)
-    st.session_state["cases"] = cases
-    st.session_state["checks"] = checks
-
-if "cases" in st.session_state:
-    cases = st.session_state["cases"]
-    checks = st.session_state["checks"]
-
-    with tab_results:
-        names = [c.name for c in cases]
-        sel = st.selectbox("Analysis case", names)
-        case = cases[names.index(sel)]
-        if not case.converged:
-            st.error("Analysis did not converge - structure likely unstable "
-                     "under this combination.")
-        else:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Sway X [mm]", f"{case.max_sway_x:.2f}")
-            c2.metric("Sway Y [mm]", f"{case.max_sway_y:.2f}")
-            a = case.alpha_cr_estimate
-            c3.metric("alpha_cr (est.)", f"{a:.2f}" if a else "n/a")
-            c4.metric("Order", "2nd" if case.order == 2 else "1st")
-            st.pyplot(plot_deformed(model, case))
-            kind = st.radio("Diagram", ["Mz", "My", "N", "Vy", "Vz", "T"],
-                            horizontal=True)
-            st.pyplot(plot_diagram(model, case, kind))
-            st.subheader("Reactions [N / N*mm]")
-            st.dataframe([{"node": n, "Fx": f"{r[0]:.0f}", "Fy": f"{r[1]:.0f}",
-                           "Fz": f"{r[2]:.0f}", "Mx": f"{r[3]:.0f}",
-                           "My": f"{r[4]:.0f}", "Mz": f"{r[5]:.0f}"}
-                          for n, r in case.reactions.items()])
-
-    with tab_checks:
-        verdict = all_ok(checks)
-        gov = governing(checks)
-        if verdict:
-            st.success(f"ALL CHECKS PASS - governing utilization "
-                       f"{gov.utilization:.3f} ({gov.check} on {gov.target})")
-        else:
-            st.error(f"CHECK FAILURES - governing {gov.check} on {gov.target} "
-                     f"in '{gov.case}': utilization {gov.utilization:.3f}")
-        st.pyplot(plot_utilization(model, checks))
-        st.dataframe([{"check": c.check, "target": c.target,
-                       "set": c.member_set, "case": c.case,
-                       "utilization": round(c.utilization, 3),
-                       "status": c.status, "detail": c.detail}
-                      for c in sorted(checks, key=lambda c: -c.utilization)],
-                     use_container_width=True)
-
-    with tab_report:
-        report = write_report(model, cases, checks)
-        st.download_button("Download report.md", report, "report.md")
-        st.markdown(report)
-else:
-    with tab_results:
-        st.info("Set the parameters in the sidebar and press *Run analysis*.")
-
-with tab_projects:
-    st.subheader("Projects")
-    st.caption("Each project holds systems; each system holds many "
-               "configurations with their recorded results.")
-    pstore = ProjectStore("projects")
-    allprojs = pstore.list_projects()
-    if not allprojs:
-        st.info("No projects yet. Build a configuration in the sidebar and "
-                "press *Save configuration to project*.")
-    for proj in allprojs:
-        meta = " · ".join(x for x in (proj.client, proj.location,
-                                      proj.engineer) if x)
-        with st.expander(f"{proj.name}  ({proj.id})"
-                         + (f" — {meta}" if meta else "")):
-            for sysm in proj.systems:
-                st.markdown(f"**System: {sysm.name}**"
-                            + (f" — {sysm.description}"
-                               if sysm.description else ""))
-                rows = []
-                for conf in sysm.configurations:
-                    rs = conf.run_summary or {}
-                    gov = rs.get("governing") or {}
-                    rows.append({
-                        "configuration": conf.name,
-                        "id": conf.id,
-                        "verdict": rs.get("verdict", "not run"),
-                        "governing": (f"{gov.get('check')} "
-                                      f"{gov.get('utilization')}"
-                                      if gov else "-"),
-                        "members": rs.get("n_members", "-"),
-                        "run at": rs.get("run_at", "-")})
-                if rows:
-                    st.dataframe(rows, use_container_width=True)
-                names = [c.name for c in sysm.configurations]
-                if names:
-                    pick = st.selectbox("Run configuration", names,
-                                        key=f"run_{proj.id}_{sysm.id}")
-                    if st.button("Run", key=f"btn_{proj.id}_{sysm.id}"):
-                        conf = sysm.configurations[names.index(pick)]
-                        with st.spinner("Running OpenSees..."):
-                            summary, cdir = run_configuration(
-                                pstore, proj.id, sysm.id, conf.id)
-                        st.success(f"{summary['verdict']} — artifacts in "
-                                   f"{cdir}")
-                        st.json(summary)
-
-with tab_masters:
-    st.subheader("Section masters")
-    st.caption("Masters are stored inside the system. Import an Excel "
-               "master once, then edit or delete sections here — no need "
-               "to re-read the spreadsheet.")
-    up_imp = st.file_uploader("Import a master file", key="master_import",
-                              type=["xlsx", "xlsm", "csv", "json"])
-    imp_name = st.text_input("Store as", up_imp.name if up_imp else "")
-    if up_imp and st.button("Import"):
-        suffix = os.path.splitext(up_imp.name)[1] or ".xlsx"
+# ----------------------------------------------------------------- masters
+def render_masters():
+    st.title("Section masters")
+    st.caption("Masters live inside the system. Import once, then edit or "
+               "delete sections — no need to re-read the spreadsheet.")
+    up = st.file_uploader("Import a master (.xlsx / .csv / .json)",
+                          type=["xlsx", "xlsm", "csv", "json"])
+    nm = st.text_input("Store as", up.name if up else "")
+    if up and st.button("Import"):
+        suffix = os.path.splitext(up.name)[1] or ".xlsx"
         tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-        tmp.write(up_imp.getvalue())
+        tmp.write(up.getvalue())
         tmp.close()
-        m = mstore.import_xlsx(tmp.name, name=imp_name or up_imp.name)
+        m = MSTORE.import_xlsx(tmp.name, name=nm or up.name)
         st.success(f"Imported '{m.id}' with {len(m.sections)} sections.")
         st.rerun()
 
-    for sm in mstore.list():
+    for sm in MSTORE.list():
         with st.expander(f"{sm.name}  ({sm.id}) — {len(sm.sections)} sections"):
-            c1, c2 = st.columns([3, 1])
-            c1.text(f"roles: {', '.join(sm.roles())}; "
-                    f"base tables: {len(sm.base_tables)}; updated {sm.updated}")
-            if c2.button("Delete master", key=f"delm_{sm.id}"):
-                mstore.delete(sm.id)
+            cc = st.columns([4, 1])
+            cc[0].caption(f"roles: {', '.join(sm.roles())} · base tables: "
+                          f"{len(sm.base_tables)} · updated {sm.updated}")
+            if cc[1].button("🗑 Delete master", key=f"dm_{sm.id}"):
+                MSTORE.delete(sm.id)
                 st.rerun()
             role = st.selectbox("Role", ["upright", "beam", "bracing"],
-                                key=f"role_{sm.id}")
+                                key=f"r_{sm.id}")
             names = sm.names(role)
             if names:
-                rows = []
-                for n in names:
-                    s = sm.sections[n]
-                    rows.append({"name": n, "A": s.get("A"),
-                                 "Iy": s.get("Iy"), "Iz": s.get("Iz"),
-                                 "J": s.get("J"), "fy": sm.fy.get(n)})
-                st.dataframe(rows, use_container_width=True)
-                edit = st.selectbox("Edit / delete section", names,
-                                    key=f"sec_{sm.id}")
-                fld = st.selectbox("Field", ["A", "Iy", "Iz", "J", "Wely",
-                                             "Welz", "fy", "e1", "e2", "t"],
-                                   key=f"fld_{sm.id}")
+                st.dataframe([{"name": n, "A": sm.sections[n].get("A"),
+                               "Iy": sm.sections[n].get("Iy"),
+                               "Iz": sm.sections[n].get("Iz"),
+                               "fy": sm.fy.get(n)} for n in names],
+                             use_container_width=True)
+                e = st.columns([2, 1.5, 1.5, 1])
+                edit = e[0].selectbox("Section", names, key=f"s_{sm.id}")
+                fld = e[1].selectbox("Field", ["A", "Iy", "Iz", "J", "Wely",
+                                               "Welz", "fy", "e1", "e2", "t"],
+                                     key=f"f_{sm.id}")
                 cur = (sm.fy.get(edit) if fld == "fy"
                        else sm.sections[edit].get(fld))
-                newv = st.number_input(f"{edit}.{fld}",
-                                       value=float(cur or 0.0),
-                                       key=f"val_{sm.id}")
-                cc1, cc2 = st.columns(2)
-                if cc1.button("Update field", key=f"upd_{sm.id}"):
-                    sm.update_fields(edit, **{fld: newv})
-                    mstore.save(sm)
-                    st.success(f"{edit}.{fld} = {newv}")
+                nv = e[2].number_input("Value", value=float(cur or 0.0),
+                                       key=f"v_{sm.id}")
+                if e[3].button("Update", key=f"u_{sm.id}"):
+                    sm.update_fields(edit, **{fld: nv})
+                    MSTORE.save(sm)
                     st.rerun()
-                if cc2.button("Delete section", key=f"dels_{sm.id}"):
+                if st.button(f"🗑 Delete section '{edit}'", key=f"ds_{sm.id}"):
                     sm.delete_section(edit)
-                    mstore.save(sm)
+                    MSTORE.save(sm)
                     st.rerun()
+
+
+# ------------------------------------------------------------------- router
+with st.sidebar:
+    st.markdown("## 🏗 EN 15512 SPR")
+    st.caption("Selective pallet racking design")
+    st.divider()
+    if st.button("🏠 Dashboard", use_container_width=True):
+        goto("dashboard")
+    if st.button("📚 Section masters", use_container_width=True):
+        goto("masters")
+    st.divider()
+    if ss.project_id and ss.view in ("project", "configure", "view_config"):
+        st.caption("Current project")
+        try:
+            st.info(PSTORE.load(ss.project_id).name)
+        except Exception:
+            pass
+    st.divider()
+    st.caption("OpenSees 2nd-order · semi-rigid connections · units N, mm, "
+               "MPa")
+
+_VIEWS = {
+    "dashboard": render_dashboard,
+    "new_project": render_new_project,
+    "project": render_project,
+    "configure": render_configure,
+    "view_config": render_view_config,
+    "masters": render_masters,
+}
+_VIEWS.get(ss.view, render_dashboard)()

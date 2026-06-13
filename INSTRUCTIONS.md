@@ -50,11 +50,28 @@ python -m pytest tests/                # full validation suite (~4 min)
 
 ## 2. Running the tool
 
-### Interactive UI
+### Interactive UI (dashboard)
 
 ```bash
 streamlit run app_streamlit.py         # opens http://localhost:8501
 ```
+
+The app opens on a **Dashboard**: a left menu (Dashboard · Section masters)
+with the saved **projects** listed on the right. From there:
+
+- **Create new project** — enter name/client/location/engineer and a first
+  system, then add configurations.
+- **Open** a project — see its systems and configurations with their
+  pass/fail verdict; **Open** a configuration to view its 3D model and
+  cross-aisle frame elevation plus saved results (verdict, governing
+  check, per-check utilisation, plots, full report), or **Run / re-run**
+  it; **Edit** to reopen the configuration form pre-filled.
+- **New configuration** (in a system) — the full form: geometry, per-level
+  beams, cross-aisle bracing including the **first-diagonal side
+  (outer/inner)**, connections, base/footplate, loads, accidental loads,
+  imperfection and factors. **Preview model**, **Save**, or **Save & run**.
+- **Section masters** page — import a master once, then edit or delete its
+  sections.
 
 ### Command line
 
@@ -226,7 +243,8 @@ print(write_report(model, cases, checks))
 | Back-to-back gap | mm | Clear gap between the two racks of a back-to-back module. |
 | Beam levels (1–20) | – | **Per level**: the beam gap (level-to-level spacing), the beam section from the master, and the pallet load — every level can differ. The model scales to 20 levels. |
 | Frame height | mm | Total upright length (≥ top beam level). |
-| Bracing type | – | CA frame pattern: `D` zigzag or `X` crossed pairs. In each frame the first diagonal connects to the **outer (aisle-side) upright** just above the bottom horizontal; the two frames of a back-to-back module are mirrored accordingly (`bracing_first_side` flips the convention). |
+| Bracing type | – | CA frame pattern: `D` zigzag or `X` crossed pairs. |
+| First diagonal connects to | – | `outer` (aisle side, default) or `inner` upright, for the first diagonal just above the bottom horizontal; both frames of a back-to-back module are mirrored accordingly. Exposed as a radio in the configuration form. |
 | First horizontal | mm | Height of the bottom horizontal strut (default 150). |
 | Diagonal pitch | mm | Height of each diagonal panel (default 600, customizable). Diagonals run up to the last position that fits; one closing horizontal there; no intermediate horizontals. |
 | fy | MPa | Default yield strength; sections from an .xlsx master carry their own fy. |
