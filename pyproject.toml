@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rack15512"
+version = "0.1.0"
+description = "Storage-rack structural analysis and EN 15512 design checks (OpenSees second-order analysis with semi-rigid connections)"
+requires-python = ">=3.9"
+dependencies = [
+    "openseespy>=3.5",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "openpyxl>=3.1",
+    "plotly>=5.18",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.30", "plotly>=5.18"]
+test = ["pytest"]
+
+[project.scripts]
+rack15512 = "rack15512.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["rack15512*"]
+
+[tool.setuptools.package-data]
+rack15512 = ["data/*.csv"]

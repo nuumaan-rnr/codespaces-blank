@@ -1,0 +1,316 @@
+"""Importer for the user's section master workbook (.xlsx).
+
+Expected sheets (units as in the workbook: cm, kN):
+  UPRIGHT_MASTER : Section | Description | dims | Aeff cm2 | Iyy cm4 |
+                   Izz cm4 | iyy | izz | Weff,y cm3 | Weff,z cm3 |
+                   fy kN/cm2 | H depth | t wall cm | ...
+  BEAM_MASTER    : # | SECTION | h mm | b mm | t mm | I cm4 | Wel cm3 |
+                   fy kN/cm2 | M_Rd kNcm | EI
+  BRACING_MASTER : transposed (property rows x section columns) with
+                   Area cm2, Iyy/Izz cm4, Zyy/Zzz cm3, IT cm4, Fy kN/cm2,
+                   thickness mm
+  BASE_STIFFNESS : per upright, table of N (kN) vs k_b (kNcm/rad) vs
+                   M_Rd (kNcm)  - the EN 15512 load-dependent floor
+                   connection stiffness
+
+Everything is converted to the app's N/mm unit set.
+
+Axis mapping (see rack15512.model): the workbook's Iyy is the MAJOR axis
+(engaged by down-aisle bending of uprights / gravity bending of beams) and
+maps to the model's local-z properties (Iz, Welz); the workbook's Izz maps
+to Iy/Wely.
+
+Derived values (not in the workbook):
+  * upright torsion constant J ~ A*t^2/3 (open thin-walled estimate),
+  * beam minor-axis I/W, area and J from the RHS h x b x t dimensions.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+from .library import SectionLibrary
+from .model import CrossSection
+
+# unit factors -> N, mm
+CM2 = 1.0e2     # cm^2  -> mm^2
+CM3 = 1.0e3     # cm^3  -> mm^3
+CM4 = 1.0e4     # cm^4  -> mm^4
+KNCM2 = 10.0    # kN/cm^2 -> MPa
+KNCM = 1.0e4    # kN*cm -> N*mm
+KN = 1.0e3      # kN -> N
+
+
+@dataclass
+class MasterWorkbook:
+    """Parsed master: a SectionLibrary plus the base-stiffness tables."""
+
+    library: SectionLibrary
+    # upright name -> sorted [(N [N], k_b [N*mm/rad], M_Rd [N*mm]), ...]
+    base_tables: Dict[str, List[Tuple[float, float, float]]] = field(
+        default_factory=dict)
+    # section name -> fy [MPa] from the workbook
+    fy: Dict[str, float] = field(default_factory=dict)
+
+    def base_stiffness(self, upright: str, N: float) -> Tuple[float, float]:
+        """Floor-connection stiffness and moment resistance for axial load
+        N [N], linearly interpolated in the upright's table (clamped at the
+        table ends)."""
+        table = self.base_tables.get(upright)
+        if not table:
+            raise KeyError(f"No BASE_STIFFNESS table for upright '{upright}'")
+        if N <= table[0][0]:
+            return table[0][1], table[0][2]
+        if N >= table[-1][0]:
+            return table[-1][1], table[-1][2]
+        for (n0, k0, m0), (n1, k1, m1) in zip(table, table[1:]):
+            if n0 <= N <= n1:
+                t = (N - n0) / (n1 - n0)
+                return k0 + t * (k1 - k0), m0 + t * (m1 - m0)
+        return table[-1][1], table[-1][2]    # unreachable
+
+
+def load_master(path: str) -> MasterWorkbook:
+    try:
+        import openpyxl
+    except ImportError:
+        raise ImportError("reading .xlsx masters requires openpyxl "
+                          "(pip install openpyxl)") from None
+    wb = openpyxl.load_workbook(path, data_only=True)
+    sections: Dict[str, CrossSection] = {}
+    fy_map: Dict[str, float] = {}
+
+    if "UPRIGHT_MASTER" in wb.sheetnames:
+        for s, fy in _parse_uprights(wb["UPRIGHT_MASTER"]):
+            sections[s.name] = s
+            fy_map[s.name] = fy
+    if "BEAM_MASTER" in wb.sheetnames:
+        for s, fy in _parse_beams(wb["BEAM_MASTER"]):
+            sections[s.name] = s
+            fy_map[s.name] = fy
+    if "BRACING_MASTER" in wb.sheetnames:
+        for s, fy in _parse_bracings(wb["BRACING_MASTER"]):
+            sections[s.name] = s
+            fy_map[s.name] = fy
+    if not sections:
+        raise ValueError(f"Master '{path}': no recognised sheets "
+                         "(UPRIGHT_MASTER / BEAM_MASTER / BRACING_MASTER)")
+
+    base = {}
+    if "BASE_STIFFNESS" in wb.sheetnames:
+        base = _parse_base_stiffness(wb["BASE_STIFFNESS"])
+
+    return MasterWorkbook(library=SectionLibrary(sections),
+                          base_tables=base, fy=fy_map)
+
+
+def _rows(ws) -> List[list]:
+    return [list(r) for r in ws.iter_rows(values_only=True)]
+
+
+def _num(v, default: Optional[float] = None) -> Optional[float]:
+    if v is None or str(v).strip() == "":
+        return default
+    return float(v)
+
+
+def _parse_uprights(ws):
+    out = []
+    header = None
+    # optional gross torsion/warping/shear-centre columns for FT buckling,
+    # found by header text (any position): IT/J, Iw, y0, Iyy_g, Izz_g
+    cols = {}
+    for r in _rows(ws):
+        cells = r[1:]                       # data starts in column B
+        if header is None:
+            if cells and str(cells[0]).strip() == "Section":
+                header = [str(c or "").strip().lower() for c in cells]
+                for idx, h in enumerate(header):
+                    if ("it" in h or h.startswith("j")) and "cm4" in h:
+                        cols["It"] = idx
+                    elif "iw" in h or "warping" in h:
+                        cols["Iw"] = idx
+                    elif h.startswith("y0") or "shear cen" in h:
+                        cols["y0"] = idx
+            continue
+        if not cells or not cells[0]:
+            continue
+
+        def opt(key, fac):
+            idx = cols.get(key)
+            if idx is None or idx >= len(cells):
+                return None
+            v = _num(cells[idx])
+            return v * fac if v else None
+
+        name = str(cells[0]).strip()
+        desc = str(cells[1] or "").strip()
+        A_eff = _num(cells[5]) * CM2
+        Iz = _num(cells[6]) * CM4           # workbook Iyy = major = local z
+        Iy = _num(cells[7]) * CM4           # workbook Izz = minor = local y
+        Wz_eff = _num(cells[10]) * CM3      # Weff,y -> Welz
+        Wy_eff = _num(cells[11]) * CM3      # Weff,z -> Wely
+        fy = _num(cells[12], 35.0) * KNCM2
+        t = _num(cells[14], 0.2) * 10.0     # t wall cm -> mm
+        It = opt("It", CM4)
+        J = It if It else A_eff * t * t / 3.0     # open-section estimate
+        out.append((CrossSection(
+            name=name, material="steel", role="upright",
+            A=A_eff, Iy=Iy, Iz=Iz, J=J,
+            Wely=Wy_eff, Welz=Wz_eff,
+            A_eff=A_eff, Wy_eff=Wy_eff, Wz_eff=Wz_eff,
+            buckling_curve_y="b", buckling_curve_z="b",
+            t=t, e1=_num(cells[15]), e2=_num(cells[16]),
+            depth_h=_num(cells[2]), width_b=_num(cells[3]),
+            It_gross=It, Iw_gross=opt("Iw", 1.0e6),   # cm6 -> mm6
+            y0=opt("y0", 10.0),                       # cm -> mm
+            Iy_gross=Iy, Iz_gross=Iz,
+            description=f"{desc} (A=Aeff)"), fy))
+    return out
+
+
+def _parse_beams(ws):
+    out = []
+    header = None
+    k_col = mrd_col = loos_col = None
+    k_fac = mrd_fac = KNCM            # default workbook units: kNcm(/rad)
+    loos_fac = 1.0e-3                 # default: mrad
+    for r in _rows(ws):
+        cells = r[1:]
+        if header is None:
+            if cells and str(cells[0]).strip() == "#":
+                header = [str(c or "").strip().lower() for c in cells]
+                # optional per-beam connector columns, found by header text:
+                #   'Connector k (kNcm/rad)' or '(kNm/rad)'
+                #   'Connector M_Rd (kNcm)' or '(kNm)'
+                #   'Connector looseness (mrad)' or '(rad)' / 'phi_l'
+                for idx, h in enumerate(header):
+                    if "connector" in h and ("stiff" in h or " k" in h
+                                             or h.startswith("k")):
+                        k_col = idx
+                        k_fac = 1.0e6 if "knm" in h else KNCM
+                    elif "connector" in h and ("m_rd" in h or "mrd" in h
+                                               or "m rd" in h):
+                        mrd_col = idx
+                        mrd_fac = 1.0e6 if "knm" in h else KNCM
+                    elif "looseness" in h or "phi_l" in h:
+                        loos_col = idx
+                        loos_fac = 1.0 if "(rad" in h else 1.0e-3
+            continue
+        if not cells or not cells[1]:
+            continue
+        name = str(cells[1]).strip()
+        h = _num(cells[2])                  # mm
+        b = _num(cells[3])
+        t = _num(cells[4])
+        Iz = _num(cells[5]) * CM4           # workbook major I (sheet value)
+        Welz = _num(cells[6]) * CM3
+        fy = _num(cells[7], 27.0) * KNCM2
+
+        def opt(col, fac):
+            if col is None or col >= len(cells):
+                return None
+            v = _num(cells[col])
+            return v * fac if v else None
+
+        # minor axis, area and J from the RHS h x b x t geometry
+        hi, bi = h - 2 * t, b - 2 * t
+        A = h * b - hi * bi
+        Iy = (h * b**3 - hi * bi**3) / 12.0
+        Wely = 2.0 * Iy / b
+        hm, bm = h - t, b - t               # closed thin-wall torsion
+        J = 2.0 * t * (hm * bm) ** 2 / (hm + bm)
+        out.append((CrossSection(
+            name=name, material="steel", role="beam",
+            A=A, Iy=Iy, Iz=Iz, J=J, Wely=Wely, Welz=Welz,
+            buckling_curve_y="b", buckling_curve_z="b",
+            connector_k=opt(k_col, k_fac),
+            connector_m_rd=opt(mrd_col, mrd_fac),
+            connector_looseness=opt(loos_col, loos_fac),
+            description=f"RHS {h:.0f}x{b:.0f}x{t:.1f} "
+                        "(minor axis/J from geometry)"), fy))
+    return out
+
+
+_BRACE_ROW_KEYS = (
+    ("section area", "A", CM2),
+    ("iyy", "Iz", CM4),                     # workbook Iyy = major -> local z
+    ("izz", "Iy", CM4),
+    ("zyy", "Welz", CM3),
+    ("zzz", "Wely", CM3),
+    ("it", "J", CM4),
+    ("fy", "fy", KNCM2),
+    ("fu", "fu", KNCM2),
+    ("thk", "t", 1.0),                      # mm
+    ("end dist. e1", "e1", 1.0),            # mm
+    ("end dist. e2", "e2", 1.0),
+    ("iw", "Iw", 1.0e6),                    # cm6 -> mm6
+    ("y0", "y0", 10.0),                     # cm -> mm
+)
+
+
+def _parse_bracings(ws):
+    rows = _rows(ws)
+    if not rows:
+        return []
+    names_raw = [str(v).strip() for v in rows[0][1:] if v is not None]
+    names: List[str] = []
+    for n in names_raw:                     # de-duplicate repeated names
+        names.append(n if n not in names else f"{n} #{names.count(n) + 1}")
+    props: Dict[str, List[float]] = {}
+    for r in rows[1:]:
+        label = str(r[0] or "").strip().lower()
+        for key, attr, factor in _BRACE_ROW_KEYS:
+            if label.startswith(key):
+                props[attr] = [(_num(v, 0.0) or 0.0) * factor
+                               for v in r[1:1 + len(names)]]
+    out = []
+    for k, name in enumerate(names):
+        def p(attr, default=0.0):
+            vals = props.get(attr)
+            return vals[k] if vals and k < len(vals) else default
+        out.append((CrossSection(
+            name=name, material="steel", role="bracing",
+            A=p("A"), Iy=p("Iy"), Iz=p("Iz"), J=max(p("J"), 1.0),
+            Wely=max(p("Wely"), 1.0), Welz=max(p("Welz"), 1.0),
+            buckling_curve_y="c", buckling_curve_z="c",
+            t=p("t", None), e1=p("e1", None), e2=p("e2", None),
+            fu=p("fu", None) or None,
+            It_gross=p("J", None) or None, Iw_gross=p("Iw", None) or None,
+            y0=p("y0", None), Iy_gross=p("Iy") or None,
+            Iz_gross=p("Iz") or None,
+            description="cold-formed C brace"), p("fy", 270.0)))
+    return out
+
+
+def _parse_base_stiffness(ws) -> Dict[str, List[Tuple[float, float, float]]]:
+    tables: Dict[str, List[Tuple[float, float, float]]] = {}
+    current: Optional[str] = None
+    for r in _rows(ws):
+        cells = r[1:]
+        if not cells:
+            continue
+        first = str(cells[0] or "").strip()
+        if first and not _is_number(first):
+            if first.lower().startswith("n (kn"):
+                continue                     # header row of a block
+            if first.upper().startswith("UP"):
+                current = first
+                tables[current] = []
+            continue
+        if current and _is_number(first):
+            N = float(first) * KN
+            k = _num(cells[1])
+            m = _num(cells[2])
+            if k is not None:
+                tables[current].append((N, k * KNCM, (m or 0.0) * KNCM))
+    return {k: sorted(v) for k, v in tables.items() if v}
+
+
+def _is_number(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
