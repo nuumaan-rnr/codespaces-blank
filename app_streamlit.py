@@ -582,17 +582,23 @@ def render_configure():
                        f"members · first diagonal: {cfg.bracing_first_side}")
         except (ValueError, KeyError) as e:
             st.error(str(e))
-    if c[1].button("💾 Save configuration", use_container_width=True):
-        _save_config(proj.id, sysm.id, cfg, master_id, notes)
+    save_label = ("💾 Update configuration" if ss.config_id
+                  else "💾 Save configuration")
+    if c[1].button(save_label, use_container_width=True):
+        conf = _save_config(proj.id, sysm.id, cfg, master_id, notes)
+        if conf:
+            ss.config_id = conf.id        # subsequent saves update this one
     if c[2].button("💾▶ Save & run", type="primary",
                    use_container_width=True):
         conf = _save_config(proj.id, sysm.id, cfg, master_id, notes,
                             silent=True)
-        with st.spinner("Running OpenSees (this can take a few minutes)…"):
-            summary, _ = run_configuration(PSTORE, proj.id, sysm.id, conf.id)
-        # post-run popup with the cases / combinations / convergence / stress
-        # and a button to open the results view (model coloured by util)
-        _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
+        if conf:
+            ss.config_id = conf.id
+            with st.spinner("Running OpenSees (this can take a few minutes)…"):
+                summary, _ = run_configuration(PSTORE, proj.id, sysm.id,
+                                               conf.id)
+            # popup with cases/combinations/convergence/stress + results link
+            _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
 
 
 def _save_config(pid, sid, cfg, master_id, notes, silent=False):
@@ -600,14 +606,22 @@ def _save_config(pid, sid, cfg, master_id, notes, silent=False):
         cfg_save = RackConfig(**{k: v for k, v in cfg.__dict__.items()
                                  if k not in ("library", "master")})
         cfg_save.levels = cfg.levels
-        conf = PSTORE.add_configuration(pid, sid, cfg.name, cfg_save,
-                                        master_id=master_id, notes=notes)
+        if ss.config_id and PSTORE.load(pid).system(sid) \
+                and PSTORE.load(pid).system(sid).configuration(ss.config_id):
+            conf = PSTORE.update_configuration(
+                pid, sid, ss.config_id, cfg.name, cfg_save,
+                master_id=master_id, notes=notes)
+            verb = "Updated"
+        else:
+            conf = PSTORE.add_configuration(pid, sid, cfg.name, cfg_save,
+                                            master_id=master_id, notes=notes)
+            verb = "Saved"
         if not silent:
-            st.success(f"Saved configuration '{conf.name}' ({conf.id}).")
+            st.success(f"{verb} configuration '{conf.name}' ({conf.id}).")
         return conf
     except (ValueError, KeyError) as e:
         st.error(f"Could not save: {e}")
-        st.stop()
+        return None
 
 
 # ----------------------------------------------------------------- masters

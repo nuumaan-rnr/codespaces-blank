@@ -65,6 +65,40 @@ def test_project_system_configuration_hierarchy(tmp_path):
     assert os.path.isfile(os.path.join(cdir, "config.json"))
 
 
+def test_update_configuration_in_place(tmp_path):
+    """Re-saving an existing configuration updates it; it does NOT spawn a
+    new one (the 'a, a-2, a-3 ...' bug)."""
+    store = ProjectStore(str(tmp_path / "projects"))
+    proj = store.create_project("Job")
+    sysm = store.add_system(proj.id, "Aisle 1")
+    conf = store.add_configuration(proj.id, sysm.id, "A",
+                                   RackConfig(n_bays=2))
+    # mark a run result on it
+    store.update_run_summary(proj.id, sysm.id, conf.id,
+                             {"verdict": "PASS", "governing": None})
+
+    # update the SAME id with changed parameters
+    updated = store.update_configuration(proj.id, sysm.id, conf.id, "A",
+                                         RackConfig(n_bays=5),
+                                         notes="rev B")
+    assert updated.id == conf.id                      # same id, not a-2
+    reloaded = store.load(proj.id)
+    assert len(reloaded.system(sysm.id).configurations) == 1   # no new entry
+    c = reloaded.system(sysm.id).configuration(conf.id)
+    assert c.config["n_bays"] == 5
+    assert c.notes == "rev B"
+    # parameters changed -> stale run result cleared
+    assert c.run_summary is None
+
+    # re-saving identical params keeps the (re-attached) run result
+    store.update_run_summary(proj.id, sysm.id, conf.id, {"verdict": "PASS"})
+    store.update_configuration(proj.id, sysm.id, conf.id, "A",
+                              RackConfig(n_bays=5), notes="rev B")
+    c = store.load(proj.id).system(sysm.id).configuration(conf.id)
+    assert c.run_summary == {"verdict": "PASS"}        # unchanged -> kept
+    assert len(store.load(proj.id).system(sysm.id).configurations) == 1
+
+
 def test_unique_ids_and_run_summary(tmp_path):
     store = ProjectStore(str(tmp_path / "projects"))
     p1 = store.create_project("Job")

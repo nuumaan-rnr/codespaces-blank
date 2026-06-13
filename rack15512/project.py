@@ -218,6 +218,40 @@ class ProjectStore:
         self.save(project)
         return conf
 
+    def update_configuration(self, project_id: str, system_id: str,
+                             config_id: str, name: str, cfg: RackConfig,
+                             master_path: Optional[str] = None,
+                             master_id: Optional[str] = None,
+                             notes: str = "") -> Configuration:
+        """Overwrite an existing configuration in place (keeps its id).
+        The stored run_summary is cleared when the parameters change, so a
+        stale result is never shown against new inputs."""
+        project = self.load(project_id)
+        system = project.system(system_id)
+        if system is None:
+            raise KeyError(f"system '{system_id}' not in project '{project_id}'")
+        conf = system.configuration(config_id)
+        if conf is None:
+            raise KeyError(f"configuration '{config_id}' not found")
+        new_cfg = rackconfig_to_dict(cfg)
+        if new_cfg != conf.config or master_id != conf.master_id:
+            conf.run_summary = None       # results no longer match the inputs
+        conf.name = name
+        conf.config = new_cfg
+        conf.master_path = master_path
+        conf.master_id = master_id
+        conf.notes = notes
+        conf.updated = _now()
+        cdir = self.config_dir(project_id, system_id, config_id)
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, "config.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"name": name, "master_path": master_path,
+                       "master_id": master_id, "config": conf.config},
+                      f, indent=2)
+        self.save(project)
+        return conf
+
     def update_run_summary(self, project_id: str, system_id: str,
                            config_id: str, summary: Dict[str, Any]) -> None:
         project = self.load(project_id)
