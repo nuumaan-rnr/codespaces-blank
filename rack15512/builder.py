@@ -161,6 +161,9 @@ class RackConfig:
     accidental_load_x: float = 1250.0       # N down-aisle
     accidental_load_y: float = 2500.0       # N cross-aisle
     accidental_height: float = 400.0        # mm above floor
+    # switches to drop whole action types from the model + combinations
+    include_placement: bool = True          # horizontal placement loads
+    include_accidental: bool = True         # accidental impact loads
     # design
     gamma_G: float = 1.3
     gamma_Q: float = 1.4
@@ -383,13 +386,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
                         brace_points[(i, hi)].append(brace_zs[k + 1])
 
     # ---- row spacers between back-to-back racks ----------------------------
+    # row spacers are modelled as BEAMS (they tie the two racks and carry
+    # bending), unlike the frame bracing which are truss members
     if spacer_pair is not None:
         sa, sb = spacer_pair
         for i in range(n_lines):
             for z in beam_levels:
                 j = j_of(z)
                 m.add_member(mid, nid(i, sa, j), nid(i, sb, j), br.name,
-                             mtype="truss", member_set="row spacers")
+                             mtype="beam", mesh=1, member_set="row spacers")
                 mid += 1
 
     # ---- EN 15512 buckling lengths for the uprights -------------------------
@@ -424,9 +429,10 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.checks.buckling_sets = ["uprights"]
 
     # bracing connection-flexibility modification: only this fraction of
-    # the brace area acts in the ANALYSIS (strength checks use full A)
+    # the brace area acts in the ANALYSIS (strength checks use full A).
+    # Row spacers are beams and keep their full section.
     for mm in m.members.values():
-        if mm.member_set in ("bracing", "row spacers"):
+        if mm.member_set == "bracing":
             mm.area_factor = cfg.brace_area_factor
 
     # bracing bolt-connection and footplate checks; when no plate is given
@@ -492,17 +498,21 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.load_cases["pallets"] = pallets
 
     top_j = j_of(beam_levels[-1])
-    place = LoadCase("placement", "variable")
-    place.nodal_loads.append(NodalLoad(nid(0, 0, top_j), fx=cfg.placement_load))
-    m.load_cases["placement"] = place
-
-    place_y = LoadCase("placement_y", "variable")
-    place_y.nodal_loads.append(NodalLoad(nid(0, 0, top_j), fy=cfg.placement_load))
-    m.load_cases["placement_y"] = place_y
+    placement = cfg.include_placement and cfg.placement_load > 0
+    if placement:
+        place = LoadCase("placement", "variable")
+        place.nodal_loads.append(NodalLoad(nid(0, 0, top_j),
+                                           fx=cfg.placement_load))
+        m.load_cases["placement"] = place
+        place_y = LoadCase("placement_y", "variable")
+        place_y.nodal_loads.append(NodalLoad(nid(0, 0, top_j),
+                                             fy=cfg.placement_load))
+        m.load_cases["placement_y"] = place_y
 
     # accidental impact loads on the corner upright (EN 15512)
-    acc = (cfg.accidental_load_x or cfg.accidental_load_y) \
-        and 0.0 < cfg.accidental_height < H
+    acc = (cfg.include_accidental
+           and (cfg.accidental_load_x or cfg.accidental_load_y)
+           and 0.0 < cfg.accidental_height < H)
     if acc:
         j_acc = j_of(cfg.accidental_height)
         acc_x = LoadCase("accidental_x", "accidental")
@@ -518,26 +528,28 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.combinations = [
         Combination("ULS1", "ULS",
                     {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q}),
-        Combination("ULS2", "ULS",
-                    {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                     "placement": cfg.gamma_Q}),
-        Combination("ULS3", "ULS",
-                    {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                     "placement_y": cfg.gamma_Q}),
         Combination("SLS1", "SLS",
                     {"dead": 1.0, "pallets": 1.0}, imperfection=False),
-        Combination("SLS2", "SLS",
-                    {"dead": 1.0, "pallets": 1.0, "placement": 1.0},
-                    imperfection=False),
     ]
+    if placement:
+        m.combinations.insert(1, Combination(
+            "ULS2", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
+                            "placement": cfg.gamma_Q}))
+        m.combinations.insert(2, Combination(
+            "ULS3", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
+                            "placement_y": cfg.gamma_Q}))
+        m.combinations.append(Combination(
+            "SLS2", "SLS", {"dead": 1.0, "pallets": 1.0, "placement": 1.0},
+            imperfection=False))
     if acc:
         # accidental design situation: gamma = 1.0 on all actions
-        m.combinations.insert(3, Combination(
-            "ULS4 acc X", "ULS",
+        idx = len([c for c in m.combinations if c.kind == "ULS"])
+        m.combinations.insert(idx, Combination(
+            "ULS-accX", "ULS",
             {"dead": 1.0, "pallets": 1.0, "accidental_x": 1.0},
             imp_directions=["+x"]))
-        m.combinations.insert(4, Combination(
-            "ULS5 acc Y", "ULS",
+        m.combinations.insert(idx + 1, Combination(
+            "ULS-accY", "ULS",
             {"dead": 1.0, "pallets": 1.0, "accidental_y": 1.0},
             imp_directions=["+y"]))
 

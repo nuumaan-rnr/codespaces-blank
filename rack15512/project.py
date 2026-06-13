@@ -239,10 +239,10 @@ class ProjectStore:
 
 # --------------------------------------------------------------- run summary
 def summarize_run(model, cases, checks) -> Dict[str, Any]:
-    """Compact run record stored against a configuration."""
+    """Compact run record stored against a configuration (also feeds the
+    post-run popup: load cases, combinations, convergence, max stress)."""
     from .checks.en15512 import all_ok, governing
     gov = governing(checks)
-    # worst utilization per check type
     by_kind: Dict[str, float] = {}
     for c in checks:
         if c.informative:
@@ -261,4 +261,15 @@ def summarize_run(model, cases, checks) -> Dict[str, Any]:
             "utilization": round(gov.utilization, 3)},
         "max_utilization_by_check": {k: round(v, 3)
                                      for k, v in sorted(by_kind.items())},
+        "max_stress": round(by_kind.get("STRESS", 0.0), 3),
+        "load_cases": list(model.load_cases),
+        "combinations": [{"name": c.name, "kind": c.kind,
+                          "factors": c.factors,
+                          "imperfection": bool(c.imperfection)}
+                         for c in model.combinations],
+        "cases": [{"name": c.name, "combo": c.combo, "kind": c.kind,
+                   "converged": c.converged,
+                   "max_sway_x": round(c.max_sway_x, 2),
+                   "max_sway_y": round(c.max_sway_y, 2)}
+                  for c in cases],
     }

@@ -115,7 +115,7 @@ def test_back_to_back_module_and_buckling_rules():
     spacers = [m for m in model.members.values()
                if m.member_set == "row spacers"]
     assert len(spacers) == 2 * 2            # 2 levels x 2 frame lines
-    assert all(m.mtype == "truss" for m in spacers)
+    assert all(m.mtype == "beam" for m in spacers)   # spacers are beams
     # 4 upright lines get supports
     assert len(model.supports) == 2 * 4
     # buckling restricted to the uprights
@@ -372,7 +372,7 @@ def test_accidental_load_case_and_factor_report():
     assert (node.x, node.y, node.z) == (0.0, 0.0, 400.0)
     ay = model.load_cases["accidental_y"].nodal_loads[0]
     assert ay.fy == pytest.approx(2500.0)
-    co4 = next(c for c in model.combinations if c.name.startswith("ULS4"))
+    co4 = next(c for c in model.combinations if "accX" in c.name)
     assert co4.factors == {"dead": 1.0, "pallets": 1.0, "accidental_x": 1.0}
     assert co4.imp_directions == ["+x"]
     # disabling

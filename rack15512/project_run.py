@@ -53,6 +53,11 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     with open(os.path.join(cdir, "report.md"), "w") as f:
         f.write(_project_header(project, system, conf) +
                 write_report(model, cases, checks))
+    # persist the full results so the interactive viewer / envelopes can be
+    # shown later without re-running the analysis
+    import pickle
+    with open(os.path.join(cdir, "results.pkl"), "wb") as f:
+        pickle.dump({"cases": cases, "checks": checks}, f)
     if plots:
         plot_model(model, os.path.join(cdir, "model.png"))
         plot_frame_elevation(model, 0.0,

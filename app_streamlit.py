@@ -13,10 +13,14 @@ import tempfile
 
 import streamlit as st
 
+import pickle
+
 from rack15512.analysis import run_all
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
+from rack15512.envelopes import build_envelopes
+from rack15512.iviewer import figure_for_case, figure_for_envelope
 from rack15512.library import SectionLibrary
 from rack15512.master_store import MasterStore
 from rack15512.model import CrossSection
@@ -44,6 +48,47 @@ def goto(view, **kw):
     for k, v in kw.items():
         ss[k] = v
     st.rerun()
+
+
+def _load_results(cdir):
+    p = os.path.join(cdir, "results.pkl")
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+@st.dialog("Analysis run summary", width="large")
+def _run_summary_dialog(rs):
+    v = rs.get("verdict", "?")
+    st.markdown(f"### {'🟢' if v == 'PASS' else '🔴'} {v}  ·  "
+                f"max member stress utilisation = {rs.get('max_stress', '-')}")
+    st.markdown(f"**{rs.get('n_cases', 0)} analysis cases** from "
+                f"{len(rs.get('combinations', []))} load combinations on "
+                f"{len(rs.get('load_cases', []))} load cases.")
+    st.markdown("**Load cases:** " + ", ".join(rs.get("load_cases", [])))
+    st.markdown("**Load combinations**")
+    st.dataframe([{"combination": c["name"], "kind": c["kind"],
+                   "factors": ", ".join(f"{f:g}×{lc}"
+                                        for lc, f in c["factors"].items()),
+                   "imperfection": "yes" if c["imperfection"] else "no"}
+                  for c in rs.get("combinations", [])],
+                 use_container_width=True)
+    st.markdown("**Analysis cases — convergence**")
+    st.dataframe([{"case": c["name"], "kind": c["kind"],
+                   "converged": "✅" if c["converged"] else "❌ NO",
+                   "sway X [mm]": c["max_sway_x"],
+                   "sway Y [mm]": c["max_sway_y"]}
+                  for c in rs.get("cases", [])], use_container_width=True)
+    not_conv = [c["name"] for c in rs.get("cases", []) if not c["converged"]]
+    if not_conv:
+        st.error("Did NOT converge: " + ", ".join(not_conv)
+                 + " — likely sway instability at ULS.")
+    else:
+        st.success("All analysis cases converged.")
 
 
 # ----------------------------------------------------------------- masters
@@ -204,6 +249,11 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         ah = c[2].number_input("Accidental height [mm]", 100.0, 1000.0,
                                float(g("accidental_height", 400.0)), 50.0)
         c = st.columns(3)
+        inc_place = c[0].checkbox("Include placement loads",
+                                  bool(g("include_placement", True)))
+        inc_acc = c[1].checkbox("Include accidental loads",
+                                bool(g("include_accidental", True)))
+        c = st.columns(3)
         gG = c[0].number_input("gamma_G", 1.0, 2.0, float(g("gamma_G", 1.3)))
         gQ = c[1].number_input("gamma_Q", 1.0, 2.0, float(g("gamma_Q", 1.4)))
 
@@ -220,7 +270,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
         dead_load_beam=dead, placement_load=place * 1e3,
         accidental_load_x=ax * 1e3, accidental_load_y=ay * 1e3,
-        accidental_height=ah, gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s)
+        accidental_height=ah, include_placement=inc_place,
+        include_accidental=inc_acc,
+        gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s)
     cfg.master = master
     return cfg
 
@@ -382,19 +434,48 @@ def render_view_config():
         if not rs:
             st.info("This configuration has not been run yet.")
         else:
-            c = st.columns(4)
+            c = st.columns(5)
             c[0].metric("Verdict", rs["verdict"])
             gov = rs.get("governing") or {}
             c[1].metric("Governing", gov.get("check", "-"))
             c[2].metric("Utilization", gov.get("utilization", "-"))
-            c[3].metric("Cases", rs.get("n_cases", "-"))
+            c[3].metric("Max stress", rs.get("max_stress", "-"))
+            c[4].metric("Cases", rs.get("n_cases", "-"))
+            if st.button("📋 Show load cases / combinations summary"):
+                _run_summary_dialog(rs)
+
+            results = _load_results(cdir)
+            if results:
+                cases, checks = results["cases"], results["checks"]
+                envs = build_envelopes(model, cases, checks)
+                opts = ([f"Envelope: {e.name}" for e in envs]
+                        + [f"Case: {c.name}" for c in cases])
+                cc = st.columns([3, 2])
+                sel = cc[0].selectbox("View envelope / case", opts)
+                scale = cc[1].slider("Deformation scale", 0, 200, 30, 5)
+                st.caption("Hover a member for its forces, a ◆ support for "
+                           "its reactions.")
+                if sel.startswith("Envelope:"):
+                    env = envs[opts.index(sel)]
+                    fig = figure_for_envelope(model, env, scale=scale)
+                    st.plotly_chart(fig, use_container_width=True)
+                    if env.governing:
+                        st.caption(f"Governing in this envelope: "
+                                   f"{env.governing.check} on "
+                                   f"{env.governing.target} = "
+                                   f"{env.governing.utilization:.3f}")
+                else:
+                    case = cases[opts.index(sel) - len(envs)]
+                    st.plotly_chart(figure_for_case(model, case, checks,
+                                                    scale=scale),
+                                    use_container_width=True)
+                    if not case.converged:
+                        st.error("This case did NOT converge.")
+            else:
+                st.info("Re-run to enable the interactive viewer / envelopes.")
             st.markdown("**Max utilization by check**")
             st.dataframe([rs.get("max_utilization_by_check", {})],
                          use_container_width=True)
-            for img in ("utilization.png", "deformed.png"):
-                p = os.path.join(cdir, img)
-                if os.path.exists(p):
-                    st.image(p)
         if st.button("▶ Run / re-run analysis", type="primary"):
             with st.spinner("Running OpenSees (this can take a few minutes)…"):
                 summary, _ = run_configuration(PSTORE, proj.id, sysm.id,
@@ -451,9 +532,10 @@ def render_configure():
                             silent=True)
         with st.spinner("Running OpenSees (this can take a few minutes)…"):
             summary, _ = run_configuration(PSTORE, proj.id, sysm.id, conf.id)
-        st.success(f"Saved and run: {summary['verdict']}")
-        goto("view_config", project_id=proj.id, system_id=sysm.id,
-             config_id=conf.id)
+        # post-run popup with the cases / combinations / convergence / stress
+        _run_summary_dialog(summary)
+        ss.config_id = conf.id
+        ss.view = "view_config"
 
 
 def _save_config(pid, sid, cfg, master_id, notes, silent=False):

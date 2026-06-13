@@ -68,8 +68,20 @@ with the saved **projects** listed on the right. From there:
   it; **Edit** to reopen the configuration form pre-filled.
 - **New configuration** (in a system) — the full form: geometry, per-level
   beams, cross-aisle bracing including the **first-diagonal side
-  (outer/inner)**, connections, base/footplate, loads, accidental loads,
-  imperfection and factors. **Preview model**, **Save**, or **Save & run**.
+  (outer/inner)**, connections, base/footplate, loads with **toggles to
+  include/exclude placement and accidental loads**, imperfection and
+  factors. **Preview model**, **Save**, or **Save & run** (a post-run
+  popup lists the load cases, load combinations, per-case convergence and
+  max member-stress utilisation).
+
+After a run, the configuration's **Results** tab gives an **interactive 3D
+viewer** (Plotly): hover a member for its forces (N, My, Mz, V) or a ◆
+support for its reaction components (the irregular node numbers are shown
+on hover), a **deformation-scale slider**, and an **envelope / case
+selector** — pick the **ULS** or **SLS** envelope (the worst over all
+combinations of that kind), a per-combination envelope, or an individual
+case. Moments are drawn on the tension side and the deformed shape shows
+the true member curvature.
 - **Section masters** page — import a master once, then edit or delete its
   sections.
 
@@ -253,7 +265,8 @@ print(write_report(model, cases, checks))
 | Pallet load | kN | Total unit load per bay per level **per module** (split between front/rear beam as UDL). |
 | Beam dead load | N/mm | Self weight of each beam. |
 | Placement load | kN | EN 15512 horizontal placement load at the top level (applied in X and Y combos). |
-| Accidental load X / Y / height | kN, mm | EN 15512 accidental impact on the corner upright (defaults 1.25 kN down-aisle, 2.5 kN cross-aisle at 400 mm; 0 disables). Combined as ULS4/ULS5 at **gamma = 1.0** with dead + pallet loads (accidental design situation). |
+| Accidental load X / Y / height | kN, mm | EN 15512 accidental impact on the corner upright (defaults 1.25 kN down-aisle, 2.5 kN cross-aisle at 400 mm). Combined as ULS-accX/ULS-accY at **gamma = 1.0** with dead + pallet loads (accidental design situation). |
+| Include placement / accidental loads | – | Toggles to drop the placement and/or accidental load cases and their combinations entirely (leaving only the gravity ULS1/SLS1 pair when both are off). |
 | phi_s | 1/x | Erection out-of-plumb; sway imperfection phi = sqrt(0.5+1/n_cols)·(2·phi_s+phi_l) applied as equivalent horizontal forces in ±X and ±Y. |
 | gamma_G / gamma_Q | – | Partial factors → ULS 1.3G+1.4Q, SLS 1.0 (EN 15512 defaults, editable). |
 | Analysis | – | Second order (P-Delta, EN 15512 requirement) or first order for comparison. |

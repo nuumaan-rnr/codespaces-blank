@@ -80,12 +80,8 @@ def plot_deformed(model: RackModel, case: CaseResult, scale: float = 0.0,
         ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
         ax.plot([ni.x, nj.x], [ni.y, nj.y], [ni.z, nj.z],
                 color="lightgray", lw=0.8)
-        di = case.displacements[m.node_i]
-        dj = case.displacements[m.node_j]
-        ax.plot([ni.x + scale * di[0], nj.x + scale * dj[0]],
-                [ni.y + scale * di[1], nj.y + scale * dj[1]],
-                [ni.z + scale * di[2], nj.z + scale * dj[2]],
-                color="#d62728", lw=1.5)
+        xs, ys, zs = _deformed_curve(model, case, m, scale)
+        ax.plot(xs, ys, zs, color="#d62728", lw=1.5)
     _equal_aspect(ax, model)
     fig.tight_layout()
     if path:
@@ -94,11 +90,39 @@ def plot_deformed(model: RackModel, case: CaseResult, scale: float = 0.0,
     return fig
 
 
+def _deformed_curve(model, case, m, scale):
+    """The deflected curve of a member: end-node displacements plus the
+    member's transverse station deflections (so beams show their true sag,
+    not a straight chord)."""
+    ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
+    di = case.displacements[m.node_i]
+    dj = case.displacements[m.node_j]
+    xh, yh, zh = model.member_axes(m)
+    L = model.member_length(m)
+    mr = case.members.get(m.id)
+    xs, ys, zs = [], [], []
+    stations = mr.stations if mr else []
+    for s in stations:
+        t = s.x / L if L else 0.0
+        # chord displacement (linear between end nodes) + transverse defl
+        dx = di[0] + (dj[0] - di[0]) * t + (yh[0] * s.defl_y + zh[0] * s.defl_z)
+        dy = di[1] + (dj[1] - di[1]) * t + (yh[1] * s.defl_y + zh[1] * s.defl_z)
+        dz = di[2] + (dj[2] - di[2]) * t + (yh[2] * s.defl_y + zh[2] * s.defl_z)
+        xs.append(ni.x + xh[0] * s.x + scale * dx)
+        ys.append(ni.y + xh[1] * s.x + scale * dy)
+        zs.append(ni.z + xh[2] * s.x + scale * dz)
+    if not xs:                      # truss / no stations: straight chord
+        xs = [ni.x + scale * di[0], nj.x + scale * dj[0]]
+        ys = [ni.y + scale * di[1], nj.y + scale * dj[1]]
+        zs = [ni.z + scale * di[2], nj.z + scale * dj[2]]
+    return xs, ys, zs
+
+
 def plot_diagram(model: RackModel, case: CaseResult, kind: str = "Mz",
                  path: Optional[str] = None):
     """Member force diagram, kind in {'Mz', 'My', 'N', 'Vy', 'Vz', 'T'}.
-    Bending/shear values are drawn offset along the matching local axis
-    (Mz, Vy along local y; My, Vz along local z; N, T along local y)."""
+    Bending moments are drawn on the TENSION side (sagging beams bulge
+    downward), the usual structural convention."""
     fig, ax = _ax3d("")
     vmax = 0.0
     for mr in case.members.values():
@@ -110,11 +134,14 @@ def plot_diagram(model: RackModel, case: CaseResult, kind: str = "Mz",
         ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
         xh, yh, zh = model.member_axes(m)
         off = zh if kind in ("My", "Vz") else yh
+        # draw bending moments on the tension side (flip sign): a sagging
+        # (+Mz) beam then bulges downward, the conventional BMD orientation
+        sign = -1.0 if kind in ("My", "Mz") else 1.0
         ax.plot([ni.x, nj.x], [ni.y, nj.y], [ni.z, nj.z], color="k", lw=0.8)
         mr = case.members[m.id]
         pts = [(ni.x, ni.y, ni.z)]
         for s in mr.stations:
-            v = getattr(s, kind) * h
+            v = sign * getattr(s, kind) * h
             pts.append((ni.x + xh[0] * s.x + off[0] * v,
                         ni.y + xh[1] * s.x + off[1] * v,
                         ni.z + xh[2] * s.x + off[2] * v))
