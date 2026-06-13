@@ -7,3 +7,4 @@ build/
 dist/
 projects/
 masters/
+.rnr_settings.json

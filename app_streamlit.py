@@ -43,7 +43,7 @@ ss.setdefault("project_id", None)
 ss.setdefault("system_id", None)
 ss.setdefault("config_id", None)
 ss.setdefault("edit_cfg", None)        # RackConfig pre-fill when editing
-ss.setdefault("dark_mode", False)
+ss.setdefault("dark_mode", ui.load_dark_pref())   # persisted across sessions
 
 ui.apply_theme()
 
@@ -310,15 +310,27 @@ def render_dashboard():
             "pallet racking to EN 15512 — second-order analysis with "
             "semi-rigid connections.", eyebrow=f"{B.COMPANY} · {B.PRODUCT}")
 
+    projects = PSTORE.list_projects()
+    # portfolio KPIs
+    n_sys = sum(len(p.systems) for p in projects)
+    confs = [c for p in projects for s in p.systems for c in s.configurations]
+    runs = [c.run_summary["verdict"] for c in confs if c.run_summary]
+    pass_rate = (f"{round(100 * sum(v == 'PASS' for v in runs) / len(runs))}%"
+                 if runs else "—")
+    ui.stat_strip([("Projects", len(projects)), ("Systems", n_sys),
+                   ("Configurations", len(confs)), ("Pass rate", pass_rate)])
+
     top = st.columns([3, 1])
     top[0].subheader("Projects")
     if top[1].button("➕ Create new project", use_container_width=True,
                      type="primary"):
         goto("new_project")
 
-    projects = PSTORE.list_projects()
     if not projects:
-        st.info("No projects yet. Click **Create new project** to start.")
+        ui.empty_state("📦", "No projects yet",
+                       "Create your first project to start designing a rack.")
+        if st.button("➕ Create your first project", type="primary"):
+            goto("new_project")
         return
     for proj in projects:
         n_cfg = sum(len(s.configurations) for s in proj.systems)
@@ -392,7 +404,8 @@ def render_project():
         goto("dashboard")
     meta = " · ".join(x for x in (proj.client, proj.location, proj.engineer,
                                   proj.standard) if x)
-    ui.hero(proj.name, meta, eyebrow="Project")
+    ui.hero(proj.name, meta, eyebrow="Project",
+            crumbs=["Dashboard", proj.name])
 
     with st.expander("➕ Add a system"):
         sn = st.text_input("System name", key="newsysname")
@@ -473,7 +486,8 @@ def render_view_config():
     conf = sysm.configuration(ss.config_id)
     if st.button("← Back to project"):
         goto("project", project_id=proj.id)
-    ui.hero(conf.name, f"{proj.name} · {sysm.name}", eyebrow="Results")
+    ui.hero(conf.name, f"{proj.name} · {sysm.name}", eyebrow="Results",
+            crumbs=["Dashboard", proj.name, sysm.name, conf.name])
 
     lib, master, _ = resolve_master(conf.master_id, conf.master_path)
     cfg = rackconfig_from_dict(conf.config, master=master)
@@ -648,7 +662,9 @@ def render_configure():
         goto("project", project_id=proj.id)
     ui.hero("Configuration", f"{proj.name} · {sysm.name}",
             eyebrow="Edit configuration" if ss.config_id else "New "
-            "configuration")
+            "configuration",
+            crumbs=["Dashboard", proj.name, sysm.name,
+                    "Edit" if ss.config_id else "New"])
 
     cur_mid = (sysm.configuration(ss.config_id).master_id
                if ss.config_id else None)

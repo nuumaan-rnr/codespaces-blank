@@ -29,6 +29,15 @@ def test_palettes_have_required_keys():
     assert ui._LIGHT["teal"].startswith("#") and ui._DARK["teal"].startswith("#")
 
 
+def test_dark_pref_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert ui.load_dark_pref() is False        # no file -> default light
+    ui._save_dark_pref(True)
+    assert ui.load_dark_pref() is True
+    ui._save_dark_pref(False)
+    assert ui.load_dark_pref() is False
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

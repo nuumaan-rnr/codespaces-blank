@@ -9,10 +9,30 @@ stay native Streamlit but are restyled by the same CSS.
 from __future__ import annotations
 
 import html as _html
+import json as _json
+import os as _os
 
 import streamlit as st
 
 from . import branding as B
+
+_PREF = ".rnr_settings.json"
+
+
+def load_dark_pref() -> bool:
+    try:
+        with open(_PREF, encoding="utf-8") as f:
+            return bool(_json.load(f).get("dark_mode", False))
+    except Exception:
+        return False
+
+
+def _save_dark_pref(value: bool) -> None:
+    try:
+        with open(_PREF, "w", encoding="utf-8") as f:
+            _json.dump({"dark_mode": bool(value)}, f)
+    except Exception:
+        pass
 
 # ---- palette (Vercel-clean: crisp surfaces, thin borders) ------------------
 _LIGHT = {
@@ -162,6 +182,26 @@ textarea {{
 .rnr-hero h1 {{ color:var(--text); margin:.25rem 0 .3rem; font-size:2.1rem;
   font-weight:800; }}
 .rnr-hero .sub {{ color:var(--muted); font-size:1rem; max-width:74ch; }}
+.rnr-crumb {{ font-size:.8rem; color:var(--muted); margin-bottom:8px; }}
+.rnr-crumb .sep {{ margin:0 7px; opacity:.6; }}
+.rnr-crumb span:last-child {{ color:{v['teal']}; font-weight:600; }}
+.rnr-statrow {{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px;
+  margin:-6px 0 22px; }}
+.rnr-stat {{ background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:16px 18px; box-shadow:var(--shadow);
+  transition:.16s; }}
+.rnr-stat:hover {{ border-color:{v['teal']}55; box-shadow:var(--shadow-hi); }}
+.rnr-stat .v {{ font-size:1.7rem; font-weight:800; color:var(--text);
+  line-height:1.1; }}
+.rnr-stat .k {{ font-size:.74rem; color:var(--muted); font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; margin-top:4px; }}
+.rnr-empty {{ text-align:center; padding:56px 24px; border:1.5px dashed
+  var(--border); border-radius:18px; background:var(--surface2);
+  margin-top:8px; }}
+.rnr-empty .ic {{ font-size:3rem; }}
+.rnr-empty .t {{ font-size:1.2rem; font-weight:800; margin-top:8px;
+  color:var(--text); }}
+.rnr-empty .s {{ color:var(--muted); margin-top:4px; }}
 .rnr-section {{ display:flex; align-items:center; gap:10px; margin:2px 0 10px;
   font-weight:700; font-size:1.02rem; color:var(--text); }}
 .rnr-section .ic {{ width:30px; height:30px; border-radius:9px;
@@ -188,12 +228,35 @@ textarea {{
 </style>""", unsafe_allow_html=True)
 
 
-def hero(title: str, subtitle: str = "", eyebrow: str = "") -> None:
+def hero(title: str, subtitle: str = "", eyebrow: str = "",
+         crumbs=None) -> None:
+    cb = ""
+    if crumbs:
+        parts = '<span class="sep">›</span>'.join(
+            f'<span>{_html.escape(c)}</span>' for c in crumbs)
+        cb = f'<div class="rnr-crumb">{parts}</div>'
     eb = (f'<div class="eyebrow">{_html.escape(eyebrow)}</div>'
           if eyebrow else "")
     sub = f'<div class="sub">{_html.escape(subtitle)}</div>' if subtitle else ""
-    st.markdown(f'<div class="rnr-hero">{eb}<h1>{_html.escape(title)}</h1>'
+    st.markdown(f'<div class="rnr-hero">{cb}{eb}<h1>{_html.escape(title)}</h1>'
                 f'{sub}</div>', unsafe_allow_html=True)
+
+
+def stat_strip(stats) -> None:
+    """A row of compact KPI tiles: stats = [(label, value), ...]."""
+    cells = "".join(
+        f'<div class="rnr-stat"><div class="v">{_html.escape(str(v))}</div>'
+        f'<div class="k">{_html.escape(k)}</div></div>' for k, v in stats)
+    st.markdown(f'<div class="rnr-statrow">{cells}</div>',
+                unsafe_allow_html=True)
+
+
+def empty_state(icon: str, title: str, text: str = "") -> None:
+    st.markdown(
+        f'<div class="rnr-empty"><div class="ic">{icon}</div>'
+        f'<div class="t">{_html.escape(title)}</div>'
+        f'<div class="s">{_html.escape(text)}</div></div>',
+        unsafe_allow_html=True)
 
 
 def pill(verdict: str) -> str:
@@ -230,4 +293,6 @@ def run_with_status(run_fn, label="Running analysis"):
 
 
 def theme_toggle() -> None:
-    st.toggle("🌙 Dark mode", key="dark_mode")
+    cur = st.toggle("🌙 Dark mode", key="dark_mode")
+    if cur != load_dark_pref():
+        _save_dark_pref(cur)

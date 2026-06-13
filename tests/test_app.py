@@ -30,6 +30,10 @@ def test_dashboard_opens_on_load(tmp_path, monkeypatch):
     # left menu + create-new-project on the right
     assert any("Dashboard" in b.label for b in at.sidebar.button)
     assert any("Create new project" in b.label for b in at.button)
+    # portfolio stat strip + empty state with no projects
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "rnr-statrow" in md
+    assert "rnr-empty" in md
 
 
 def test_new_project_and_configure_shows_first_side(tmp_path, monkeypatch):
