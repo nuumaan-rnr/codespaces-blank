@@ -10,6 +10,7 @@ checks.
 """
 
 import json
+import os
 import tempfile
 
 import streamlit as st
@@ -21,6 +22,8 @@ from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
 from rack15512.checks.en15512 import all_ok, governing, run_checks
 from rack15512.library import SectionLibrary
 from rack15512.master_xlsx import MasterWorkbook, load_master
+from rack15512.project import ProjectStore
+from rack15512.project_run import run_configuration
 from rack15512.report import write_report
 from rack15512.viewer import (plot_deformed, plot_diagram, plot_model,
                               plot_utilization)
@@ -198,6 +201,29 @@ with st.sidebar:
 
     go = st.button("Run analysis", type="primary", use_container_width=True)
 
+    st.header("Project")
+    st.caption("Record this configuration under a project / system. "
+               "Each system can hold many configurations.")
+    store = ProjectStore("projects")
+    projects = store.list_projects()
+    proj_labels = ["(new project)"] + [f"{p.name} [{p.id}]" for p in projects]
+    proj_sel = st.selectbox("Project", proj_labels)
+    if proj_sel == "(new project)":
+        new_proj_name = st.text_input("New project name", "My project")
+        new_client = st.text_input("Client", "")
+        new_engineer = st.text_input("Engineer", "")
+    else:
+        cur_proj = projects[proj_labels.index(proj_sel) - 1]
+        sys_labels = ["(new system)"] + [f"{s.name} [{s.id}]"
+                                         for s in cur_proj.systems]
+        sys_sel = st.selectbox("System", sys_labels)
+        if sys_sel == "(new system)":
+            new_sys_name = st.text_input("New system name", "Aisle 1")
+        config_name = st.text_input("Configuration name", "Config 1")
+        config_notes = st.text_input("Notes", "")
+    save_proj = st.button("Save configuration to project",
+                          use_container_width=True)
+
 cfg = RackConfig(
     module="back-to-back" if module.startswith("Back") else "single",
     b2b_gap=b2b_gap,
@@ -238,8 +264,39 @@ except (ValueError, KeyError) as e:
 if order.startswith("First"):
     model.analysis.order = 1
 
-tab_model, tab_results, tab_checks, tab_report = st.tabs(
-    ["Model", "Results", "EN 15512 checks", "Report"])
+if save_proj:
+    # persist the uploaded master so the configuration can be re-run later
+    master_path = None
+    if up_file is not None:
+        os.makedirs("projects/_masters", exist_ok=True)
+        master_path = os.path.join("projects/_masters", up_file.name)
+        with open(master_path, "wb") as f:
+            f.write(up_file.getvalue())
+    try:
+        if proj_sel == "(new project)":
+            proj = store.create_project(new_proj_name, client=new_client,
+                                        engineer=new_engineer)
+            sysm = store.add_system(proj.id, "System 1")
+            pid, sid = proj.id, sysm.id
+            cname, cnotes = "Config 1", ""
+        else:
+            pid = cur_proj.id
+            if sys_sel == "(new system)":
+                sysm = store.add_system(pid, new_sys_name)
+                sid = sysm.id
+            else:
+                sid = cur_proj.systems[sys_labels.index(sys_sel) - 1].id
+            cname, cnotes = config_name, config_notes
+        conf = store.add_configuration(pid, sid, cname, cfg,
+                                       master_path=master_path, notes=cnotes)
+        st.success(f"Saved to project '{pid}' / system '{sid}' / "
+                   f"config '{conf.id}'. Run it from the Projects tab or "
+                   f"`rack15512 project run {pid} {sid} {conf.id}`.")
+    except (ValueError, KeyError) as e:
+        st.error(f"Could not save: {e}")
+
+tab_model, tab_results, tab_checks, tab_report, tab_projects = st.tabs(
+    ["Model", "Results", "EN 15512 checks", "Report", "Projects"])
 
 with tab_model:
     st.pyplot(plot_model(model))
@@ -324,3 +381,49 @@ if "cases" in st.session_state:
 else:
     with tab_results:
         st.info("Set the parameters in the sidebar and press *Run analysis*.")
+
+with tab_projects:
+    st.subheader("Projects")
+    st.caption("Each project holds systems; each system holds many "
+               "configurations with their recorded results.")
+    pstore = ProjectStore("projects")
+    allprojs = pstore.list_projects()
+    if not allprojs:
+        st.info("No projects yet. Build a configuration in the sidebar and "
+                "press *Save configuration to project*.")
+    for proj in allprojs:
+        meta = " · ".join(x for x in (proj.client, proj.location,
+                                      proj.engineer) if x)
+        with st.expander(f"{proj.name}  ({proj.id})"
+                         + (f" — {meta}" if meta else "")):
+            for sysm in proj.systems:
+                st.markdown(f"**System: {sysm.name}**"
+                            + (f" — {sysm.description}"
+                               if sysm.description else ""))
+                rows = []
+                for conf in sysm.configurations:
+                    rs = conf.run_summary or {}
+                    gov = rs.get("governing") or {}
+                    rows.append({
+                        "configuration": conf.name,
+                        "id": conf.id,
+                        "verdict": rs.get("verdict", "not run"),
+                        "governing": (f"{gov.get('check')} "
+                                      f"{gov.get('utilization')}"
+                                      if gov else "-"),
+                        "members": rs.get("n_members", "-"),
+                        "run at": rs.get("run_at", "-")})
+                if rows:
+                    st.dataframe(rows, use_container_width=True)
+                names = [c.name for c in sysm.configurations]
+                if names:
+                    pick = st.selectbox("Run configuration", names,
+                                        key=f"run_{proj.id}_{sysm.id}")
+                    if st.button("Run", key=f"btn_{proj.id}_{sysm.id}"):
+                        conf = sysm.configurations[names.index(pick)]
+                        with st.spinner("Running OpenSees..."):
+                            summary, cdir = run_configuration(
+                                pstore, proj.id, sysm.id, conf.id)
+                        st.success(f"{summary['verdict']} — artifacts in "
+                                   f"{cdir}")
+                        st.json(summary)

@@ -66,6 +66,71 @@ def _example_config(master_path: str | None) -> RackConfig:
     return RackConfig(library=_load_library(master_path))
 
 
+def _project_cmd(a) -> int:
+    from .project import ProjectStore, rackconfig_to_dict
+    store = ProjectStore(a.root)
+    if a.pcmd == "new":
+        proj = store.create_project(a.name, client=a.client,
+                                    location=a.location, engineer=a.engineer,
+                                    description=a.description)
+        print(f"Created project '{proj.name}' (id: {proj.id})")
+        return 0
+    if a.pcmd == "add-system":
+        sysm = store.add_system(a.project_id, a.name, a.description)
+        print(f"Added system '{sysm.name}' (id: {sysm.id}) to {a.project_id}")
+        return 0
+    if a.pcmd == "add-config":
+        cfg = _example_config(a.master)
+        master_path = a.master
+        conf = store.add_configuration(a.project_id, a.system_id, a.name,
+                                       cfg, master_path=master_path,
+                                       notes=a.notes)
+        print(f"Added configuration '{conf.name}' (id: {conf.id})")
+        return 0
+    if a.pcmd == "list":
+        if a.project_id:
+            return _project_cmd_show(store, a.project_id)
+        for proj in store.list_projects():
+            n_cfg = sum(len(s.configurations) for s in proj.systems)
+            print(f"{proj.id:24s} {proj.name}  "
+                  f"[{len(proj.systems)} systems, {n_cfg} configs]")
+        return 0
+    if a.pcmd == "show":
+        return _project_cmd_show(store, a.project_id)
+    if a.pcmd == "run":
+        from .project_run import run_configuration
+        summary, cdir = run_configuration(store, a.project_id, a.system_id,
+                                          a.config_id)
+        gov = summary.get("governing") or {}
+        print(f"{summary['verdict']} - governing "
+              f"{gov.get('check')} {gov.get('target')} "
+              f"= {gov.get('utilization')}")
+        print(f"Artifacts in {cdir}/")
+        return 0 if summary["verdict"] == "PASS" else 2
+    return 1
+
+
+def _project_cmd_show(store, project_id: str) -> int:
+    proj = store.load(project_id)
+    print(f"Project: {proj.name}  (id: {proj.id})")
+    for label, val in (("Client", proj.client), ("Location", proj.location),
+                       ("Engineer", proj.engineer),
+                       ("Standard", proj.standard)):
+        if val:
+            print(f"  {label}: {val}")
+    for sysm in proj.systems:
+        print(f"  System '{sysm.name}' (id: {sysm.id})")
+        for conf in sysm.configurations:
+            rs = conf.run_summary
+            status = (f"{rs['verdict']} "
+                      f"(gov {rs['governing']['check']} "
+                      f"{rs['governing']['utilization']})"
+                      if rs and rs.get("governing") else
+                      ("not run" if not rs else rs["verdict"]))
+            print(f"    Config '{conf.name}' (id: {conf.id}) - {status}")
+    return 0
+
+
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="rack15512",
                                 description="EN 15512 storage-rack analysis "
@@ -101,7 +166,40 @@ def main(argv: List[str] | None = None) -> int:
                          "'CO - 4.1' result sheets (validation.md)")
     pf.add_argument("--save-json", help="also save the imported model as JSON")
 
+    pp = sub.add_parser("project", help="manage projects / systems / "
+                                        "configurations")
+    pp.add_argument("--root", default="projects",
+                    help="projects directory (default: projects)")
+    psub = pp.add_subparsers(dest="pcmd", required=True)
+    pnew = psub.add_parser("new", help="create a project")
+    pnew.add_argument("name")
+    pnew.add_argument("--client", default="")
+    pnew.add_argument("--location", default="")
+    pnew.add_argument("--engineer", default="")
+    pnew.add_argument("--description", default="")
+    psys = psub.add_parser("add-system", help="add a system to a project")
+    psys.add_argument("project_id")
+    psys.add_argument("name")
+    psys.add_argument("--description", default="")
+    pcfg = psub.add_parser("add-config", help="add the demo/example config "
+                                              "to a system")
+    pcfg.add_argument("project_id")
+    pcfg.add_argument("system_id")
+    pcfg.add_argument("name")
+    pcfg.add_argument("--master", help="section master .xlsx/.csv")
+    pcfg.add_argument("--notes", default="")
+    plist = psub.add_parser("list", help="list projects (or a project's tree)")
+    plist.add_argument("project_id", nargs="?")
+    pshow = psub.add_parser("show", help="show a project's systems / configs")
+    pshow.add_argument("project_id")
+    prun = psub.add_parser("run", help="run a stored configuration")
+    prun.add_argument("project_id")
+    prun.add_argument("system_id")
+    prun.add_argument("config_id")
+
     a = p.parse_args(argv)
+    if a.cmd == "project":
+        return _project_cmd(a)
     if a.cmd == "run":
         model = io_json.load(a.model)
         if a.first_order:

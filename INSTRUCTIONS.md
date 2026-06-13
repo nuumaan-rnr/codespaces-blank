@@ -65,6 +65,45 @@ python -m rack15512 sections --master examples/Master.xlsx --role upright
 python -m rack15512 rfem SPR_CHECK_Data.xlsx --master Master.xlsx --compare
 ```
 
+### Projects (record systems & configurations)
+
+Work is organised as **Project → System → Configuration**: a project (the
+job) holds one or more systems (e.g. each aisle/rack run), and each system
+holds many configurations (parameter sets). Everything is stored under a
+`projects/` directory; each configuration keeps its RackConfig, a reference
+to the section master, and — once run — a result summary plus the report
+and plots.
+
+```bash
+python -m rack15512 project new "Acme DC Phase 2" --client "Acme" \
+       --location "Mumbai" --engineer "R. Nair"
+python -m rack15512 project add-system acme-dc-phase-2 "Aisle 1"
+python -m rack15512 project add-config acme-dc-phase-2 aisle-1 \
+       "UP0016 D-frame" --master examples/Master.xlsx
+python -m rack15512 project run acme-dc-phase-2 aisle-1 up0016-d-frame
+python -m rack15512 project show acme-dc-phase-2      # tree + verdicts
+python -m rack15512 project list                      # all projects
+```
+
+Directory layout:
+
+```
+projects/
+  acme-dc-phase-2/
+    project.json                 # project + systems + configurations + results
+    aisle-1/
+      up0016-d-frame/
+        config.json              # the RackConfig parameters
+        model.json, report.md    # written after a run
+        model.png, utilization.png, ...
+```
+
+In the Streamlit app, build a configuration in the sidebar and press
+**Save configuration to project**; the **Projects** tab lists every
+project/system/configuration with its recorded verdict and lets you re-run
+any configuration. (The `projects/` directory is your working data and is
+git-ignored.)
+
 ### Python script
 
 ```python
