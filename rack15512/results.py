@@ -155,4 +155,7 @@ class SeismicEnvelope:
     storey_disp: Dict[float, Tuple[float, float]] = field(default_factory=dict)
     base_shear: float = 0.0
     scale: float = 1.0
+    v_dyn: float = 0.0             # dynamic (RSA) base shear before scaling
+    v_static: float = 0.0         # empirical-period static base shear (Cl 7.7.3)
+    t_emp: float = 0.0            # empirical period Ta used for scaling [s]
     method: str = "RSA"            # 'RSA' | 'ELF'

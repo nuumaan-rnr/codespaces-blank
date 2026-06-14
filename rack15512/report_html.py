@@ -229,11 +229,19 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
                 a(f"<tr><td>{md['mode']}</td><td>{md['T']}</td>"
                   f"<td>{md['mass_x_pct']}</td><td>{md['mass_y_pct']}</td></tr>")
             a("</tbody></table>")
+        if ss.get("T_emp_x") is not None:
+            a(f"<p>Period basis (Cl 7.6, h = full rack height "
+              f"{ss.get('height_m')} m, base plate to top of uprights): "
+              f"empirical T_a,x = {ss['T_emp_x']} s, T_a,y = {ss['T_emp_y']} s; "
+              f"fundamental modal T₁ = {ss.get('fundamental_T')} s. "
+              f"Base-shear scaling X (Cl 7.7.3): V_dyn = {ss.get('v_dyn_x_kN')} "
+              f"kN vs V_static(T_a) = {ss.get('v_static_x_kN')} kN → scale "
+              f"×{ss.get('scale_x')} (Y ×{ss.get('scale_y')}).</p>")
         a("<p class='basis'>Modal response spectrum analysis: Ah=(Z/2)(I/R)"
           "(Sa/g); modes combined by SRSS, scaled to the empirical-period base "
-          "shear (Cl 7.7.3); directions combined 100%+30% (Cl 6.3.4.1); "
-          "seismic combinations 1.2(DL+IL±EL), 1.5(DL±EL), 0.9DL±1.5EL "
-          "(IS 800 LSD).</p>")
+          "shear (Cl 7.7.3) with T_a from the full rack height; directions "
+          "combined 100%+30% (Cl 6.3.4.1); seismic combinations "
+          "1.2(DL+IL±EL), 1.5(DL±EL), 0.9DL±1.5EL (IS 800 LSD).</p>")
 
     # ---- 4 model views ---------------------------------------------------
     a("<h2>4. Model views (dimensions in mm)</h2>")

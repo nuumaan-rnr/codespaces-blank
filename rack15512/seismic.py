@@ -224,11 +224,11 @@ def _scale_to_static(env, model, weights, shapes, periods, s, comp,
         v_dyn_sq += (Ah * w_eff) ** 2
     v_dyn = math.sqrt(v_dyn_sq)
     direction = "X" if comp == 0 else "Y"
-    v_static = horizontal_seismic_coefficient(
-        empirical_period(model, direction), s) * total_W
+    t_emp = empirical_period(model, direction)   # uses the full rack height
+    v_static = horizontal_seismic_coefficient(t_emp, s) * total_W
     lam = max(1.0, v_static / v_dyn) if v_dyn > 1e-9 else 1.0
     env.base_shear = max(v_dyn, v_static)
-    env.scale = lam
+    env.scale, env.v_dyn, env.v_static, env.t_emp = lam, v_dyn, v_static, t_emp
     if lam != 1.0:
         _apply_scale(env, lam)
 
@@ -530,4 +530,14 @@ def _summary(model, s, modal, envs, method, total_W) -> dict:
         "captured_mass_x_pct": round(100 * _captured(
             _node_weights(model, s), modal.shapes, 0, total_W), 1)
         if modal and modal.converged else None,
+        # empirical-period / base-shear basis (Cl 7.6 / 7.7.3); the empirical
+        # period uses the full rack height (base plate to top of uprights)
+        "height_m": round(model.height() / 1000.0, 2),
+        "T_emp_x": round(empirical_period(model, "X"), 3),
+        "T_emp_y": round(empirical_period(model, "Y"), 3),
+        "v_dyn_x_kN": round(envs.get("X", SeismicEnvelope("X")).v_dyn / 1e3, 1),
+        "v_static_x_kN": round(
+            envs.get("X", SeismicEnvelope("X")).v_static / 1e3, 1),
+        "scale_x": round(envs.get("X", SeismicEnvelope("X")).scale, 2),
+        "scale_y": round(envs.get("Y", SeismicEnvelope("Y")).scale, 2),
     }
