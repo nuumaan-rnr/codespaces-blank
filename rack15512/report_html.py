@@ -210,12 +210,14 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
     if ss:
         a("<h2>3a. Seismic design (IS 1893:2016)</h2>")
         a(f"<p>Zone {_esc(ss['zone'])} (Z={ss['Z']}), soil type "
-          f"{_esc(ss['soil'])}, importance I={ss['I']}, response reduction "
-          f"R={ss['R']}; method {_esc(ss['method'])}. Design coefficient "
-          f"Ah≈{ss['Ah_design']}. Seismic weight W={ss['seismic_weight_kN']} "
-          f"kN. Base shear V_B,x={ss['base_shear_x_kN']} kN, "
-          f"V_B,y={ss['base_shear_y_kN']} kN. Modal mass captured "
-          f"(X) {ss.get('captured_mass_x_pct')}%.</p>")
+          f"{_esc(ss['soil'])}, importance I={ss['I']}, structure "
+          f"'{_esc(str(ss.get('structure_type', '-')))}' → response reduction "
+          f"R={ss['R']}, damping {ss.get('damping_pct')}%, seismic mass factor "
+          f"κ={ss.get('imposed_factor')}; method {_esc(ss['method'])}. Design "
+          f"coefficient Ah≈{ss['Ah_design']}. Seismic weight "
+          f"W={ss['seismic_weight_kN']} kN. Base shear "
+          f"V_B,x={ss['base_shear_x_kN']} kN, V_B,y={ss['base_shear_y_kN']} kN. "
+          f"Modal mass captured (X) {ss.get('captured_mass_x_pct')}%.</p>")
         if ss.get("modes"):
             a("<table><thead><tr><th>Mode</th><th>T [s]</th>"
               "<th>Mass X %</th><th>Mass Y %</th></tr></thead><tbody>")

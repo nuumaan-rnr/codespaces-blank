@@ -209,6 +209,7 @@ class RackConfig:
     seismic_soil: str = "II"               # 'I'|'II'|'III'
     seismic_importance: float = 1.0        # I
     seismic_response_reduction: float = 4.0  # R
+    seismic_structure_type: str = "Storage rack - cross-aisle braced"
     seismic_damping: float = 0.05
     seismic_imposed_factor: float = 0.5    # kappa (share of pallet load)
     seismic_n_modes: int = 6
@@ -671,6 +672,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             enabled=True, zone=cfg.seismic_zone, soil_type=cfg.seismic_soil,
             importance=cfg.seismic_importance,
             response_reduction=cfg.seismic_response_reduction,
+            structure_type=cfg.seismic_structure_type,
             damping=cfg.seismic_damping,
             imposed_factor=cfg.seismic_imposed_factor,
             n_modes=cfg.seismic_n_modes)

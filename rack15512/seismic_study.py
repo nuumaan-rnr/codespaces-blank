@@ -59,11 +59,20 @@ def _evaluate(cfg: RackConfig) -> Dict:
 
 def zone_study(cfg: RackConfig, *, zones=("II", "III", "IV", "V"),
                strategies: Optional[List] = None,
-               spine_sections: Optional[List[str]] = None) -> Dict:
+               spine_sections: Optional[List[str]] = None,
+               progress=None) -> Dict:
     """For each zone, evaluate the bracing strategies and recommend the
     lightest passing one.  spine_sections, when given, are swept on the spine
-    strategies to 'design' the spine C-section (lightest passing)."""
+    strategies to 'design' the spine C-section (lightest passing).
+
+    ``progress(stage, frac)`` is called after each evaluated configuration so a
+    UI can show a live progress bar for the (long) study."""
     strategies = strategies or STRATEGIES
+    # total evaluations for the progress fraction
+    n_sec = len(spine_sections) if spine_sections else 1
+    total = sum(len(zones) * (n_sec if mut.get("spine_bracing") else 1)
+                for _lbl, mut in strategies) or 1
+    done = 0
     result: Dict[str, Dict] = {}
     for zone in zones:
         options = []
@@ -79,6 +88,10 @@ def zone_study(cfg: RackConfig, *, zones=("II", "III", "IV", "V"),
                     cfg, seismic=True, seismic_zone=zone, **m2)
                 ev = _evaluate(cfg2)
                 ev["label"] = label + (f" [{sec}]" if sec else "")
+                done += 1
+                if progress:
+                    progress(f"Zone {zone}: {ev['label']} -> {ev['verdict']}",
+                             done / total)
                 # prefer the lightest passing within a section sweep
                 if best_opt is None or (
                         ev["verdict"] == "PASS"

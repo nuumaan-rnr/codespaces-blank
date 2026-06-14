@@ -30,6 +30,20 @@ RHO_STEEL = 7.85e-6                   # steel density [tonne/mm³] = kg/mm³*...
 
 ZONE_FACTORS = {"II": 0.10, "III": 0.16, "IV": 0.24, "V": 0.36}   # Table 3
 
+# Lateral-load-resisting system -> default response reduction factor R
+# (IS 1893:2016 Table 9; rack-specific entries follow FEM 10.2.08 practice).
+# Value None => the user sets R manually.
+STRUCTURE_TYPES = {
+    "Storage rack - cross-aisle braced": 4.0,
+    "Storage rack - down-aisle moment frame": 3.0,
+    "Steel OCBF (ordinary concentric braced)": 4.0,
+    "Steel SCBF (special concentric braced)": 4.5,
+    "Steel EBF (eccentric braced)": 5.0,
+    "Steel OMRF (ordinary moment frame)": 3.0,
+    "Steel SMRF (special moment frame)": 5.0,
+    "Custom (set R manually)": None,
+}
+
 # Candidate spine/plan brace sections (lipped C family), lightest -> heaviest.
 SPINE_CANDIDATES = ["1C36x21x6x1.2", "1C36x21x7x1.5", "1C60x40x10x1.6",
                     "1C60x40x10x2.0", "1C60x40x12x2.5", "1C80x40x10x1.6"]
@@ -478,6 +492,9 @@ def _summary(model, s, modal, envs, method, total_W) -> dict:
                           "mass_y_pct": round(100 * my, 1)})
     return {
         "method": method, "zone": s.zone, "Z": Z,
+        "structure_type": getattr(s, "structure_type", "-"),
+        "damping_pct": round(100 * s.damping, 1),
+        "imposed_factor": s.imposed_factor,
         "soil": s.soil_type, "I": s.importance, "R": s.response_reduction,
         "seismic_weight_kN": round(total_W / 1e3, 1),
         "Ah_design": round(horizontal_seismic_coefficient(

@@ -329,6 +329,7 @@ class SeismicSettings:
     zone: str = "III"              # 'II'|'III'|'IV'|'V' -> Z 0.10/0.16/0.24/0.36
     importance: float = 1.0        # I (Table 8); 1.5 for important
     response_reduction: float = 4.0  # R (Table 9); braced ~4, OMRF ~3, SMRF ~5
+    structure_type: str = "Storage rack - cross-aisle braced"  # informs R
     soil_type: str = "II"          # 'I' rock | 'II' medium | 'III' soft
     damping: float = 0.05          # for CQC
     imposed_factor: float = 0.5    # kappa: share of pallet load in seismic mass

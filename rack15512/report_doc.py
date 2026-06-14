@@ -154,8 +154,10 @@ def build_report_blocks(model, cases, checks, meta=None) -> List[tuple]:
         b.append(("h2", "3a  Seismic design (IS 1893:2016)"))
         b.append(("p",
                   f"Zone {ss['zone']} (Z={ss['Z']}), soil {ss['soil']}, "
-                  f"I={ss['I']}, R={ss['R']}; method {ss['method']}. "
-                  f"Ah~{ss['Ah_design']}, seismic weight "
+                  f"I={ss['I']}, structure '{ss.get('structure_type', '-')}' "
+                  f"-> R={ss['R']}, damping {ss.get('damping_pct')}%, "
+                  f"mass factor k={ss.get('imposed_factor')}; method "
+                  f"{ss['method']}. Ah~{ss['Ah_design']}, seismic weight "
                   f"{ss['seismic_weight_kN']} kN, base shear "
                   f"Vb,x={ss['base_shear_x_kN']} kN / "
                   f"Vb,y={ss['base_shear_y_kN']} kN, modal mass captured (X) "

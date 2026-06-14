@@ -340,30 +340,58 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         gQ = c[1].number_input("gamma_Q", 1.0, 2.0, float(g("gamma_Q", 1.4)))
 
     with st.expander("🌐  Seismic (IS 1893:2016) & seismic bracing"):
+        from rack15512.seismic import (STRUCTURE_TYPES, ZONE_FACTORS,
+                                       design_spectrum_sa_g)
         seismic = st.checkbox("Run seismic (modal response spectrum) analysis",
                               bool(g("seismic", False)))
+        ui.section("📋", "Seismic parameters (IS 1893:2016)")
+        soil_labels = {"I": "I — Rock / hard", "II": "II — Medium",
+                       "III": "III — Soft"}
         c = st.columns(4)
-        s_zone = c[0].selectbox("Seismic zone", ["II", "III", "IV", "V"],
-                                index=_idx(["II", "III", "IV", "V"],
-                                           g("seismic_zone", "III")))
-        s_soil = c[1].selectbox("Soil type", ["I", "II", "III"],
-                                index=_idx(["I", "II", "III"],
-                                           g("seismic_soil", "II")))
-        s_I = c[2].number_input("Importance I", 1.0, 1.5,
-                                float(g("seismic_importance", 1.0)), 0.1)
-        s_R = c[3].number_input("Response reduction R", 1.0, 5.0,
-                                float(g("seismic_response_reduction", 4.0)),
-                                0.5)
-        c = st.columns(4)
-        s_kappa = c[0].number_input("Pallet mass factor κ", 0.0, 1.0,
-                                    float(g("seismic_imposed_factor", 0.5)),
-                                    0.05)
-        s_damp = c[1].number_input("Damping", 0.01, 0.10,
-                                   float(g("seismic_damping", 0.05)), 0.01)
-        s_modes = c[2].number_input("Modes (min)", 1, 30,
-                                    int(g("seismic_n_modes", 6)))
-        st.caption("Seismic combinations: 1.2(DL+IL±EL), 1.5(DL±EL), "
-                   "0.9DL±1.5EL (IS 800 LSD); directions 100%+30%.")
+        s_zone = c[0].selectbox(
+            "Seismic zone", ["II", "III", "IV", "V"],
+            index=_idx(["II", "III", "IV", "V"], g("seismic_zone", "III")),
+            help="Zone factor Z: II=0.10, III=0.16, IV=0.24, V=0.36 (Table 3)")
+        s_soil = c[1].selectbox(
+            "Soil / site type", ["I", "II", "III"],
+            index=_idx(["I", "II", "III"], g("seismic_soil", "II")),
+            format_func=lambda k: soil_labels[k])
+        s_I = c[2].number_input(
+            "Importance factor I", 1.0, 1.5,
+            float(g("seismic_importance", 1.0)), 0.1,
+            help="1.0 normal, 1.5 important / high-occupancy (Table 8)")
+        s_kappa = c[3].number_input(
+            "Imposed-load factor κ", 0.0, 1.0,
+            float(g("seismic_imposed_factor", 0.5)), 0.05,
+            help="Fraction of pallet load taken as seismic mass (Table 8)")
+        s_damp = st.slider("Damping ratio", 0.01, 0.10,
+                           float(g("seismic_damping", 0.05)), 0.01,
+                           help="5% typical for bolted steel racks")
+        s_struct = st.selectbox(
+            "Structure type (lateral system → R)", list(STRUCTURE_TYPES),
+            index=_idx(list(STRUCTURE_TYPES),
+                       g("seismic_structure_type",
+                         "Storage rack - cross-aisle braced")),
+            help="Sets the response reduction factor R (Table 9); choose "
+                 "'Custom' to type R.")
+        cc = st.columns(2)
+        r_from_type = STRUCTURE_TYPES.get(s_struct)
+        s_R = cc[0].number_input(
+            "Response reduction R", 1.0, 6.0,
+            float(r_from_type if r_from_type is not None
+                  else g("seismic_response_reduction", 4.0)), 0.5,
+            disabled=r_from_type is not None)
+        s_modes = cc[1].number_input(
+            "Modes (min)", 1, 12, int(g("seismic_n_modes", 6)),
+            help="Auto-increased until ≥90% mass per direction (Cl 7.7.5.2)")
+        Z = ZONE_FACTORS[s_zone]
+        sa_plateau = design_spectrum_sa_g(0.3, s_soil)
+        ah = (Z / 2.0) * (s_I / s_R) * sa_plateau
+        st.caption(
+            f"**Z = {Z}**, Sa/g(plateau) = {sa_plateau:.2f}, "
+            f"**Ah = (Z/2)(I/R)(Sa/g) = {ah:.4f}** (R = {s_R:g}). "
+            "Combinations 1.2(DL+IL±EL), 1.5(DL±EL), 0.9DL±1.5EL (IS 800 LSD); "
+            "modal RSA, SRSS, base-shear scaling, directions 100%+30%.")
         st.markdown("**Seismic bracing** (truss members)")
         c = st.columns(4)
         brace_opts = ["(frame brace)"] + list(br_names)
@@ -413,6 +441,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
+        seismic_structure_type=s_struct,
         seismic_damping=s_damp, seismic_imposed_factor=s_kappa,
         seismic_n_modes=int(s_modes),
         spine_bracing=sp_on,
@@ -940,8 +969,11 @@ def render_seismic_study():
     cfg = rackconfig_from_dict(conf.config, master=master)
     spine_secs = ([s for s in SPINE_CANDIDATES if s in lib.sections]
                   if sweep_sec else None)
-    with st.spinner("Running modal RSA for every zone × bracing strategy…"):
-        study = zone_study(cfg, zones=tuple(zones), spine_sections=spine_secs)
+    study = ui.run_with_status(
+        lambda progress: zone_study(cfg, zones=tuple(zones),
+                                    spine_sections=spine_secs,
+                                    progress=progress),
+        label="Seismic zone study — modal RSA per zone × strategy")
 
     for zone in zones:
         z = study[zone]
