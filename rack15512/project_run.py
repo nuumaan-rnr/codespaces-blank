@@ -63,18 +63,38 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
 
     cdir = store.config_dir(project_id, system_id, config_id)
     os.makedirs(cdir, exist_ok=True)
-    save_model(model, os.path.join(cdir, "model.json"))
-    with open(os.path.join(cdir, "report.md"), "w", encoding="utf-8") as f:
-        f.write(_project_header(project, system, conf) +
-                write_report(model, cases, checks))
-    # Design Validation Report: self-contained HTML + editable DOCX + PDF
+
+    # --- persist the run result FIRST -------------------------------------
+    # The run summary + pickled results are the primary outputs; reports and
+    # plots are derived artifacts.  Save the result before generating them so
+    # a failure while writing a report or rendering a plot can never lose the
+    # analysis (which previously left the UI showing "not run yet").
+    step("Saving results", 0.80)
+    import pickle
+    try:
+        save_model(model, os.path.join(cdir, "model.json"))
+        with open(os.path.join(cdir, "results.pkl"), "wb") as f:
+            pickle.dump({"cases": cases, "checks": checks}, f)
+    except Exception as exc:
+        print(f"Could not persist model/results.pkl: {exc}")
+    summary = summarize_run(model, cases, checks)
+    store.update_run_summary(project_id, system_id, config_id, summary)
+
+    # --- reports & plots (secondary; never fatal to the run) --------------
+    step("Writing report and plots", 0.90)
     meta = {"project": project.name, "system": system.name,
             "configuration": conf.name, "client": project.client,
             "location": project.location, "engineer": project.engineer}
-    from .report_html import design_validation_report
-    with open(os.path.join(cdir, "design_validation_report.html"), "w",
-              encoding="utf-8") as f:
-        f.write(design_validation_report(model, cases, checks, meta))
+    try:
+        with open(os.path.join(cdir, "report.md"), "w", encoding="utf-8") as f:
+            f.write(_project_header(project, system, conf) +
+                    write_report(model, cases, checks))
+        from .report_html import design_validation_report
+        with open(os.path.join(cdir, "design_validation_report.html"), "w",
+                  encoding="utf-8") as f:
+            f.write(design_validation_report(model, cases, checks, meta))
+    except Exception as exc:
+        print(f"Report (md/html) generation skipped: {exc}")
     try:
         from .report_doc import write_reports
         write_reports(model, cases, checks, meta,
@@ -84,24 +104,21 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
                                             "design_validation_report.pdf"))
     except Exception as exc:                # optional deps (docx/reportlab)
         print(f"DOCX/PDF report skipped: {exc}")
-    # persist the full results so the interactive viewer / envelopes can be
-    # shown later without re-running the analysis
-    import pickle
-    with open(os.path.join(cdir, "results.pkl"), "wb") as f:
-        pickle.dump({"cases": cases, "checks": checks}, f)
     if plots:
-        plot_model(model, os.path.join(cdir, "model.png"))
-        plot_frame_elevation(model, 0.0,
-                             os.path.join(cdir, "frame_elevation.png"))
-        plot_utilization(model, checks, os.path.join(cdir, "utilization.png"))
-        for case in cases:
-            if case.converged and case.kind == "ULS":
-                plot_deformed(model, case,
-                              path=os.path.join(cdir, "deformed.png"))
-                break
+        try:
+            plot_model(model, os.path.join(cdir, "model.png"))
+            plot_frame_elevation(model, 0.0,
+                                 os.path.join(cdir, "frame_elevation.png"))
+            plot_utilization(model, checks,
+                             os.path.join(cdir, "utilization.png"))
+            for case in cases:
+                if case.converged and case.kind == "ULS":
+                    plot_deformed(model, case,
+                                  path=os.path.join(cdir, "deformed.png"))
+                    break
+        except Exception as exc:
+            print(f"Plot generation skipped: {exc}")
 
-    summary = summarize_run(model, cases, checks)
-    store.update_run_summary(project_id, system_id, config_id, summary)
     step("Complete", 1.0)
     return summary, cdir
 

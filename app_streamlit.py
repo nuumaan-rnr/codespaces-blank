@@ -759,12 +759,16 @@ def render_view_config():
         rc = st.columns(2)
         if rc[0].button("▶ Run / re-run analysis", type="primary",
                         use_container_width=True):
-            summary, _ = ui.run_with_status(
-                lambda progress: run_configuration(
-                    PSTORE, proj.id, sysm.id, conf.id, progress=progress),
-                label="OpenSees second-order analysis")
-            ui.toast_verdict(summary["verdict"])
-            st.rerun()
+            try:
+                summary, _ = ui.run_with_status(
+                    lambda progress: run_configuration(
+                        PSTORE, proj.id, sysm.id, conf.id, progress=progress),
+                    label="OpenSees second-order analysis")
+                ui.toast_verdict(summary["verdict"])
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Analysis failed: {exc}")
+                st.exception(exc)
         if rc[1].button("🌐 Seismic zone study (IS 1893)",
                         use_container_width=True):
             goto("seismic_study", project_id=proj.id, system_id=sysm.id,
@@ -1042,13 +1046,17 @@ def render_configure():
                             silent=True)
         if conf:
             ss.config_id = conf.id
-            summary, _ = ui.run_with_status(
-                lambda progress: run_configuration(
-                    PSTORE, proj.id, sysm.id, conf.id, progress=progress),
-                label="OpenSees second-order analysis")
-            ui.toast_verdict(summary["verdict"])
-            # popup with cases/combinations/convergence/stress + results link
-            _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
+            try:
+                summary, _ = ui.run_with_status(
+                    lambda progress: run_configuration(
+                        PSTORE, proj.id, sysm.id, conf.id, progress=progress),
+                    label="OpenSees second-order analysis")
+                ui.toast_verdict(summary["verdict"])
+                # popup: cases/combinations/convergence/stress + results link
+                _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
+            except Exception as exc:
+                st.error(f"Analysis failed: {exc}")
+                st.exception(exc)
 
 
 def _save_config(pid, sid, cfg, master_id, notes, silent=False):
