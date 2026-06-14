@@ -35,13 +35,14 @@ def test_ignore_placement_and_accidental():
     assert set(none.load_cases) == {"dead", "pallets"}
 
 
-def test_row_spacer_is_beam_bracing_is_truss():
+def test_frame_spacer_and_bracing_are_truss():
     m = _model(module="back-to-back", depth=1000.0, b2b_gap=250.0)
-    spacers = [x for x in m.members.values() if x.member_set == "row spacers"]
+    spacers = [x for x in m.members.values()
+               if x.member_set == "frame spacer"]
     braces = [x for x in m.members.values() if x.member_set == "bracing"]
-    assert spacers and all(s.mtype == "beam" for s in spacers)
+    # spacers are simply-supported (truss) ties, bracing also truss
+    assert spacers and all(s.mtype == "truss" for s in spacers)
     assert braces and all(b.mtype == "truss" for b in braces)
-    # row spacers keep full area; bracing carries the analysis factor
     assert all(s.area_factor == 1.0 for s in spacers)
     assert all(b.area_factor == pytest.approx(0.15) for b in braces)
 

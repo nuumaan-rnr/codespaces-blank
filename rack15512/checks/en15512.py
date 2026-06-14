@@ -747,7 +747,20 @@ def _seismic_drift_checks(model: RackModel,
             "SEISMIC_DRIFT", case.name, f"storey z={lo:.0f}-{hi:.0f}", "frame",
             ratio / limit,
             f"drift={d:.2f} mm over h={h:.0f} mm -> {ratio:.4f} "
-            f"(limit {limit}); IS 1893 Cl 7.11.1"))
+            f"(limit {limit}); inter-storey, IS 1893 Cl 7.11.1 / EN 1998-1 "
+            "4.4.3"))
+    # informative overall (roof) drift = top displacement / total height
+    if len(levels) >= 2:
+        H = levels[-1] - levels[0]
+        top = max((math.hypot(d[0], d[1])
+                   for n, d in case.displacements.items()
+                   if abs(model.nodes[n].z - levels[-1]) < 1.0), default=0.0)
+        if H > 0:
+            res.append(CheckResult(
+                "SEISMIC_DRIFT", case.name, "overall (roof)", "frame",
+                (top / H) / limit,
+                f"top sway={top:.2f} mm over H={H:.0f} mm -> {top/H:.4f} "
+                "(overall, informative)", informative=True))
     return res
 
 

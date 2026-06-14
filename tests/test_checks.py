@@ -113,9 +113,9 @@ def test_back_to_back_module_and_buckling_rules():
     # four upright lines across the CA direction
     assert {round(n.y) for n in model.nodes.values()} == {0, 1000, 1250, 2250}
     spacers = [m for m in model.members.values()
-               if m.member_set == "row spacers"]
+               if m.member_set == "frame spacer"]
     assert len(spacers) == 2 * 2            # 2 levels x 2 frame lines
-    assert all(m.mtype == "beam" for m in spacers)   # spacers are beams
+    assert all(m.mtype == "truss" for m in spacers)  # simply-supported ties
     # 4 upright lines get supports
     assert len(model.supports) == 2 * 4
     # buckling restricted to the uprights
@@ -205,7 +205,7 @@ def test_brace_bolt_and_baseplate_checks_in_pipeline():
     checks = run_checks(model, cases)
     bolts = [c for c in checks if c.check == "BRACE_BOLT" and not c.informative]
     plates = [c for c in checks if c.check == "BASEPLATE"]
-    assert bolts and all(c.member_set in ("bracing", "row spacers")
+    assert bolts and all(c.member_set in ("bracing", "frame spacer")
                          for c in bolts)
     assert any("governs" in c.detail for c in bolts)
     # EN 15512 contact pressure: fj = 2.5 fck/gc and a typical 4 mm plate
@@ -218,7 +218,7 @@ def test_brace_bolt_and_baseplate_checks_in_pipeline():
     assert any(c.check == "ANCHORAGE" for c in checks)
     # bracing members get their own buckling check
     bb = [c for c in checks if c.check == "BRACE_BUCKLING"]
-    assert bb and all(c.member_set in ("bracing", "row spacers") for c in bb)
+    assert bb and all(c.member_set in ("bracing", "frame spacer") for c in bb)
 
 
 def test_back_to_back_rear_bracing_mirrored():

@@ -971,7 +971,7 @@ def render_seismic_study():
     br_opts = ["(frame brace)"] + list(lib.names("bracing") or lib.names())
 
     ui.section("📋", "Seismic parameters (IS 1893:2016)")
-    c = st.columns(4)
+    c = st.columns(5)
     zone = c[0].selectbox("Zone", ["II", "III", "IV", "V"],
                           index=_idx(["II", "III", "IV", "V"],
                                      cfg0.seismic_zone))
@@ -981,8 +981,11 @@ def render_seismic_study():
                             float(cfg0.seismic_importance), 0.1)
     s_R = c[3].number_input("Response reduction R", 1.0, 6.0,
                             float(cfg0.seismic_response_reduction), 0.5)
+    s_damp = c[4].number_input("Damping ratio", 0.01, 0.10,
+                               float(cfg0.seismic_damping), 0.01)
     Z = ZONE_FACTORS[zone]
-    st.caption(f"Z = {Z} · Ah(plateau) = {(Z/2)*(s_I/s_R)*2.5:.4f}")
+    st.caption(f"Z = {Z} · damping {s_damp*100:.0f}% · "
+               f"Ah(plateau) = {(Z/2)*(s_I/s_R)*2.5:.4f}")
 
     ui.section("◫", "Bracing specification (truss members) — runs exactly this")
     c = st.columns(3)
@@ -1018,16 +1021,23 @@ def render_seismic_study():
         format_func=lambda z: f"{z:.0f} mm")
     if pl_on and len(pl_levels) > len(blevels[::2]):
         st.warning("Plan bracing should not exceed alternate beam levels.")
+    beam_opts = ["(frame brace)"] + list(lib.names("beam") or lib.names())
+    sp_sec = st.selectbox(
+        "Frame / row spacer section (beam section; simply-supported truss tie)",
+        beam_opts, index=_idx(beam_opts, cfg0.spacer_section
+                              or "(frame brace)"))
 
     cfg = dataclasses.replace(
         cfg0, seismic=True, seismic_zone=zone, seismic_soil=soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
+        seismic_damping=s_damp,
         spine_bracing=da_on,
         spine_bracing_section=None if da_sec == "(frame brace)" else da_sec,
         spine_bracing_modules=da_mod, ca_x_height=(ca_h or None),
         plan_bracing=pl_on,
         plan_bracing_section=None if pl_sec == "(frame brace)" else pl_sec,
-        plan_bracing_levels=(pl_levels or None), plan_bracing_modules=da_mod)
+        plan_bracing_levels=(pl_levels or None), plan_bracing_modules=da_mod,
+        spacer_section=None if sp_sec == "(frame brace)" else sp_sec)
     cfg.master = master
 
     ui.section("🧊", "Model preview (before running)")
@@ -1229,6 +1239,20 @@ def render_masters():
                 st.caption("No BASE_STIFFNESS table in this master — add a "
                            "BASE_STIFFNESS sheet (per upright: N vs k_b vs "
                            "M_Rd) to use load-dependent base springs.")
+
+            from rack15512.cf_sections import STD_1C, standard_1c_sections
+            missing = [n for n in STD_1C if n not in sm.sections]
+            bc = st.columns([3, 2])
+            bc[0].caption(f"Standard 1C bracing family: "
+                          f"{len(STD_1C) - len(missing)}/{len(STD_1C)} present")
+            if missing and bc[1].button(f"➕ Add {len(missing)} 1C bracing "
+                                        "sections", key=f"add1c_{sm.id}"):
+                for nm, sec in standard_1c_sections().items():
+                    if nm in missing:
+                        sm.upsert_section(sec, fy=355.0)
+                MSTORE.save(sm)
+                st.success(f"Added {len(missing)} 1C bracing sections.")
+                st.rerun()
 
             role = st.selectbox("Role", ["upright", "beam", "bracing"],
                                 key=f"r_{sm.id}")

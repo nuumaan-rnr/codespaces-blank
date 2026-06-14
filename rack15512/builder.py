@@ -139,6 +139,10 @@ class RackConfig:
     spine_bracing_modules: str = "alternate"  # 'alternate'|'every_3rd'
     spine_bracing_area_factor: float = 0.15
     spine_offset_single: float = 150.0        # spine offset behind a single rack
+    # row / frame spacers (ties): one member_set "frame spacer", modelled as
+    # simply-supported truss members (axial only, no flexural stiffness); the
+    # section may be a beam section selected by the user
+    spacer_section: Optional[str] = None      # None = the frame brace section
     # upright splice: auto-placed at H/2 when frame height > splice_above
     # (max manufacturable upright length); set splice_z to position it
     splice_z: Optional[float] = None
@@ -438,16 +442,35 @@ def build_rack(cfg: RackConfig) -> RackModel:
                         brace_points[(i, lo)].append(brace_zs[k])
                         brace_points[(i, hi)].append(brace_zs[k + 1])
 
-    # ---- row spacers between back-to-back racks ----------------------------
-    # row spacers are modelled as BEAMS (they tie the two racks and carry
-    # bending), unlike the frame bracing which are truss members
+    # ---- row / frame spacers between back-to-back racks --------------------
+    # spacers are simply-supported TRUSS ties (axial only, no flexural
+    # stiffness); section selectable (default the frame brace), one unified
+    # member_set "frame spacer"
+    def _register_spacer():
+        name = cfg.spacer_section
+        if not name:
+            return br.name
+        for role in ("beam", "bracing"):
+            try:
+                sec = lib.get(_pick(lib, name, role))
+            except (KeyError, ValueError):
+                continue
+            fy = cfg.master.fy.get(sec.name) if cfg.master else None
+            sec.material = (f"steel_fy{fy:.0f}" if fy else "steel")
+            if fy:
+                m.materials.setdefault(sec.material, Steel(sec.material, fy=fy))
+            m.sections[sec.name] = sec
+            return sec.name
+        return br.name
+
+    spsec = _register_spacer()
     if spacer_pair is not None:
         sa, sb = spacer_pair
         for i in range(n_lines):
             for z in beam_levels:
                 j = j_of(z)
-                m.add_member(mid, nid(i, sa, j), nid(i, sb, j), br.name,
-                             mtype="beam", mesh=1, member_set="row spacers")
+                m.add_member(mid, nid(i, sa, j), nid(i, sb, j), spsec,
+                             mtype="truss", member_set="frame spacer")
                 mid += 1
 
     # ---- seismic bracing: plan (horizontal) and spine (vertical X) ---------
@@ -481,6 +504,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
     y_spine = (cfg.depth + cfg.b2b_gap / 2.0 if cfg.module == "back-to-back"
                else cfg.depth + cfg.spine_offset_single)
     inner_sides = [1, 2] if spacer_pair else [1]   # frames the spacer ties to
+    spine_base_nodes: List[int] = []         # given the same base stiffness
 
     if cfg.spine_bracing and spine_bays:
         ssec = _register_brace(cfg.spine_bracing_section)
@@ -490,8 +514,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         for i in spine_lines:                # spine node column + base support
             for z in spine_z:
                 m.add_node(nid(i, _SP, j_of(z)), i * cfg.bay_width, y_spine, z)
-            m.supports.append(Support(nid(i, _SP, j_of(0.0)),
-                                      ux=True, uy=True, uz=True))
+            spine_base_nodes.append(nid(i, _SP, j_of(0.0)))
             for za, zb in zip(spine_z, spine_z[1:]):   # vertical chords
                 m.add_member(mid, nid(i, _SP, j_of(za)), nid(i, _SP, j_of(zb)),
                              ssec, mtype="truss", member_set="spine bracing")
@@ -499,7 +522,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             for z in spine_z:                # frame spacers tie the spine to the
                 j = j_of(z)                  # frame at EVERY level (out-of-plane
                 for s in inner_sides:        # restraint; avoids a mechanism)
-                    m.add_member(mid, nid(i, _SP, j), nid(i, s, j), ssec,
+                    m.add_member(mid, nid(i, _SP, j), nid(i, s, j), spsec,
                                  mtype="truss", member_set="frame spacer")
                     mid += 1
         for i in spine_bays:                 # full-height X per beam-level panel
@@ -621,6 +644,14 @@ def build_rack(cfg: RackConfig) -> RackModel:
             k = k_base if k_base > 0 else False
             m.supports.append(Support(nid(i, s, 0), ux=True, uy=True, uz=True,
                                       rx=k, ry=k, rz=False))
+    # spine tower bases: anchored to the floor with the same base stiffness as
+    # the uprights (no support is left without base stiffness).  rz is fixed
+    # because the spine nodes carry only truss members (no member supplies a
+    # z-rotation stiffness), which would otherwise leave a free DOF.
+    for node in spine_base_nodes:
+        kx = k_base if k_base > 0 else True
+        m.supports.append(Support(node, ux=True, uy=True, uz=True,
+                                  rx=kx, ry=kx, rz=True))
 
     # ---- load cases ---------------------------------------------------------
     dead = LoadCase("dead", "permanent")
