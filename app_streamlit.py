@@ -771,7 +771,7 @@ def render_view_config():
             except Exception as exc:
                 st.error(f"Analysis failed: {exc}")
                 st.exception(exc)
-        if rc[1].button("🌐 Seismic zone study (IS 1893)",
+        if rc[1].button("🌐 Seismic auto-design (IS 1893)",
                         use_container_width=True):
             goto("seismic_study", project_id=proj.id, system_id=sysm.id,
                  config_id=conf.id)
@@ -953,50 +953,65 @@ def render_seismic_study():
     if st.button("← Back to results"):
         goto("view_config", project_id=proj.id, system_id=sysm.id,
              config_id=conf.id)
-    ui.hero("Seismic Zone Study", f"{proj.name} · {conf.name}",
+    ui.hero("Seismic Auto-Design", f"{proj.name} · {conf.name}",
             eyebrow="IS 1893 cost-saving design",
-            crumbs=["Dashboard", proj.name, conf.name, "Zone study"])
-    st.caption("Sweeps bracing strategies (cross-aisle D/X, spine every-3rd / "
-               "alternate / all, ± plan bracing) for each zone and recommends "
-               "the lightest arrangement that passes all checks.")
+            crumbs=["Dashboard", proj.name, conf.name, "Auto-design"])
+    st.caption("Fast deterministic escalation per zone (a few runs, not a full "
+               "sweep): 1) X spine bracing down-aisle → 2) add X cross-aisle "
+               "only if buckling fails → 3) add plan bracing in the spine "
+               "modules at the 1st, then 1st+2nd, then alternate beam levels — "
+               "stopping at the first arrangement that passes.")
 
-    zones = st.multiselect("Seismic zones to study", ["II", "III", "IV", "V"],
-                           default=["III", "IV"])
-    sweep_sec = st.checkbox("Design spine section (sweep the C-section family)",
+    c = st.columns(2)
+    zones = c[0].multiselect("Seismic zones to study", ["II", "III", "IV", "V"],
+                             default=["III", "IV"])
+    spine_mod = c[1].selectbox("Spine / plan modules", ["every_3rd",
+                                                        "alternate", "all"])
+    sweep_sec = st.checkbox("Also try heavier spine C-sections if still failing",
                             value=False)
-    if not st.button("▶ Run zone study", type="primary") or not zones:
-        st.info("Pick zones and press Run. Each zone × strategy runs a full "
-                "modal analysis, so this can take a few minutes.")
+    if not st.button("▶ Run auto-design", type="primary") or not zones:
+        st.info("Pick zones and press Run. Each step runs one modal analysis; "
+                "the escalation stops as soon as the rack passes.")
         return
 
     from rack15512.seismic import SPINE_CANDIDATES
-    from rack15512.seismic_study import zone_study
+    from rack15512.seismic_study import autodesign_seismic
     lib, master, _ = resolve_master(conf.master_id, conf.master_path)
     cfg = rackconfig_from_dict(conf.config, master=master)
     spine_secs = ([s for s in SPINE_CANDIDATES if s in lib.sections]
                   if sweep_sec else None)
+
+    def _run(progress):
+        out = {}
+        for i, zone in enumerate(zones):
+            out[zone] = autodesign_seismic(
+                cfg, zone=zone, spine_modules=spine_mod,
+                spine_sections=spine_secs,
+                progress=lambda s, f, i=i: progress(
+                    s, (i + f) / len(zones)))
+        return out
+
     study = ui.run_with_status(
-        lambda progress: zone_study(cfg, zones=tuple(zones),
-                                    spine_sections=spine_secs,
-                                    progress=progress),
-        label="Seismic zone study — modal RSA per zone × strategy")
+        _run, label="Seismic auto-design — escalating bracing per zone")
 
     for zone in zones:
         z = study[zone]
+        rec = z["recommended"]
         with st.container(border=True):
-            rec = z["recommended"]
-            head = (f"#### Zone {zone} (Z={z['Z']})  ·  "
-                    + (f"✅ lightest safe: **{rec['label']}** — "
-                       f"{rec['weight_kg']} kg" if rec
-                       else "❌ no safe option in the set"))
-            st.markdown(head)
-            st.dataframe([{"strategy": o["label"], "verdict": o["verdict"],
+            ok = z["passed"]
+            st.markdown(
+                f"#### Zone {zone} (Z={z['Z']})  ·  "
+                + (f"✅ **{rec['label']}** — {rec['weight_kg']} kg"
+                   if ok else
+                   f"⚠️ no passing arrangement; best **{rec['label']}** "
+                   f"(util {rec['max_util']})"))
+            st.dataframe([{"step": o["label"], "verdict": o["verdict"],
                            "governing": o["governing"],
-                           "weight [kg]": o["weight_kg"]}
-                          for o in z["options"]],
+                           "weight [kg]": o["weight_kg"]} for o in z["steps"]],
                          use_container_width=True)
-            if z["note"]:
-                st.warning(z["note"])
+            if not ok:
+                st.warning("Increase spine module density, enable the heavier "
+                           "C-section sweep, or raise R / sections.")
 
 
 # ----------------------------------------------------- create/edit a config

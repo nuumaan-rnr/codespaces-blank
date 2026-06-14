@@ -38,23 +38,106 @@ def steel_weight(model) -> float:
     return w
 
 
+BUCKLING_CHECKS = {"BUCKLING", "BRACE_BUCKLING"}
+
+
 def _evaluate(cfg: RackConfig) -> Dict:
-    """Build + run one configuration, returning verdict / governing / weight."""
+    """Build + run one configuration, returning verdict / governing / weight /
+    the set of failing (non-informative) check kinds."""
     model = build_rack(cfg)
     try:
         cases = run_all(model)
         checks = run_checks(model, cases)
     except Exception as exc:                       # analysis failure
-        return {"verdict": "ERROR", "governing": str(exc),
-                "max_util": None, "weight_kg": steel_weight(model)}
+        return {"verdict": "ERROR", "governing": str(exc), "max_util": None,
+                "weight_kg": steel_weight(model), "fails": set()}
     gov = governing(checks)
+    fails = {c.check for c in checks if not c.ok and not c.informative}
     return {
         "verdict": "PASS" if all_ok(checks) else "FAIL",
         "governing": (f"{gov.check} {gov.utilization:.2f}" if gov else "-"),
         "governing_check": gov.check if gov else None,
         "max_util": round(gov.utilization, 3) if gov else None,
         "weight_kg": round(steel_weight(model), 1),
+        "fails": fails,
     }
+
+
+def _beam_levels(cfg: RackConfig) -> List[float]:
+    """Beam-level elevations [mm] from the config (cumulative gaps or list)."""
+    if cfg.levels:
+        zs, e = [], 0.0
+        for lv in cfg.levels:
+            e += lv.gap
+            zs.append(e)
+        return zs
+    return list(cfg.beam_levels or [])
+
+
+def autodesign_seismic(cfg: RackConfig, *, zone: str,
+                       spine_modules: str = "every_3rd",
+                       spine_sections: Optional[List[str]] = None,
+                       progress=None) -> Dict:
+    """Deterministic seismic bracing escalation (fast — a few runs, not a full
+    sweep), per the default rules:
+
+      1. Always add X spine bracing in the down-aisle (DA) direction.
+      2. Add X cross-aisle (CA) frame bracing only if a buckling check fails.
+      3. Add plan bracing (in the spine modules) at the 1st beam level, then the
+         1st+2nd, then alternate levels, until it passes.
+      (optional) finally try heavier spine C-sections if still failing.
+
+    Each step keeps the previous additions ("in combination").  Returns the
+    ordered steps, and the first passing arrangement (or the best attempt)."""
+    levels = _beam_levels(cfg)
+    L1, L12, alt = levels[:1], levels[:2], levels[::2]
+    mut = dict(seismic=True, seismic_zone=zone,
+               spine_bracing_modules=spine_modules,
+               plan_bracing_modules=spine_modules)
+    steps: List[Dict] = []
+    # rough step budget for the progress bar
+    budget = 5 + (len(spine_sections) if spine_sections else 0)
+    state = {"done": 0}
+
+    def run(label: str, **add) -> Dict:
+        mut.update(add)
+        ev = _evaluate(dataclasses.replace(cfg, **mut))
+        ev["label"] = label
+        steps.append(ev)
+        state["done"] += 1
+        if progress:
+            progress(f"Zone {zone}: {label} -> {ev['verdict']}",
+                     min(state["done"] / budget, 1.0))
+        return ev
+
+    # 1 — DA spine X (always)
+    ev = run("DA spine X", spine_bracing=True)
+    if ev["verdict"] != "PASS":
+        # 2 — CA X only if buckling is the problem
+        if ev["fails"] & BUCKLING_CHECKS:
+            ev = run("+ CA X (buckling)", bracing_type="X")
+        # 3 — plan bracing at the 1st beam level (in spine modules)
+        if ev["verdict"] != "PASS" and L1:
+            ev = run("+ plan @ L1", plan_bracing=True, plan_bracing_levels=L1)
+        # 4 — plan at 1st + 2nd beam levels
+        if ev["verdict"] != "PASS" and len(levels) >= 2:
+            ev = run("+ plan @ L1,L2", plan_bracing_levels=L12)
+        # 5 — plan at alternate beam levels
+        if ev["verdict"] != "PASS" and len(alt) > 2:
+            ev = run("+ plan @ alternate levels", plan_bracing_levels=alt)
+        # 6 — heavier spine section, last resort
+        if ev["verdict"] != "PASS" and spine_sections:
+            for sec in spine_sections:
+                ev = run(f"+ spine {sec}", spine_bracing_section=sec)
+                if ev["verdict"] == "PASS":
+                    break
+
+    passing = [s for s in steps if s["verdict"] == "PASS"]
+    recommended = (min(passing, key=lambda s: s["weight_kg"]) if passing
+                   else min(steps, key=lambda s: (s["max_util"] or 1e9)))
+    return {"zone": zone, "Z": ZONE_FACTORS.get(zone), "steps": steps,
+            "recommended": recommended, "passed": bool(passing),
+            "config": dataclasses.replace(cfg, **mut)}
 
 
 def zone_study(cfg: RackConfig, *, zones=("II", "III", "IV", "V"),
