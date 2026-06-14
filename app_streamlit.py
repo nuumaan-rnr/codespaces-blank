@@ -82,7 +82,7 @@ def _run_summary_dialog(rs, target=None):
     if target is not None:
         if st.button("📊 View results (model coloured by utilisation, "
                      "hover for forces/reactions) →", type="primary",
-                     use_container_width=True):
+                     width="stretch"):
             ss.project_id, ss.system_id, ss.config_id = target
             goto("view_config")
     st.markdown(f"**{rs.get('n_cases', 0)} analysis cases** from "
@@ -95,13 +95,13 @@ def _run_summary_dialog(rs, target=None):
                                         for lc, f in c["factors"].items()),
                    "imperfection": "yes" if c["imperfection"] else "no"}
                   for c in rs.get("combinations", [])],
-                 use_container_width=True)
+                 width="stretch")
     st.markdown("**Analysis cases — convergence**")
     st.dataframe([{"case": c["name"], "kind": c["kind"],
                    "converged": "✅" if c["converged"] else "❌ NO",
                    "sway X [mm]": c["max_sway_x"],
                    "sway Y [mm]": c["max_sway_y"]}
-                  for c in rs.get("cases", [])], use_container_width=True)
+                  for c in rs.get("cases", [])], width="stretch")
     not_conv = [c["name"] for c in rs.get("cases", []) if not c["converged"]]
     if not_conv:
         st.error("Did NOT converge: " + ", ".join(not_conv)
@@ -182,6 +182,16 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     """Render the full configuration form; return a RackConfig (master not
     attached). cfg0 pre-fills the widgets when editing."""
     g = lambda f, d: getattr(cfg0, f, d) if cfg0 else d
+
+    def gn(field, default, lo, hi):
+        """g() for number inputs, clamped to [lo, hi] so a stale/edited config
+        value outside the widget range can't crash the form."""
+        try:
+            v = float(g(field, default))
+        except (TypeError, ValueError):
+            v = float(default)
+        return min(max(v, lo), hi)
+
     up_names = lib.names("upright") or lib.names()
     br_names = lib.names("bracing") or lib.names()
     beam_names = lib.names("beam") or lib.names()
@@ -193,14 +203,14 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         module = c[1].radio(
             "Module", ["single", "back-to-back"],
             index=0 if g("module", "back-to-back") == "single" else 1)
-        n_bays = c[2].number_input("Bays", 1, 20, int(g("n_bays", 5)))
+        n_bays = c[2].number_input("Bays", 1, 20, int(gn("n_bays", 5, 1, 20)))
         bay_width = c[3].number_input("Beam span [mm]", 1000.0, 4500.0,
-                                      float(g("bay_width", 2700.0)), 50.0)
+                                      gn("bay_width", 2700.0, 1000.0, 4500.0), 50.0)
         c = st.columns(4)
         depth = c[0].number_input("Frame depth [mm]", 600.0, 2000.0,
-                                  float(g("depth", 1000.0)), 50.0)
+                                  gn("depth", 1000.0, 600.0, 2000.0), 50.0)
         b2b_gap = c[1].number_input("Back-to-back gap [mm]", 50.0, 600.0,
-                                    float(g("b2b_gap", 250.0)), 10.0,
+                                    gn("b2b_gap", 250.0, 50.0, 600.0), 10.0,
                                     disabled=module == "single")
         up_sec = c[2].selectbox(
             "Upright", up_names,
@@ -260,7 +270,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     with st.expander("🔩  Connections, base & checks"):
         c = st.columns(3)
         fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
-                               float(g("steel_fy", 355.0)), 5.0)
+                               gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
         base_auto = c[1].checkbox("Base stiffness from master table",
                                   isinstance(g("base_stiffness", "auto"), str))
         kbase = c[2].number_input("Floor stiffness [kNm/rad] (if not auto)",
@@ -271,7 +281,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                         else 500.0), disabled=base_auto)
         c = st.columns(3)
         brace_factor = c[0].number_input("Bracing area factor", 0.05, 1.0,
-                                         float(g("brace_area_factor", 0.15)),
+                                         gn("brace_area_factor", 0.15, 0.05, 1.0),
                                          0.05)
         bolt = c[1].selectbox("Brace bolt", ["M8", "M10", "M12", "M14", "M16"],
                               index=_idx(["8", "10", "12", "14", "16"],
@@ -285,9 +295,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             1, 2, int(g("brace_planes", 1)))
         c = st.columns(3)
         fck = c[0].number_input("Concrete f_ck [MPa]", 15.0, 60.0,
-                                float(g("concrete_fck", 25.0)), 5.0)
+                                gn("concrete_fck", 25.0, 15.0, 60.0), 5.0)
         plate_fy = c[1].number_input("Plate fy [MPa]", 200.0, 460.0,
-                                     float(g("plate_fy", 310.0)), 5.0)
+                                     gn("plate_fy", 310.0, 200.0, 460.0), 5.0)
         c[2].caption("Footplate auto: 90→100×145×4, 120→100×176×4 "
                      "(blank fields below)")
         c = st.columns(3)
@@ -311,7 +321,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                                 "10.9"],
                                                g("anchor_grade", "5.6")))
         anch_hef = c[3].number_input("Embedment hef [mm]", 30.0, 250.0,
-                                     float(g("anchor_hef", 70.0)), 5.0)
+                                     gn("anchor_hef", 70.0, 30.0, 250.0), 5.0)
         c = st.columns(4)
         anch_s = c[0].number_input("Anchor spacing [mm] (0=auto)", 0.0, 500.0,
                                    float(g("anchor_spacing", None) or 0.0))
@@ -338,15 +348,15 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         ay = c[1].number_input("Accidental Y [kN]", 0.0, 10.0,
                                float(g("accidental_load_y", 2500.0) / 1e3))
         ah = c[2].number_input("Accidental height [mm]", 100.0, 1000.0,
-                               float(g("accidental_height", 400.0)), 50.0)
+                               gn("accidental_height", 400.0, 100.0, 1000.0), 50.0)
         c = st.columns(3)
         inc_place = c[0].checkbox("Include placement loads",
                                   bool(g("include_placement", True)))
         inc_acc = c[1].checkbox("Include accidental loads",
                                 bool(g("include_accidental", True)))
         c = st.columns(3)
-        gG = c[0].number_input("gamma_G", 1.0, 2.0, float(g("gamma_G", 1.3)))
-        gQ = c[1].number_input("gamma_Q", 1.0, 2.0, float(g("gamma_Q", 1.4)))
+        gG = c[0].number_input("gamma_G", 1.0, 2.0, gn("gamma_G", 1.3, 1.0, 2.0))
+        gQ = c[1].number_input("gamma_Q", 1.0, 2.0, gn("gamma_Q", 1.4, 1.0, 2.0))
 
     with st.expander("🌐  Seismic (IS 1893:2016) & seismic bracing"):
         from rack15512.seismic import (STRUCTURE_TYPES, ZONE_FACTORS,
@@ -367,14 +377,14 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             format_func=lambda k: soil_labels[k])
         s_I = c[2].number_input(
             "Importance factor I", 1.0, 1.5,
-            float(g("seismic_importance", 1.0)), 0.1,
+            gn("seismic_importance", 1.0, 1.0, 1.5), 0.1,
             help="1.0 normal, 1.5 important / high-occupancy (Table 8)")
         s_kappa = c[3].number_input(
             "Imposed-load factor κ", 0.0, 1.0,
-            float(g("seismic_imposed_factor", 0.5)), 0.05,
+            gn("seismic_imposed_factor", 0.5, 0.0, 1.0), 0.05,
             help="Fraction of pallet load taken as seismic mass (Table 8)")
         s_damp = st.slider("Damping ratio", 0.01, 0.10,
-                           float(g("seismic_damping", 0.05)), 0.01,
+                           gn("seismic_damping", 0.05, 0.01, 0.10), 0.01,
                            help="5% typical for bolted steel racks")
         s_struct = st.selectbox(
             "Structure type (lateral system → R)", list(STRUCTURE_TYPES),
@@ -387,8 +397,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         r_from_type = STRUCTURE_TYPES.get(s_struct)
         s_R = cc[0].number_input(
             "Response reduction R", 1.0, 6.0,
-            float(r_from_type if r_from_type is not None
-                  else g("seismic_response_reduction", 4.0)), 0.5,
+            float(r_from_type) if r_from_type is not None
+            else gn("seismic_response_reduction", 4.0, 1.0, 6.0), 0.5,
             disabled=r_from_type is not None)
         s_modes = cc[1].number_input(
             "Modes (min)", 1, 12, int(g("seismic_n_modes", 6)),
@@ -491,7 +501,7 @@ def render_dashboard():
 
     top = st.columns([3, 1])
     top[0].subheader("Projects")
-    if top[1].button("➕ Create new project", use_container_width=True,
+    if top[1].button("➕ Create new project", width="stretch",
                      type="primary"):
         goto("new_project")
 
@@ -522,10 +532,10 @@ def render_dashboard():
                            unsafe_allow_html=True)
             cc[3].markdown(ui.pill(status), unsafe_allow_html=True)
             if cc[3].button("Open →", key=f"open_{proj.id}",
-                            use_container_width=True, type="primary"):
+                            width="stretch", type="primary"):
                 goto("project", project_id=proj.id)
             if cc[3].button("🗑 Delete", key=f"delp_{proj.id}",
-                            use_container_width=True):
+                            width="stretch"):
                 ss[f"confirm_delp_{proj.id}"] = True
             if ss.get(f"confirm_delp_{proj.id}"):
                 st.warning(f"Permanently delete project '{proj.name}' and all "
@@ -584,7 +594,7 @@ def render_project():
             sysm = PSTORE.add_system(proj.id, sn)
             goto("project", project_id=proj.id, system_id=sysm.id)
     if n_total_cfg >= 2 and hc[1].button("⚖️ Compare configurations",
-                                         use_container_width=True):
+                                         width="stretch"):
         goto("compare", project_id=proj.id)
 
     if not proj.systems:
@@ -595,7 +605,7 @@ def render_project():
         sc = st.columns([6, 2])
         sc[0].subheader(f"System: {sysm.name}")
         if sc[1].button("🗑 Delete system", key=f"dsys_{sysm.id}",
-                        use_container_width=True):
+                        width="stretch"):
             ss[f"confirm_dsys_{sysm.id}"] = True
         if ss.get(f"confirm_dsys_{sysm.id}"):
             st.warning(f"Delete system '{sysm.name}' and its "
@@ -630,25 +640,25 @@ def render_project():
                     cc[1].caption(f"gov {gov.get('check')} "
                                   f"{gov.get('utilization')}")
                 if cc[2].button("Open", key=f"oc_{conf.id}",
-                                use_container_width=True, type="primary"):
+                                width="stretch", type="primary"):
                     goto("view_config", project_id=proj.id,
                          system_id=sysm.id, config_id=conf.id)
                 if cc[3].button("Edit", key=f"ec_{conf.id}",
-                                use_container_width=True):
+                                width="stretch"):
                     cfg0 = rackconfig_from_dict(conf.config)
                     goto("configure", project_id=proj.id, system_id=sysm.id,
                          config_id=conf.id, edit_cfg=cfg0)
                 if cc[4].button("🗑 Delete", key=f"dc_{conf.id}",
-                                use_container_width=True):
+                                width="stretch"):
                     ss[f"confirm_dc_{conf.id}"] = True
                 if ss.get(f"confirm_dc_{conf.id}"):
                     if cc[4].button("Confirm delete", key=f"dcy_{conf.id}",
-                                    type="primary", use_container_width=True):
+                                    type="primary", width="stretch"):
                         PSTORE.delete_configuration(proj.id, sysm.id, conf.id)
                         ss[f"confirm_dc_{conf.id}"] = False
                         goto("project", project_id=proj.id)
                     if cc[4].button("Cancel", key=f"dcn_{conf.id}",
-                                    use_container_width=True):
+                                    width="stretch"):
                         ss[f"confirm_dc_{conf.id}"] = False
                         st.rerun()
 
@@ -728,7 +738,7 @@ def render_view_config():
                         env = envs[opts.index(sel)]
                         st.plotly_chart(figure_for_envelope(model, env,
                                                             scale=scale),
-                                        use_container_width=True)
+                                        width="stretch")
                         if env.governing:
                             st.markdown(
                                 f"<span class='rnr-muted'>Governing: "
@@ -740,7 +750,7 @@ def render_view_config():
                         case = cases[opts.index(sel) - len(envs)]
                         st.plotly_chart(figure_for_case(model, case, checks,
                                                         scale=scale),
-                                        use_container_width=True)
+                                        width="stretch")
                         if not case.converged:
                             st.error("This case did NOT converge.")
                     st.caption("Hover a member for its forces, a ◆ support "
@@ -750,7 +760,7 @@ def render_view_config():
             with st.container(border=True):
                 ui.section("📊", "Maximum utilisation by check")
                 st.dataframe([rs.get("max_utilization_by_check", {})],
-                             use_container_width=True)
+                             width="stretch")
             seis = rs.get("seismic")
             if seis:
                 with st.container(border=True):
@@ -774,7 +784,7 @@ def render_view_config():
                                f"mass {seis.get('captured_mass_x_pct')}%")
         rc = st.columns(3)
         if rc[0].button("▶ Run / re-run analysis", type="primary",
-                        use_container_width=True):
+                        width="stretch"):
             ui.log(f"Run invoked: {proj.name} · {sysm.name} · {conf.name}")
             try:
                 summary, _ = ui.run_with_status(
@@ -787,11 +797,11 @@ def render_view_config():
                 st.error(f"Analysis failed: {exc}")
                 st.exception(exc)
         if rc[1].button("🌐 Seismic design (IS 1893)",
-                        use_container_width=True):
+                        width="stretch"):
             goto("seismic_study", project_id=proj.id, system_id=sysm.id,
                  config_id=conf.id)
         if rc[2].button("🔩 Anchor & footplate designer",
-                        use_container_width=True,
+                        width="stretch",
                         disabled=not _load_results(cdir),
                         help="Design the anchor + footplate against the "
                              "governing ULS / seismic base reactions "
@@ -810,7 +820,7 @@ def render_view_config():
                 "configuration": conf.name, "client": proj.client,
                 "location": proj.location, "engineer": proj.engineer}
         if res and st.button("⚙ Generate / refresh report files",
-                             use_container_width=True):
+                             width="stretch"):
             from rack15512.report_doc import write_reports
             from rack15512.report_html import design_validation_report
             with open(os.path.join(cdir, "design_validation_report.html"),
@@ -855,11 +865,11 @@ def render_view_config():
                             st.download_button(
                                 f"Download {label}", f.read(),
                                 f"{conf.id}_{fname}", mime=mime,
-                                use_container_width=True, type="primary",
+                                width="stretch", type="primary",
                                 key=f"dl_{fname}")
                     else:
                         st.button(f"Download {label}", disabled=True,
-                                  use_container_width=True, key=f"dlx_{fname}")
+                                  width="stretch", key=f"dlx_{fname}")
         if not any_file:
             if res:
                 st.info("Press *Generate / refresh report files* above.")
@@ -1132,7 +1142,7 @@ def render_seismic_study():
                f"{_n('frame spacer')} · plan {_n('plan bracing')} (all truss)")
 
     if st.button("▶ Run seismic analysis (this specification)",
-                 type="primary", use_container_width=True):
+                 type="primary", width="stretch"):
         cfg_save = RackConfig(**{k: v for k, v in cfg.__dict__.items()
                                  if k not in ("library", "master")})
         cfg_save.levels = cfg.levels
@@ -1328,7 +1338,7 @@ def render_anchor_designer():
                  "demand [kN]": None, "capacity [kN]": 1.0,
                  "utilisation": round(comb, 2)},
             ]
-            st.dataframe(rows, use_container_width=True)
+            st.dataframe(rows, width="stretch")
             st.caption("Tension governed by "
                        + ("steel" if cap["n_rd"] == cap["n_rd_s"]
                           else "pull-out" if cap["n_rd"] == cap["n_rd_p"]
@@ -1391,7 +1401,7 @@ def render_configure():
         (st.error if lvl == "error" else st.warning)(m)
 
     c = st.columns(3)
-    if c[0].button("👁 Preview model", use_container_width=True):
+    if c[0].button("👁 Preview model", width="stretch"):
         try:
             model = build_rack(cfg)
             st.session_state["_preview"] = True
@@ -1404,12 +1414,12 @@ def render_configure():
             st.error(str(e))
     save_label = ("💾 Update configuration" if ss.config_id
                   else "💾 Save configuration")
-    if c[1].button(save_label, use_container_width=True):
+    if c[1].button(save_label, width="stretch"):
         conf = _save_config(proj.id, sysm.id, cfg, master_id, notes)
         if conf:
             ss.config_id = conf.id        # subsequent saves update this one
     if c[2].button("💾▶ Save & run", type="primary",
-                   use_container_width=True):
+                   width="stretch"):
         conf = _save_config(proj.id, sysm.id, cfg, master_id, notes,
                             silent=True)
         if conf:
@@ -1489,7 +1499,7 @@ def render_masters():
                     data = [{"N [kN]": round(r[0] / 1e3, 1),
                              "k_b [kNm/rad]": round(r[1] / 1e6, 1),
                              "M_Rd [kNm]": round(r[2] / 1e6, 2)} for r in rows]
-                    st.dataframe(data, use_container_width=True)
+                    st.dataframe(data, width="stretch")
                     try:
                         import pandas as pd
                         df = pd.DataFrame(data).set_index("N [kN]")
@@ -1531,7 +1541,7 @@ def render_masters():
                                "Iy": sm.sections[n].get("Iy"),
                                "Iz": sm.sections[n].get("Iz"),
                                "fy": sm.fy.get(n)} for n in names],
-                             use_container_width=True)
+                             width="stretch")
                 e = st.columns([2, 1.5, 1.5, 1])
                 edit = e[0].selectbox("Section", names, key=f"s_{sm.id}")
                 fld = e[1].selectbox("Field", ["A", "Iy", "Iz", "J", "Wely",
@@ -1554,15 +1564,15 @@ def render_masters():
 # ------------------------------------------------------------------- router
 with st.sidebar:
     if os.path.exists(B.LOGO_PATH):
-        st.image(B.LOGO_PATH, use_container_width=True)
+        st.image(B.LOGO_PATH, width="stretch")
     st.markdown(f"<div style='font-weight:800;font-size:1.02rem;margin-top:2px'>"
                 f"{B.PRODUCT}</div>"
                 f"<div class='rnr-muted' style='font-size:.8rem'>{B.TAGLINE}"
                 f"</div>", unsafe_allow_html=True)
     st.divider()
-    if st.button("🏠  Dashboard", use_container_width=True):
+    if st.button("🏠  Dashboard", width="stretch"):
         goto("dashboard")
-    if st.button("📚  Section masters", use_container_width=True):
+    if st.button("📚  Section masters", width="stretch"):
         goto("masters")
     st.divider()
     ui.theme_toggle()
