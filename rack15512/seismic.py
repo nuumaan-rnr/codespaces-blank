@@ -349,18 +349,31 @@ def beam_storey_levels(model: RackModel) -> List[float]:
 
 
 def _storey_results(cr: CaseResult, model: RackModel, E, s) -> None:
-    """Per-storey drift and (approx.) seismic shear for the drift / P-Δ checks."""
+    """Inter-storey drift evaluated PER UPRIGHT COLUMN: for each upright line
+    (same x, y) the relative horizontal displacement between the node at the
+    upper level and the node at the lower level; the storey drift is the worst
+    column. (IS 1893 Cl 7.11.1 - checked at each node/level.)"""
     levels = beam_storey_levels(model)
-    # representative corner upright line displacement at each level
-    def disp_at(z: float) -> float:
-        best = 0.0
-        for nid, n in model.nodes.items():
-            if abs(n.z - z) < 1e-3 and nid in cr.displacements:
-                d = cr.displacements[nid]
-                best = max(best, math.hypot(d[0], d[1]))
-        return best
+    # columns keyed by (x, y); only real uprights (exclude the spine line)
+    cols: Dict[Tuple[int, int], Dict[int, int]] = {}
+    for nid_, n in model.nodes.items():
+        if (nid_ // 10000) % 10 == 8:        # spine line index _SP = 8
+            continue
+        cols.setdefault((round(n.x), round(n.y)), {})[round(n.z)] = nid_
+
+    def disp(nid_: int) -> Tuple[float, float]:
+        d = cr.displacements.get(nid_, (0.0, 0.0))
+        return d[0], d[1]
+
     for lo, hi in zip(levels, levels[1:]):
-        cr.seismic_storey_drift[hi] = abs(disp_at(hi) - disp_at(lo))
+        worst = 0.0
+        klo, khi = round(lo), round(hi)
+        for zmap in cols.values():
+            if klo in zmap and khi in zmap:
+                ux0, uy0 = disp(zmap[klo])
+                ux1, uy1 = disp(zmap[khi])
+                worst = max(worst, math.hypot(ux1 - ux0, uy1 - uy0))
+        cr.seismic_storey_drift[hi] = worst
 
 
 # ------------------------------------------------------------------ orchestrator

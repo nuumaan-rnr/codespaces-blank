@@ -519,9 +519,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
                 m.add_member(mid, nid(i, _SP, j_of(za)), nid(i, _SP, j_of(zb)),
                              ssec, mtype="truss", member_set="spine bracing")
                 mid += 1
-            for z in spine_z:                # frame spacers tie the spine to the
-                j = j_of(z)                  # frame at EVERY level (out-of-plane
-                for s in inner_sides:        # restraint; avoids a mechanism)
+            for z in spine_z[1:]:            # frame spacers tie the spine to the
+                j = j_of(z)                  # frame at every level ABOVE ground
+                for s in inner_sides:        # (ground is held by the grounding
                     m.add_member(mid, nid(i, _SP, j), nid(i, s, j), spsec,
                                  mtype="truss", member_set="frame spacer")
                     mid += 1
@@ -644,14 +644,11 @@ def build_rack(cfg: RackConfig) -> RackModel:
             k = k_base if k_base > 0 else False
             m.supports.append(Support(nid(i, s, 0), ux=True, uy=True, uz=True,
                                       rx=k, ry=k, rz=False))
-    # spine tower bases: anchored to the floor with the same base stiffness as
-    # the uprights (no support is left without base stiffness).  rz is fixed
-    # because the spine nodes carry only truss members (no member supplies a
-    # z-rotation stiffness), which would otherwise leave a free DOF.
+    # spine tower bases: a grounding angle bolted to the floor (fixed support)
+    # for the spine between back-to-back modules / behind a single module
     for node in spine_base_nodes:
-        kx = k_base if k_base > 0 else True
         m.supports.append(Support(node, ux=True, uy=True, uz=True,
-                                  rx=kx, ry=kx, rz=True))
+                                  rx=True, ry=True, rz=True))
 
     # ---- load cases ---------------------------------------------------------
     dead = LoadCase("dead", "permanent")
