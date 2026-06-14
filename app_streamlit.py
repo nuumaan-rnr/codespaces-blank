@@ -288,6 +288,33 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                 float(g("plate_d", None) or 0.0))
         pt = c[2].number_input("Plate t [mm] (0=std)", 0.0, 40.0,
                                float(g("plate_t", None) or 0.0))
+        st.markdown("**Footplate anchors** — wedge anchor, EN 1992-4 "
+                    "(non-seismic); defaults from code, adjust to pass.")
+        c = st.columns(4)
+        n_anch = c[0].number_input("Anchors / plate", 1, 6,
+                                   int(g("n_anchors", 2)))
+        anch_d = c[1].selectbox("Anchor", ["M8", "M10", "M12", "M16", "M20"],
+                                index=_idx(["8", "10", "12", "16", "20"],
+                                           str(int(g("anchor_d", 12.0)))))
+        anch_grade = c[2].selectbox("Anchor grade",
+                                    ["4.6", "5.6", "5.8", "8.8", "10.9"],
+                                    index=_idx(["4.6", "5.6", "5.8", "8.8",
+                                                "10.9"],
+                                               g("anchor_grade", "5.6")))
+        anch_hef = c[3].number_input("Embedment hef [mm]", 30.0, 250.0,
+                                     float(g("anchor_hef", 70.0)), 5.0)
+        c = st.columns(4)
+        anch_s = c[0].number_input("Anchor spacing [mm] (0=auto)", 0.0, 500.0,
+                                   float(g("anchor_spacing", None) or 0.0))
+        anch_c = c[1].number_input("Edge distance [mm] (0=none)", 0.0, 500.0,
+                                   float(g("anchor_edge", None) or 0.0))
+        anch_np = c[2].number_input("Pull-out N_Rk,p [kN] (0=default)", 0.0,
+                                    200.0,
+                                    float((g("anchor_pullout_rk", None) or 0.0)
+                                          / 1e3))
+        anch_vc = c[3].number_input("Shear V_Rk,c [kN] (0=default)", 0.0, 200.0,
+                                    float((g("anchor_shear_rk", None) or 0.0)
+                                          / 1e3))
 
     with st.expander("⬇  Loads, imperfection & factors"):
         c = st.columns(3)
@@ -323,6 +350,11 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, concrete_fck=fck, plate_fy=plate_fy,
         plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
+        n_anchors=int(n_anch), anchor_d=float(anch_d[1:]),
+        anchor_grade=anch_grade, anchor_hef=anch_hef,
+        anchor_spacing=anch_s or None, anchor_edge=anch_c or None,
+        anchor_pullout_rk=(anch_np * 1e3) or None,
+        anchor_shear_rk=(anch_vc * 1e3) or None,
         dead_load_beam=dead, placement_load=place * 1e3,
         accidental_load_x=ax * 1e3, accidental_load_y=ay * 1e3,
         accidental_height=ah, include_placement=inc_place,

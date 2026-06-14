@@ -428,6 +428,75 @@ def test_base_plate_en15512_contact_pressure():
     assert plate.utilization < 1.0
 
 
+def _anchor_case(reactions, name="ULS1"):
+    from rack15512.results import CaseResult
+    return CaseResult(name=name, combo=name, kind="ULS", order=2,
+                      converged=True, reactions=reactions)
+
+
+def test_anchor_capacities_m12_5_6():
+    """EN 1992-4 per-anchor design resistances for an M12 5.6 wedge anchor,
+    hef=70, C25 (default tables): steel tension 21.1 kN, steel shear
+    12.6 kN, pull-out 12/1.5=8 kN, concrete cone ~11.1 kN; tension governed
+    by pull-out (8 kN), shear by concrete (17/1.5=11.3 kN)."""
+    from rack15512.checks.en15512 import _anchor_capacities
+    from rack15512.model import BasePlate
+    cap = _anchor_capacities(BasePlate(f_ck=25.0, anchor_d=12.0,
+                                       anchor_grade="5.6", anchor_hef=70.0))
+    assert cap["n_rd_s"] / 1e3 == pytest.approx(21.075, rel=1e-3)
+    assert cap["v_rd_s"] / 1e3 == pytest.approx(12.645, rel=1e-3)
+    assert cap["n_rd_p"] / 1e3 == pytest.approx(8.0, rel=1e-3)
+    assert cap["n_rd_c"] / 1e3 == pytest.approx(11.1, rel=0.02)
+    assert cap["n_rd"] == cap["n_rd_p"]          # pull-out governs tension
+    assert cap["v_rd"] == cap["v_rd_c"]          # concrete governs shear
+
+
+def test_anchorage_demand_distribution_and_interaction():
+    """2x M12 5.6: 10 kN uplift + 5 kN shear -> N_Ed=5 kN, V_Ed=2.5 kN per
+    anchor; betaN=5/8=0.625 governs, combined betaN^1.5+betaV^1.5<betaN."""
+    from rack15512.checks.en15512 import _anchorage_checks
+    from rack15512.model import BasePlate, RackModel
+    m = RackModel()
+    m.base_plate = BasePlate(f_ck=25.0, anchor_d=12.0, anchor_grade="5.6",
+                             anchor_hef=70.0, n_anchors=2)
+    case = _anchor_case({1: (3000.0, 4000.0, -10000.0, 0.0, 0.0, 0.0)})
+    res = _anchorage_checks(m, case)
+    assert len(res) == 1 and res[0].check == "ANCHORAGE"
+    assert res[0].utilization == pytest.approx(0.625, rel=1e-2)
+    d = res[0].detail
+    assert "M12 5.6 wedge" in d and "pull-out" in d and "betaN" in d
+    assert res[0].ok
+
+
+def test_anchorage_moment_couple_and_overload():
+    """A base moment adds tension via M/lever; a large uplift fails the
+    pull-out limit (util > 1)."""
+    from rack15512.checks.en15512 import _anchorage_checks
+    from rack15512.model import BasePlate, RackModel
+    m = RackModel()
+    m.base_plate = BasePlate(f_ck=25.0, anchor_d=12.0, anchor_grade="5.6",
+                             anchor_hef=70.0, n_anchors=2, anchor_spacing=100.0)
+    # 4 kN uplift / 2 = 2 kN, plus 0.5 kNm / 0.1 m = 5 kN -> 7 kN per anchor
+    case = _anchor_case({1: (0.0, 0.0, -4000.0, 500000.0, 0.0, 0.0)})
+    n_ed = 4000.0 / 2 + 500000.0 / 100.0
+    assert _anchorage_checks(m, case)[0].utilization == pytest.approx(
+        n_ed / 8000.0, rel=1e-2)
+    big = _anchor_case({1: (0.0, 0.0, -40000.0, 0.0, 0.0, 0.0)})
+    r = _anchorage_checks(m, big)[0]
+    assert r.utilization > 1.0 and not r.ok
+
+
+def test_anchorage_overrides_pull_out_and_shear():
+    """User overrides for N_Rk,p / V_Rk,c replace the default table."""
+    from rack15512.checks.en15512 import _anchor_capacities
+    from rack15512.model import BasePlate
+    cap = _anchor_capacities(BasePlate(
+        f_ck=25.0, anchor_d=12.0, anchor_grade="5.6", anchor_hef=70.0,
+        anchor_pullout_rk=30000.0, anchor_shear_rk=30000.0))
+    assert cap["n_rd_p"] / 1e3 == pytest.approx(20.0, rel=1e-3)   # 30/1.5
+    assert cap["v_rd_c"] / 1e3 == pytest.approx(20.0, rel=1e-3)
+
+
 def test_overloaded_rack_fails_checks():
     cfg = RackConfig(n_bays=2, beam_levels=[2500.0, 5000.0, 7500.0, 10000.0],
                      upright_section="UP-90x70x1.8",

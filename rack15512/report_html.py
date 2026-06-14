@@ -58,9 +58,15 @@ CLAUSES = {
                        "Partial restraint of the upright base: "
                        "M_Sd,y / M_Rd(N_Sd) ≤ 1, M_Rd(N) from the "
                        "floor-connection tests."),
-    "ANCHORAGE": ("EN 15512 §7.6, §9.10.4",
-                  "Anchorage / overturning: base uplift ≤ anchor tension; "
-                  "min 3 kN tension + 5 kN shear per connection."),
+    "ANCHORAGE": ("EN 1992-4 §7.2 / EN 15512 §7.6, §9.10.4",
+                  "Footplate wedge-anchor design (non-seismic): per anchor the "
+                  "tension N_Ed = uplift/n + M_base/lever is checked against "
+                  "min(steel A_s·f_uk/γ_Ms, pull-out N_Rk,p/γ_Mc, concrete "
+                  "cone N_Rk,c/γ_Mc) and the shear V_Ed = V_base/n against "
+                  "min(steel 0.5·A_s·f_uk/γ_Ms, concrete V_Rk,c/γ_Mc), with "
+                  "the combined interaction (β_N)^1.5 + (β_V)^1.5 ≤ 1; the "
+                  "EN 15512 §9.10.4 minimum 3 kN tension + 5 kN shear capacity "
+                  "is enforced as a floor."),
     "SPLICE": ("EN 1993-1-8 §3 (bolt group)",
                "Upright splice connection: elastic bolt-group check for the "
                "concurrent N, V and M; per-bolt min(shear, bearing)."),

@@ -151,6 +151,15 @@ class RackConfig:
     plate_b: Optional[float] = None         # actual plate [mm] (optional)
     plate_d: Optional[float] = None
     plate_t: Optional[float] = None
+    # footplate anchors (ANCHORAGE check, EN 1992-4 wedge anchor, non-seismic)
+    n_anchors: int = 2
+    anchor_d: float = 12.0                  # mm (M12)
+    anchor_grade: str = "5.6"
+    anchor_hef: float = 70.0               # effective embedment [mm]
+    anchor_spacing: Optional[float] = None  # lever between anchors [mm]
+    anchor_edge: Optional[float] = None     # edge distance [mm] (None = none)
+    anchor_pullout_rk: Optional[float] = None  # N_Rk,p [N] (None = default)
+    anchor_shear_rk: Optional[float] = None    # V_Rk,c [N] (None = default)
     # loads
     pallet_load_per_level: float = 20000.0  # N per bay per level PER MODULE
     dead_load_beam: float = 0.05            # N/mm per beam
@@ -452,8 +461,13 @@ def build_rack(cfg: RackConfig) -> RackModel:
     if cfg.master and up.name in cfg.master.base_tables:
         m_rd_n = [(N, m_rd)
                   for N, k_b, m_rd in cfg.master.base_tables[up.name]]
-    m.base_plate = BasePlate(f_ck=cfg.concrete_fck, fy_plate=cfg.plate_fy,
-                             b=pb, d=pd_, t=pt, m_rd_n=m_rd_n)
+    m.base_plate = BasePlate(
+        f_ck=cfg.concrete_fck, fy_plate=cfg.plate_fy, b=pb, d=pd_, t=pt,
+        m_rd_n=m_rd_n, n_anchors=cfg.n_anchors, anchor_d=cfg.anchor_d,
+        anchor_grade=cfg.anchor_grade, anchor_hef=cfg.anchor_hef,
+        anchor_spacing=cfg.anchor_spacing, anchor_edge=cfg.anchor_edge,
+        anchor_pullout_rk=cfg.anchor_pullout_rk,
+        anchor_shear_rk=cfg.anchor_shear_rk)
 
     # upright splice connection check
     if splice_z:

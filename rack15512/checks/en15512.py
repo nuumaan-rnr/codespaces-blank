@@ -56,6 +56,15 @@ BOLT_GRADES = {"4.6": (400.0, 0.6), "4.8": (400.0, 0.5),
                "6.8": (600.0, 0.5), "8.8": (800.0, 0.6),
                "10.9": (1000.0, 0.5)}
 
+# Default characteristic resistances for mechanical (wedge / expansion)
+# anchors in CRACKED C20/25, non-seismic.  These stand in for the product ETA
+# values and are intentionally conservative; they are overridable per config
+# (BasePlate.anchor_pullout_rk / anchor_shear_rk).  diameter [mm] -> R_k [N].
+ANCHOR_PULLOUT_RK = {8: 6000.0, 10: 9000.0, 12: 12000.0,
+                     16: 20000.0, 20: 30000.0}      # N_Rk,p  (tension)
+ANCHOR_SHEAR_RK_C = {8: 8000.0, 10: 12000.0, 12: 17000.0,
+                     16: 30000.0, 20: 45000.0}      # V_Rk,c  (concrete shear)
+
 
 @dataclass
 class CheckResult:
@@ -467,24 +476,112 @@ def _base_restraint_checks(model: RackModel,
     return res
 
 
+def _anchor_grade_fu_fy(grade: str) -> Tuple[float, float]:
+    """(f_uk, f_yk) [MPa] from an ISO bolt grade string 'X.Y'."""
+    a, b = grade.split(".")
+    fuk = float(a) * 100.0
+    fyk = float(a) * float(b) * 10.0
+    return fuk, fyk
+
+
+def _anchor_capacities(bp) -> Optional[dict]:
+    """Per-anchor design resistances for a wedge anchor to EN 1992-4
+    (non-seismic), returning N_Rd by failure mode and V_Rd by failure mode.
+    Returns None when the anchor diameter / grade are unknown."""
+    d = int(round(bp.anchor_d))
+    if d not in BOLTS or bp.anchor_grade not in BOLT_GRADES:
+        return None
+    _, As = BOLTS[d]
+    fuk, fyk = _anchor_grade_fu_fy(bp.anchor_grade)
+    g_n = bp.gamma_ms_n if bp.gamma_ms_n else max(1.2 * fuk / fyk, 1.4)
+    g_v = bp.gamma_ms_v if bp.gamma_ms_v else max(1.0 * fuk / fyk, 1.25)
+    gc = bp.gamma_mc or 1.5
+    hef = bp.anchor_hef
+    fck = bp.f_ck
+
+    # --- tension limit states ------------------------------------------
+    n_rd_s = As * fuk / g_n                                   # steel
+    n_rk_p = bp.anchor_pullout_rk or ANCHOR_PULLOUT_RK.get(
+        d, ANCHOR_PULLOUT_RK[12])
+    n_rd_p = n_rk_p / gc                                      # pull-out
+    # concrete cone (EN 1992-4 7.2.1.4), cracked k1=7.7, simplified group /
+    # edge factors for the 2-anchor footplate (no concrete geometry modelled)
+    n_rk_c0 = 7.7 * math.sqrt(fck) * hef ** 1.5
+    s_cr = 3.0 * hef
+    s = (bp.anchor_spacing if bp.anchor_spacing
+         else (max(bp.d - 60.0, 0.5 * bp.d) if bp.d else 100.0))
+    grp = 0.5 * (1.0 + min(s, s_cr) / s_cr)                   # group sharing
+    psi_ed = 1.0
+    if bp.anchor_edge and bp.anchor_edge < 1.5 * hef:
+        psi_ed = 0.7 + 0.3 * bp.anchor_edge / (1.5 * hef)
+    n_rd_c = n_rk_c0 * grp * psi_ed / gc                      # cone
+
+    # --- shear limit states --------------------------------------------
+    v_rd_s = 0.5 * As * fuk / g_v                             # steel (k6=0.5)
+    v_rk_c = bp.anchor_shear_rk or ANCHOR_SHEAR_RK_C.get(
+        d, ANCHOR_SHEAR_RK_C[12])
+    v_rd_c = v_rk_c / gc                                      # concrete
+    return {"n_rd_s": n_rd_s, "n_rd_p": n_rd_p, "n_rd_c": n_rd_c,
+            "v_rd_s": v_rd_s, "v_rd_c": v_rd_c,
+            "n_rd": min(n_rd_s, n_rd_p, n_rd_c),
+            "v_rd": min(v_rd_s, v_rd_c), "s": s}
+
+
 def _anchorage_checks(model: RackModel,
                       case: CaseResult) -> List[CheckResult]:
-    """Anchorage / overturning (EN 15512 7.6, 9.10.4): each upright-floor
-    connection must resist a minimum tension and shear; net base uplift
-    (where the vertical reaction goes into tension) is checked against the
-    anchor tension capacity."""
+    """Wedge-anchor design of the footplate to EN 1992-4 (non-seismic),
+    Profis-Hilti style: per anchor the tension demand (uplift / n + base
+    moment / lever) is verified against min(steel, pull-out, concrete cone)
+    and the shear demand (base shear / n) against min(steel, concrete);
+    combined via (beta_N)^1.5 + (beta_V)^1.5 <= 1 (EN 1992-4 7.2.3).  The
+    EN 15512 9.10.4 minimum (3 kN tension + 5 kN shear capacity per
+    connection) is enforced as a floor."""
     bp = model.base_plate
     if bp is None or not case.reactions:
         return []
-    # most-tensioned base (negative vertical reaction = uplift)
-    node, r = min(case.reactions.items(), key=lambda kv: kv[1][2])
-    uplift = max(-r[2], 0.0)
-    util = uplift / bp.anchor_tension if bp.anchor_tension else 0.0
-    return [CheckResult(
-        "ANCHORAGE", case.name, f"node {node}", "uprights", util,
-        f"uplift={uplift/1e3:.2f} kN vs anchor tension capacity "
-        f"{bp.anchor_tension/1e3:.1f} kN (EN 15512 9.10.4 min 3 kN "
-        f"tension + 5 kN shear must also be provided)")]
+    cap = _anchor_capacities(bp)
+    if cap is None:
+        return [CheckResult(
+            "ANCHORAGE", case.name, "settings", "uprights", 99.0,
+            f"unknown anchor M{bp.anchor_d:.0f} grade {bp.anchor_grade}")]
+    n = max(int(bp.n_anchors), 1)
+    n_rd, v_rd, s = cap["n_rd"], cap["v_rd"], cap["s"]
+
+    worst = None
+    for node, r in case.reactions.items():
+        uplift = max(-r[2], 0.0)
+        M = math.hypot(r[3], r[4])
+        V = math.hypot(r[0], r[1])
+        n_ed = uplift / n + (M / s if s > 0 else 0.0)        # per tension anchor
+        v_ed = V / n                                          # per anchor
+        bN = n_ed / n_rd if n_rd > 0 else 99.0
+        bV = v_ed / v_rd if v_rd > 0 else 99.0
+        comb = (min(bN, 1.0) ** 1.5 + min(bV, 1.0) ** 1.5
+                if bN <= 1.0 and bV <= 1.0 else bN ** 1.5 + bV ** 1.5)
+        util = max(bN, bV, comb)
+        if worst is None or util > worst[0]:
+            worst = (util, node, n_ed, v_ed, bN, bV, comb)
+
+    util, node, n_ed, v_ed, bN, bV, comb = worst
+    floor = ""
+    if n_rd < bp.anchor_tension or v_rd < bp.anchor_shear:
+        floor = (f"; below EN 15512 9.10.4 minimum "
+                 f"({bp.anchor_tension/1e3:.0f} kN tension / "
+                 f"{bp.anchor_shear/1e3:.0f} kN shear)")
+        util = max(util, bp.anchor_tension / n_rd if n_rd else 99.0,
+                   bp.anchor_shear / v_rd if v_rd else 99.0)
+    detail = (
+        f"{n}x M{bp.anchor_d:.0f} {bp.anchor_grade} wedge, hef="
+        f"{bp.anchor_hef:.0f} mm, s={s:.0f} mm; per anchor N_Ed="
+        f"{n_ed/1e3:.2f} kN, V_Ed={v_ed/1e3:.2f} kN. "
+        f"Tension N_Rd=min(steel {cap['n_rd_s']/1e3:.1f}, pull-out "
+        f"{cap['n_rd_p']/1e3:.1f}, cone {cap['n_rd_c']/1e3:.1f})="
+        f"{n_rd/1e3:.1f} kN (betaN={bN:.2f}); Shear V_Rd=min(steel "
+        f"{cap['v_rd_s']/1e3:.1f}, concrete {cap['v_rd_c']/1e3:.1f})="
+        f"{v_rd/1e3:.1f} kN (betaV={bV:.2f}); combined "
+        f"betaN^1.5+betaV^1.5={comb:.2f}{floor}")
+    return [CheckResult("ANCHORAGE", case.name, f"node {node}", "uprights",
+                        util, detail)]
 
 
 def _splice_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:

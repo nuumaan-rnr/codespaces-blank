@@ -367,9 +367,22 @@ class BasePlate:
     # load-dependent base moment resistance MRd(N) from the floor-connection
     # tests (EN 15512 9.4.4.3 / BASE_STIFFNESS sheet): [(N [N], M_Rd [N*mm])]
     m_rd_n: Optional[List[Tuple[float, float]]] = None
-    # overturning / anchorage (EN 15512 7.6, 9.10.4)
+    # overturning / anchorage (EN 15512 7.6, 9.10.4): EN 15512 minimum that
+    # every upright-floor connection must always provide
     anchor_tension: float = 3000.0     # min connection tension [N]
     anchor_shear: float = 5000.0       # min connection shear [N]
+    # ---- Profis-Hilti-style wedge-anchor design (EN 1992-4, non-seismic) ----
+    n_anchors: int = 2                 # anchors per footplate
+    anchor_d: float = 12.0             # anchor diameter [mm] (M12 default)
+    anchor_grade: str = "5.6"          # anchor steel grade
+    anchor_hef: float = 70.0           # effective embedment [mm]
+    anchor_spacing: Optional[float] = None   # lever between anchors [mm]
+    anchor_edge: Optional[float] = None      # edge distance [mm]; None = no edge
+    anchor_pullout_rk: Optional[float] = None  # N_Rk,p [N]; None = default table
+    anchor_shear_rk: Optional[float] = None    # V_Rk,c [N]; None = default table
+    gamma_ms_n: Optional[float] = None  # steel tension factor; None = from grade
+    gamma_ms_v: Optional[float] = None  # steel shear factor; None = from grade
+    gamma_mc: float = 1.5               # concrete (pull-out / cone / edge)
 
     def bearing_strength(self) -> float:
         """Floor design bearing strength fj [MPa] (EN 15512 9.10.1)."""
