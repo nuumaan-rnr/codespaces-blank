@@ -25,7 +25,7 @@ from rack15512.envelopes import build_envelopes
 from rack15512.iviewer import figure_for_case, figure_for_envelope
 from rack15512.library import SectionLibrary
 from rack15512.master_store import MasterStore
-from rack15512.model import CrossSection
+from rack15512.model import BasePlate, CrossSection
 from rack15512.project import ProjectStore, rackconfig_from_dict
 from rack15512.project_run import run_configuration
 from rack15512.report import write_report
@@ -758,7 +758,7 @@ def render_view_config():
                     st.caption(f"Method {seis.get('method')} · seismic weight "
                                f"{seis.get('seismic_weight_kN')} kN · captured "
                                f"mass {seis.get('captured_mass_x_pct')}%")
-        rc = st.columns(2)
+        rc = st.columns(3)
         if rc[0].button("▶ Run / re-run analysis", type="primary",
                         use_container_width=True):
             ui.log(f"Run invoked: {proj.name} · {sysm.name} · {conf.name}")
@@ -775,6 +775,14 @@ def render_view_config():
         if rc[1].button("🌐 Seismic design (IS 1893)",
                         use_container_width=True):
             goto("seismic_study", project_id=proj.id, system_id=sysm.id,
+                 config_id=conf.id)
+        if rc[2].button("🔩 Anchor & footplate designer",
+                        use_container_width=True,
+                        disabled=not _load_results(cdir),
+                        help="Design the anchor + footplate against the "
+                             "governing ULS / seismic base reactions "
+                             "(after a run)."):
+            goto("anchor_designer", project_id=proj.id, system_id=sysm.id,
                  config_id=conf.id)
 
     with t_report:
@@ -1079,6 +1087,157 @@ def render_seismic_study():
             st.exception(exc)
 
 
+# ------------------------------------------------ anchor & footplate designer
+def render_anchor_designer():
+    import math
+    from rack15512.checks.en15512 import (_anchorage_checks,
+                                          _base_plate_checks)
+    proj = PSTORE.load(ss.project_id)
+    sysm = proj.system(ss.system_id)
+    conf = sysm.configuration(ss.config_id)
+    if st.button("← Back to results"):
+        goto("view_config", project_id=proj.id, system_id=sysm.id,
+             config_id=conf.id)
+    ui.hero("Anchor & Footplate Designer", f"{proj.name} · {conf.name}",
+            eyebrow="EN 15512 / EN 1992-4 — post-analysis",
+            crumbs=["Dashboard", proj.name, conf.name, "Anchor designer"])
+
+    cdir = PSTORE.config_dir(proj.id, sysm.id, conf.id)
+    results = _load_results(cdir)
+    if not results:
+        st.info("Run the analysis first — the designer uses the saved base "
+                "reactions from the ULS (and seismic) cases.")
+        return
+    lib, master, master_id = resolve_master(conf.master_id, conf.master_path)
+    cfg0 = rackconfig_from_dict(conf.config, master=master)
+    try:
+        model = build_rack(cfg0)
+    except (ValueError, KeyError) as e:
+        st.error(f"Could not rebuild the model: {e}")
+        return
+
+    uls = [c for c in results["cases"] if c.kind == "ULS"]
+    seis = [c for c in results["cases"] if c.kind == "SEISMIC"]
+    st.caption(f"Designing against {len(uls)} ULS case(s)"
+               + (f" + {len(seis)} seismic case(s)" if seis else "")
+               + ". The anchor / footplate are not part of the seismic member "
+                 "run; they are designed here from the governing base reactions.")
+
+    def _env(cases):
+        comp = up = sh = mom = 0.0
+        for c in cases:
+            for r in c.reactions.values():
+                comp = max(comp, r[2]); up = max(up, -r[2])
+                sh = max(sh, math.hypot(r[0], r[1]))
+                mom = max(mom, math.hypot(r[3], r[4]))
+        return comp, up, sh, mom
+
+    cols = st.columns(2)
+    for col, (lbl, cs) in zip(cols, [("ULS", uls), ("Seismic", seis)]):
+        if not cs:
+            continue
+        comp, up, sh, mom = _env(cs)
+        col.markdown(f"**{lbl} base reactions (envelope)**")
+        col.caption(f"max compression {comp/1e3:.1f} kN · max uplift "
+                    f"{up/1e3:.1f} kN · max shear {sh/1e3:.1f} kN · max moment "
+                    f"{mom/1e6:.2f} kNm")
+
+    ui.section("🔩", "Footplate")
+    c = st.columns(4)
+    fck = c[0].number_input("Concrete f_ck [MPa]", 15.0, 60.0,
+                            float(cfg0.concrete_fck), 5.0)
+    plate_fy = c[1].number_input("Plate fy [MPa]", 200.0, 460.0,
+                                 float(cfg0.plate_fy), 5.0)
+    pb = c[2].number_input("Plate b [mm] (0=std)", 0.0, 500.0,
+                           float(cfg0.plate_b or 0.0))
+    c2 = st.columns(4)
+    pd_ = c2[0].number_input("Plate d [mm] (0=std)", 0.0, 500.0,
+                             float(cfg0.plate_d or 0.0))
+    pt = c2[1].number_input("Plate t [mm] (0=std)", 0.0, 40.0,
+                            float(cfg0.plate_t or 0.0))
+
+    ui.section("⚓", "Wedge anchors (EN 1992-4, non-seismic defaults)")
+    c = st.columns(4)
+    n_anch = c[0].number_input("Anchors / plate", 1, 6, int(cfg0.n_anchors))
+    a_d = c[1].selectbox("Anchor", ["M8", "M10", "M12", "M16", "M20"],
+                         index=_idx(["8", "10", "12", "16", "20"],
+                                    str(int(cfg0.anchor_d))))
+    a_g = c[2].selectbox("Grade", ["4.6", "5.6", "5.8", "8.8", "10.9"],
+                         index=_idx(["4.6", "5.6", "5.8", "8.8", "10.9"],
+                                    cfg0.anchor_grade))
+    a_hef = c[3].number_input("Embedment hef [mm]", 30.0, 250.0,
+                              float(cfg0.anchor_hef), 5.0)
+    c = st.columns(4)
+    a_s = c[0].number_input("Spacing [mm] (0=auto)", 0.0, 500.0,
+                            float(cfg0.anchor_spacing or 0.0))
+    a_c = c[1].number_input("Edge dist. [mm] (0=none)", 0.0, 500.0,
+                            float(cfg0.anchor_edge or 0.0))
+    a_np = c[2].number_input("Pull-out N_Rk,p [kN] (0=default)", 0.0, 200.0,
+                             float((cfg0.anchor_pullout_rk or 0.0) / 1e3))
+    a_vc = c[3].number_input("Shear V_Rk,c [kN] (0=default)", 0.0, 200.0,
+                             float((cfg0.anchor_shear_rk or 0.0) / 1e3))
+
+    bp = BasePlate(
+        f_ck=fck, fy_plate=plate_fy, b=pb or None, d=pd_ or None,
+        t=pt or None, m_rd_n=model.base_plate.m_rd_n if model.base_plate else None,
+        n_anchors=int(n_anch), anchor_d=float(a_d[1:]), anchor_grade=a_g,
+        anchor_hef=a_hef, anchor_spacing=a_s or None, anchor_edge=a_c or None,
+        anchor_pullout_rk=(a_np * 1e3) or None,
+        anchor_shear_rk=(a_vc * 1e3) or None)
+    model.base_plate = bp
+
+    # evaluate the base-plate + anchorage checks against ULS + seismic cases
+    bp_res, an_res = [], []
+    for c in uls + seis:
+        bp_res += _base_plate_checks(model, c)
+        an_res += _anchorage_checks(model, c)
+    real = [r for r in bp_res + an_res if not r.informative]
+    worst_bp = max((r for r in bp_res if not r.informative),
+                   key=lambda r: r.utilization, default=None)
+    worst_an = max((r for r in an_res if not r.informative),
+                   key=lambda r: r.utilization, default=None)
+
+    ui.section("✅", "Verification (governing case)")
+    vc = st.columns(2)
+    for col, title, w in [(vc[0], "Footplate (BASEPLATE)", worst_bp),
+                          (vc[1], "Anchorage (EN 1992-4)", worst_an)]:
+        with col:
+            if not w:
+                st.info(f"{title}: not evaluated.")
+                continue
+            verdict = "PASS" if w.ok else "FAIL"
+            st.markdown(ui.pill(verdict), unsafe_allow_html=True)
+            st.markdown(f"**{title}** — util **{w.utilization:.2f}** "
+                        f"(case {w.case}, {w.target})")
+            st.caption(w.detail)
+
+    ok = all(r.ok for r in real) if real else False
+    if st.button("💾 Save anchor & footplate to configuration",
+                 type="primary", disabled=not real):
+        cfg_save = RackConfig(**{k: v for k, v in cfg0.__dict__.items()
+                                 if k not in ("library", "master")})
+        cfg_save.levels = cfg0.levels
+        cfg_save.concrete_fck = fck
+        cfg_save.plate_fy = plate_fy
+        cfg_save.plate_b = pb or None
+        cfg_save.plate_d = pd_ or None
+        cfg_save.plate_t = pt or None
+        cfg_save.n_anchors = int(n_anch)
+        cfg_save.anchor_d = float(a_d[1:])
+        cfg_save.anchor_grade = a_g
+        cfg_save.anchor_hef = a_hef
+        cfg_save.anchor_spacing = a_s or None
+        cfg_save.anchor_edge = a_c or None
+        cfg_save.anchor_pullout_rk = (a_np * 1e3) or None
+        cfg_save.anchor_shear_rk = (a_vc * 1e3) or None
+        PSTORE.update_configuration(proj.id, sysm.id, conf.id, conf.name,
+                                    cfg_save, master_id=master_id,
+                                    notes=conf.notes or "")
+        ui.log(f"Anchor/footplate saved ({'PASS' if ok else 'FAIL'}): "
+               f"{conf.name}", "ok" if ok else "error")
+        st.success("Saved. Re-run the analysis to refresh the full report.")
+
+
 # ----------------------------------------------------- create/edit a config
 def render_configure():
     proj = PSTORE.load(ss.project_id)
@@ -1300,6 +1459,7 @@ _VIEWS = {
     "view_config": render_view_config,
     "compare": render_compare,
     "seismic_study": render_seismic_study,
+    "anchor_designer": render_anchor_designer,
     "masters": render_masters,
 }
 _VIEWS.get(ss.view, render_dashboard)()
