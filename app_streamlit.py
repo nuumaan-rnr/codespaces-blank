@@ -950,7 +950,7 @@ def render_compare():
 def render_seismic_study():
     import dataclasses
     from rack15512.seismic import ZONE_FACTORS, design_spectrum_sa_g
-    from rack15512.seismic_study import _beam_levels, autodesign_seismic
+    from rack15512.seismic_study import _beam_levels
     proj = PSTORE.load(ss.project_id)
     sysm = proj.system(ss.system_id)
     conf = sysm.configuration(ss.config_id)
@@ -1057,9 +1057,8 @@ def render_seismic_study():
                f"spine {_n('spine bracing')} · frame spacers "
                f"{_n('frame spacer')} · plan {_n('plan bracing')} (all truss)")
 
-    run_c = st.columns([2, 1])
-    if run_c[0].button("▶ Run seismic analysis (this specification)",
-                       type="primary", use_container_width=True):
+    if st.button("▶ Run seismic analysis (this specification)",
+                 type="primary", use_container_width=True):
         cfg_save = RackConfig(**{k: v for k, v in cfg.__dict__.items()
                                  if k not in ("library", "master")})
         cfg_save.levels = cfg.levels
@@ -1078,22 +1077,6 @@ def render_seismic_study():
         except Exception as exc:
             st.error(f"Analysis failed: {exc}")
             st.exception(exc)
-    if run_c[1].button("⚙ Auto-design bracing", use_container_width=True,
-                       help="Apply the default escalation rules to find a "
-                            "passing arrangement for this zone."):
-        res = ui.run_with_status(
-            lambda progress: autodesign_seismic(
-                cfg0, zone=zone, spine_modules=da_mod, progress=progress),
-            label=f"Auto-design (zone {zone})")
-        rec = res["recommended"]
-        st.success(f"Recommended: {rec['label']} — {rec['verdict']} "
-                   f"({rec['weight_kg']} kg)" if res["passed"]
-                   else f"No passing arrangement; best {rec['label']} "
-                        f"(util {rec['max_util']})")
-        st.dataframe([{"step": o["label"], "verdict": o["verdict"],
-                       "governing": o["governing"],
-                       "weight [kg]": o["weight_kg"]} for o in res["steps"]],
-                     use_container_width=True)
 
 
 # ----------------------------------------------------- create/edit a config
