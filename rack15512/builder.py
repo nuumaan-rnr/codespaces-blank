@@ -134,9 +134,9 @@ class RackConfig:
     # behind a single rack), tied to the frame(s) by horizontal frame spacers;
     # X panel per beam level; modules at most alternate
     spine_bracing: bool = False
-    spine_bracing_section: Optional[str] = None            # None = brace_section
+    spine_bracing_section: Optional[str] = "1C60x40x10x1.6"
     spine_bracing_pitch: Optional[float] = None            # None = bracing_pitch
-    spine_bracing_modules: str = "alternate"  # 'alternate'|'every_3rd'
+    spine_bracing_modules: str = "every_3rd"  # 'alternate'|'every_3rd'
     spine_bracing_area_factor: float = 0.15
     spine_offset_single: float = 150.0        # spine offset behind a single rack
     # row / frame spacers (ties): one member_set "frame spacer", modelled as

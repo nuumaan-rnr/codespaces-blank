@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-14 · rack drift/P-Delta limits (EN)"
+BUILD = "2026-06-14 · form defaults + plan-level modes"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

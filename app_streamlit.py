@@ -184,11 +184,14 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     g = lambda f, d: getattr(cfg0, f, d) if cfg0 else d
 
     def gn(field, default, lo, hi):
-        """g() for number inputs, clamped to [lo, hi] so a stale/edited config
-        value outside the widget range can't crash the form."""
+        """g() for number inputs: a stale/edited value outside [lo, hi] falls
+        back to the default (so e.g. a corrupt accidental_height of 0.05 shows
+        the 400 default, not the 100 minimum), and never crashes the form."""
         try:
             v = float(g(field, default))
         except (TypeError, ValueError):
+            v = float(default)
+        if v < lo or v > hi:
             v = float(default)
         return min(max(v, lo), hi)
 
@@ -1096,17 +1099,34 @@ def render_seismic_study():
     pl_sec = c[1].selectbox("Plan section (1C 60x40–80x40)", plan_opts,
                             index=_idx(plan_opts, cfg0.plan_bracing_section
                                        or plan_opts[0]))
-    pl_levels = st.multiselect(
-        "Plan bracing at beam levels (≤ alternate)", blevels,
-        default=(cfg0.plan_bracing_levels or blevels[::2]),
-        format_func=lambda z: f"{z:.0f} mm")
-    if pl_on and len(pl_levels) > len(blevels[::2]):
-        st.warning("Plan bracing should not exceed alternate beam levels.")
+    # current level mode from the saved config
+    _alt = blevels[::2]
+    _cur = cfg0.plan_bracing_levels
+    if _cur and len(_cur) == len(blevels):
+        _mode0 = "All levels"
+    elif not _cur or {round(z) for z in _cur} == {round(z) for z in _alt}:
+        _mode0 = "Alternate levels"
+    else:
+        _mode0 = "Specific levels"
+    pl_mode = c[2].selectbox("Plan bracing levels",
+                             ["All levels", "Alternate levels",
+                              "Specific levels"],
+                             index=["All levels", "Alternate levels",
+                                    "Specific levels"].index(_mode0))
+    if pl_mode == "Specific levels":
+        pl_levels = st.multiselect(
+            "Select beam levels", blevels,
+            default=(_cur or _alt), format_func=lambda z: f"{z:.0f} mm")
+    elif pl_mode == "Alternate levels":
+        pl_levels = _alt
+    else:                                       # All levels
+        pl_levels = list(blevels)
     beam_opts = ["(frame brace)"] + list(lib.names("beam") or lib.names())
+    _sp_def = cfg0.spacer_section or (beam_opts[1] if len(beam_opts) > 1
+                                      else "(frame brace)")
     sp_sec = st.selectbox(
         "Frame / row spacer section (beam section; simply-supported truss tie)",
-        beam_opts, index=_idx(beam_opts, cfg0.spacer_section
-                              or "(frame brace)"))
+        beam_opts, index=_idx(beam_opts, _sp_def))
 
     ca_brace = cfg0.brace_section if ca_sec.startswith("(keep") else ca_sec
     cfg = dataclasses.replace(
