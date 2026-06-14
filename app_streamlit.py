@@ -339,6 +339,57 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         gG = c[0].number_input("gamma_G", 1.0, 2.0, float(g("gamma_G", 1.3)))
         gQ = c[1].number_input("gamma_Q", 1.0, 2.0, float(g("gamma_Q", 1.4)))
 
+    with st.expander("🌐  Seismic (IS 1893:2016) & seismic bracing"):
+        seismic = st.checkbox("Run seismic (modal response spectrum) analysis",
+                              bool(g("seismic", False)))
+        c = st.columns(4)
+        s_zone = c[0].selectbox("Seismic zone", ["II", "III", "IV", "V"],
+                                index=_idx(["II", "III", "IV", "V"],
+                                           g("seismic_zone", "III")))
+        s_soil = c[1].selectbox("Soil type", ["I", "II", "III"],
+                                index=_idx(["I", "II", "III"],
+                                           g("seismic_soil", "II")))
+        s_I = c[2].number_input("Importance I", 1.0, 1.5,
+                                float(g("seismic_importance", 1.0)), 0.1)
+        s_R = c[3].number_input("Response reduction R", 1.0, 5.0,
+                                float(g("seismic_response_reduction", 4.0)),
+                                0.5)
+        c = st.columns(4)
+        s_kappa = c[0].number_input("Pallet mass factor κ", 0.0, 1.0,
+                                    float(g("seismic_imposed_factor", 0.5)),
+                                    0.05)
+        s_damp = c[1].number_input("Damping", 0.01, 0.10,
+                                   float(g("seismic_damping", 0.05)), 0.01)
+        s_modes = c[2].number_input("Modes (min)", 1, 30,
+                                    int(g("seismic_n_modes", 6)))
+        st.caption("Seismic combinations: 1.2(DL+IL±EL), 1.5(DL±EL), "
+                   "0.9DL±1.5EL (IS 800 LSD); directions 100%+30%.")
+        st.markdown("**Seismic bracing** (truss members)")
+        c = st.columns(4)
+        brace_opts = ["(frame brace)"] + list(br_names)
+        sp_on = c[0].checkbox("Spine bracing (down-aisle X)",
+                              bool(g("spine_bracing", False)))
+        sp_sec = c[1].selectbox("Spine section", brace_opts,
+                                index=_idx(brace_opts,
+                                           g("spine_bracing_section", None)
+                                           or "(frame brace)"))
+        sp_mod = c[2].selectbox("Spine modules", ["all", "alternate",
+                                                  "every_3rd"],
+                                index=_idx(["all", "alternate", "every_3rd"],
+                                           g("spine_bracing_modules", "all")))
+        pl_on = c[3].checkbox("Plan bracing (horizontal X)",
+                              bool(g("plan_bracing", False)))
+        c = st.columns(4)
+        pl_default = g("plan_bracing_section", "1C36x21x6x1.2")
+        pl_sec = c[0].selectbox("Plan section", brace_opts,
+                                index=_idx(brace_opts,
+                                           pl_default if pl_default in brace_opts
+                                           else "(frame brace)"))
+        pl_mod = c[1].selectbox("Plan modules", ["all", "alternate",
+                                                 "every_3rd"],
+                                index=_idx(["all", "alternate", "every_3rd"],
+                                           g("plan_bracing_modules", "all")))
+
     cfg = RackConfig(
         name=name, module=module, n_bays=int(n_bays), bay_width=bay_width,
         depth=depth, b2b_gap=b2b_gap, levels=levels, frame_height=frame_h,
@@ -359,7 +410,17 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         accidental_load_x=ax * 1e3, accidental_load_y=ay * 1e3,
         accidental_height=ah, include_placement=inc_place,
         include_accidental=inc_acc,
-        gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s)
+        gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
+        seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
+        seismic_importance=s_I, seismic_response_reduction=s_R,
+        seismic_damping=s_damp, seismic_imposed_factor=s_kappa,
+        seismic_n_modes=int(s_modes),
+        spine_bracing=sp_on,
+        spine_bracing_section=None if sp_sec == "(frame brace)" else sp_sec,
+        spine_bracing_modules=sp_mod,
+        plan_bracing=pl_on,
+        plan_bracing_section=None if pl_sec == "(frame brace)" else pl_sec,
+        plan_bracing_modules=pl_mod)
     cfg.master = master
     return cfg
 
@@ -645,13 +706,40 @@ def render_view_config():
                 ui.section("📊", "Maximum utilisation by check")
                 st.dataframe([rs.get("max_utilization_by_check", {})],
                              use_container_width=True)
-        if st.button("▶ Run / re-run analysis", type="primary"):
+            seis = rs.get("seismic")
+            if seis:
+                with st.container(border=True):
+                    ui.section("🌐", "Seismic (IS 1893) summary")
+                    sc = st.columns(5)
+                    sc[0].markdown(ui.tile("Zone", seis.get("zone", "-")),
+                                   unsafe_allow_html=True)
+                    sc[1].markdown(ui.tile("T₁ [s]",
+                                           seis.get("fundamental_T", "-")),
+                                   unsafe_allow_html=True)
+                    sc[2].markdown(ui.tile("V_b,x [kN]",
+                                           seis.get("base_shear_x_kN", "-")),
+                                   unsafe_allow_html=True)
+                    sc[3].markdown(ui.tile("Drift util",
+                                           seis.get("max_drift_util", "-")),
+                                   unsafe_allow_html=True)
+                    sc[4].markdown(ui.pill(seis.get("verdict", "not run")),
+                                   unsafe_allow_html=True)
+                    st.caption(f"Method {seis.get('method')} · seismic weight "
+                               f"{seis.get('seismic_weight_kN')} kN · captured "
+                               f"mass {seis.get('captured_mass_x_pct')}%")
+        rc = st.columns(2)
+        if rc[0].button("▶ Run / re-run analysis", type="primary",
+                        use_container_width=True):
             summary, _ = ui.run_with_status(
                 lambda progress: run_configuration(
                     PSTORE, proj.id, sysm.id, conf.id, progress=progress),
                 label="OpenSees second-order analysis")
             ui.toast_verdict(summary["verdict"])
             st.rerun()
+        if rc[1].button("🌐 Seismic zone study (IS 1893)",
+                        use_container_width=True):
+            goto("seismic_study", project_id=proj.id, system_id=sysm.id,
+                 config_id=conf.id)
 
     with t_report:
         st.markdown("#### Design Validation Report (EN 15512)")
@@ -822,6 +910,57 @@ def render_compare():
                "ratio exceeds unity (fails that check).")
 
 
+# ----------------------------------------------------- seismic zone study
+def render_seismic_study():
+    proj = PSTORE.load(ss.project_id)
+    sysm = proj.system(ss.system_id)
+    conf = sysm.configuration(ss.config_id)
+    if st.button("← Back to results"):
+        goto("view_config", project_id=proj.id, system_id=sysm.id,
+             config_id=conf.id)
+    ui.hero("Seismic Zone Study", f"{proj.name} · {conf.name}",
+            eyebrow="IS 1893 cost-saving design",
+            crumbs=["Dashboard", proj.name, conf.name, "Zone study"])
+    st.caption("Sweeps bracing strategies (cross-aisle D/X, spine every-3rd / "
+               "alternate / all, ± plan bracing) for each zone and recommends "
+               "the lightest arrangement that passes all checks.")
+
+    zones = st.multiselect("Seismic zones to study", ["II", "III", "IV", "V"],
+                           default=["III", "IV"])
+    sweep_sec = st.checkbox("Design spine section (sweep the C-section family)",
+                            value=False)
+    if not st.button("▶ Run zone study", type="primary") or not zones:
+        st.info("Pick zones and press Run. Each zone × strategy runs a full "
+                "modal analysis, so this can take a few minutes.")
+        return
+
+    from rack15512.seismic import SPINE_CANDIDATES
+    from rack15512.seismic_study import zone_study
+    lib, master, _ = resolve_master(conf.master_id, conf.master_path)
+    cfg = rackconfig_from_dict(conf.config, master=master)
+    spine_secs = ([s for s in SPINE_CANDIDATES if s in lib.sections]
+                  if sweep_sec else None)
+    with st.spinner("Running modal RSA for every zone × bracing strategy…"):
+        study = zone_study(cfg, zones=tuple(zones), spine_sections=spine_secs)
+
+    for zone in zones:
+        z = study[zone]
+        with st.container(border=True):
+            rec = z["recommended"]
+            head = (f"#### Zone {zone} (Z={z['Z']})  ·  "
+                    + (f"✅ lightest safe: **{rec['label']}** — "
+                       f"{rec['weight_kg']} kg" if rec
+                       else "❌ no safe option in the set"))
+            st.markdown(head)
+            st.dataframe([{"strategy": o["label"], "verdict": o["verdict"],
+                           "governing": o["governing"],
+                           "weight [kg]": o["weight_kg"]}
+                          for o in z["options"]],
+                         use_container_width=True)
+            if z["note"]:
+                st.warning(z["note"])
+
+
 # ----------------------------------------------------- create/edit a config
 def render_configure():
     proj = PSTORE.load(ss.project_id)
@@ -989,6 +1128,7 @@ _VIEWS = {
     "configure": render_configure,
     "view_config": render_view_config,
     "compare": render_compare,
+    "seismic_study": render_seismic_study,
     "masters": render_masters,
 }
 _VIEWS.get(ss.view, render_dashboard)()

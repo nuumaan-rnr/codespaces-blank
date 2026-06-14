@@ -77,21 +77,7 @@ class OpenSeesEngine:
         n_steps = max(1, model.analysis.n_steps) if order == 2 else 1
         converged = False
         for attempt_steps in (n_steps, 5 * n_steps):
-            ops.wipe()
-            ops.model("basic", "-ndm", 3, "-ndf", 6)
-
-            self._next_tag = 1
-            self._node_tag: Dict[int, int] = {}      # model node id -> ops tag
-            self._coords: Dict[int, Tuple[float, float, float]] = {}
-            self._members: Dict[int, _MemberMap] = {}
-            self._spring_ground: Dict[int, int] = {}  # support node -> ground tag
-            self._mat_tag = 0
-            self._transf_tag = 0
-
-            self._build_nodes(model, geom_sway)
-            self._build_members(model, order)
-            self._build_supports(model)
-            self._fix_spinning_nodes(model)
+            self._build(model, order, geom_sway)
             self._apply_loads(model, loads)
 
             converged = self._solve(model, attempt_steps)
@@ -105,7 +91,68 @@ class OpenSeesEngine:
         ops.wipe()
         return res
 
+    def modal(self, model: RackModel, masses: Dict[int, float],
+              n_modes: int) -> "ModalResult":
+        """Build the model once (linear), assign translational lumped mass,
+        and run an eigenvalue analysis.  Returns periods + mode shapes; on any
+        failure returns ModalResult(converged=False) so the caller can fall
+        back to the equivalent-static method."""
+        from ..results import ModalResult
+        try:
+            self._build(model, order=1, geom_sway=None)
+            for nid, mss in masses.items():
+                tag = self._node_tag.get(nid)
+                if tag is not None and mss > 0.0:
+                    ops.mass(tag, mss, mss, mss, 0.0, 0.0, 0.0)
+            ops.constraints("Transformation")
+            ops.numberer("RCM")
+            ops.system("FullGeneral")
+            ops.test("NormDispIncr", 1.0e-6, 50)
+            ops.algorithm("Linear")
+            ops.integrator("LoadControl", 1.0)
+            ops.analysis("Static")
+            n = max(1, min(int(n_modes), len(self._node_tag) * 3 - 1))
+            eigvals = ops.eigen("-fullGenLapack", n)
+            periods, omega2 = [], []
+            for w2 in eigvals:
+                if w2 is None or w2 <= 0.0:
+                    raise ValueError("non-positive eigenvalue")
+                omega2.append(w2)
+                periods.append(2.0 * math.pi / math.sqrt(w2))
+            shapes: Dict[int, List[Tuple[float, float, float]]] = {}
+            for nid, tag in self._node_tag.items():
+                modes = []
+                for k in range(1, n + 1):
+                    v = ops.nodeEigenvector(tag, k)
+                    modes.append((v[0], v[1], v[2]))
+                shapes[nid] = modes
+            ops.wipe()
+            return ModalResult(converged=True, periods=periods, omega2=omega2,
+                               shapes=shapes, masses=dict(masses))
+        except Exception as exc:                      # eigen unsupported/failed
+            ops.wipe()
+            return ModalResult(converged=False, note=f"eigen failed: {exc}")
+
     # ------------------------------------------------------------------ build
+    def _reset_state(self) -> None:
+        ops.wipe()
+        ops.model("basic", "-ndm", 3, "-ndf", 6)
+        self._next_tag = 1
+        self._node_tag: Dict[int, int] = {}          # model node id -> ops tag
+        self._coords: Dict[int, Tuple[float, float, float]] = {}
+        self._members: Dict[int, _MemberMap] = {}
+        self._spring_ground: Dict[int, int] = {}      # support node -> ground
+        self._mat_tag = 0
+        self._transf_tag = 0
+
+    def _build(self, model: RackModel, order: int,
+               geom_sway: Optional[Tuple[float, Tuple[float, float]]]) -> None:
+        self._reset_state()
+        self._build_nodes(model, geom_sway)
+        self._build_members(model, order)
+        self._build_supports(model)
+        self._fix_spinning_nodes(model)
+
     def _new_tag(self) -> int:
         t = self._next_tag
         self._next_tag += 1

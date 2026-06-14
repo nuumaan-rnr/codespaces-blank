@@ -89,6 +89,9 @@ class CaseResult:
     members: Dict[int, MemberResult] = field(default_factory=dict)
     # companion first-order sway (same loads, linear) for alpha_cr estimate
     sway_first_order: Optional[float] = None
+    # seismic per-storey results (set on SEISMIC cases): z_level -> value
+    seismic_storey_drift: Dict[float, float] = field(default_factory=dict)
+    seismic_storey_shear: Dict[float, float] = field(default_factory=dict)
 
     @property
     def max_sway(self) -> float:
@@ -113,3 +116,40 @@ class CaseResult:
         if self.order != 2 or d1 is None or d2 <= 1.0e-9 or d1 >= d2:
             return None
         return 1.0 / (1.0 - d1 / d2)
+
+
+@dataclass
+class ModalResult:
+    """Eigenvalue (modal) analysis output for response-spectrum analysis."""
+
+    converged: bool
+    periods: List[float] = field(default_factory=list)       # seconds, per mode
+    omega2: List[float] = field(default_factory=list)         # eigenvalues
+    # node id -> list over modes of the translational shape (ux, uy, uz)
+    shapes: Dict[int, List[Tuple[float, float, float]]] = field(
+        default_factory=dict)
+    masses: Dict[int, float] = field(default_factory=dict)    # node id -> kg
+    note: str = ""
+
+    @property
+    def n_modes(self) -> int:
+        return len(self.periods)
+
+
+@dataclass
+class SeismicEnvelope:
+    """Positive-only (sign-less) modal-combined seismic response in one
+    global direction ('X' or 'Y'), after SRSS/CQC and base-shear scaling."""
+
+    direction: str
+    member_force: Dict[int, List[Tuple[float, float, float, float, float,
+                                       float]]] = field(default_factory=dict)
+    member_defl: Dict[int, List[Tuple[float, float]]] = field(
+        default_factory=dict)
+    member_x: Dict[int, List[float]] = field(default_factory=dict)
+    reaction: Dict[int, Tuple[float, ...]] = field(default_factory=dict)
+    displacement: Dict[int, Tuple[float, ...]] = field(default_factory=dict)
+    storey_disp: Dict[float, Tuple[float, float]] = field(default_factory=dict)
+    base_shear: float = 0.0
+    scale: float = 1.0
+    method: str = "RSA"            # 'RSA' | 'ELF'

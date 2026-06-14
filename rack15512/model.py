@@ -314,6 +314,40 @@ class AnalysisSettings:
 
 
 @dataclass
+class SeismicSettings:
+    """IS 1893:2016 seismic (modal response spectrum) settings.
+
+    Ah = (Z/2)*(I/R)*(Sa/g); the design spectrum Sa/g (5% damping) follows
+    Cl 6.4.2 by soil type.  Seismic mass = dead + imposed_factor*pallets
+    (IS 1893 Table 8).  Modes are auto-increased to capture >= 90% mass per
+    direction (Cl 7.7.5.2); responses combined by SRSS/CQC, base-shear scaled
+    to the empirical-period static value (Cl 7.7.3), directions combined
+    100%+30% (Cl 6.3.4.1).
+    """
+
+    enabled: bool = False
+    zone: str = "III"              # 'II'|'III'|'IV'|'V' -> Z 0.10/0.16/0.24/0.36
+    importance: float = 1.0        # I (Table 8); 1.5 for important
+    response_reduction: float = 4.0  # R (Table 9); braced ~4, OMRF ~3, SMRF ~5
+    soil_type: str = "II"          # 'I' rock | 'II' medium | 'III' soft
+    damping: float = 0.05          # for CQC
+    imposed_factor: float = 0.5    # kappa: share of pallet load in seismic mass
+    n_modes: int = 6               # initial/min eigen request
+    max_modes: int = 30            # cap when auto-increasing for 90% mass
+    combination: str = "SRSS"      # 'SRSS' | 'CQC'
+    include_self_mass: bool = True  # add member A*L*rho to the lumped mass
+    apply_base_shear_scaling: bool = True   # Cl 7.7.3
+    drift_limit_ratio: float = 0.004        # Cl 7.11.1
+    theta_limit: float = 0.10               # P-Delta stability (informative)
+    # IS 800 LSD seismic combination rows: (label, f_dead, f_imposed, f_seismic)
+    combos: Tuple[Tuple[str, float, float, float], ...] = (
+        ("1.2(DL+IL+EL)", 1.2, 1.2, 1.2),
+        ("1.5(DL+EL)", 1.5, 0.0, 1.5),
+        ("0.9DL+1.5EL", 0.9, 0.0, 1.5),
+    )
+
+
+@dataclass
 class CheckSettings:
     """EN 15512 / EN 1993 verification settings (all overridable)."""
 
@@ -442,6 +476,8 @@ class RackModel:
     imperfection: Imperfection = field(default_factory=Imperfection)
     analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
     checks: CheckSettings = field(default_factory=CheckSettings)
+    seismic: Optional[SeismicSettings] = None
+    seismic_summary: Optional[dict] = None     # filled by run_seismic for reports
     base_plate: Optional[BasePlate] = None
     splices: List[Splice] = field(default_factory=list)
 
@@ -527,8 +563,9 @@ class RackModel:
                 if ml.member not in self.members:
                     errors.append(f"Load case '{lc.name}': unknown member {ml.member}")
         for c in self.combinations:
-            if c.kind not in ("ULS", "SLS"):
-                errors.append(f"Combination '{c.name}': kind must be ULS or SLS")
+            if c.kind not in ("ULS", "SLS", "SEISMIC"):
+                errors.append(f"Combination '{c.name}': kind must be ULS, SLS "
+                              "or SEISMIC")
             for case in c.factors:
                 if case not in self.load_cases:
                     errors.append(f"Combination '{c.name}': unknown case '{case}'")

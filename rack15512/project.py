@@ -338,4 +338,24 @@ def summarize_run(model, cases, checks) -> Dict[str, Any]:
                    "max_sway_x": round(c.max_sway_x, 2),
                    "max_sway_y": round(c.max_sway_y, 2)}
                   for c in cases],
+        "seismic": _seismic_summary(model, checks),
+    }
+
+
+def _seismic_summary(model, checks) -> Optional[Dict[str, Any]]:
+    ss = getattr(model, "seismic_summary", None)
+    if not ss:
+        return None
+    seis = [c for c in checks if c.case and c.case.startswith("SEIS")]
+    drift = [c for c in seis if c.check == "SEISMIC_DRIFT"]
+    return {
+        "method": ss.get("method"), "zone": ss.get("zone"),
+        "fundamental_T": ss.get("fundamental_T"),
+        "base_shear_x_kN": ss.get("base_shear_x_kN"),
+        "base_shear_y_kN": ss.get("base_shear_y_kN"),
+        "seismic_weight_kN": ss.get("seismic_weight_kN"),
+        "captured_mass_x_pct": ss.get("captured_mass_x_pct"),
+        "max_drift_util": round(max((c.utilization for c in drift), default=0.0),
+                                3),
+        "verdict": "PASS" if all(c.ok for c in seis) else "FAIL",
     }

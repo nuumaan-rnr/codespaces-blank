@@ -109,6 +109,18 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
             a = _alpha_cr_check(model, case)
             if a:
                 out.append(a)
+        elif case.kind == "SEISMIC":
+            out += _stress_checks(model, case)
+            out += _buckling_checks(model, case)
+            out += _brace_buckling_checks(model, case)
+            out += _connector_checks(model, case)
+            out += _brace_bolt_checks(model, case)
+            out += _base_plate_checks(model, case)
+            out += _base_restraint_checks(model, case)
+            out += _anchorage_checks(model, case)
+            out += _splice_checks(model, case)
+            out += _seismic_drift_checks(model, case)
+            out += _seismic_pdelta_checks(model, case)
         else:
             out += _deflection_checks(model, case)
             out += _sway_checks(model, case)
@@ -235,7 +247,8 @@ def _brace_buckling_checks(model: RackModel,
     g = model.checks.gamma_M1
     for mid, mr in case.members.items():
         m = model.members[mid]
-        if m.member_set not in ("bracing", "row spacers"):
+        if m.member_set not in ("bracing", "row spacers", "plan bracing",
+                                "spine bracing"):
             continue
         if mr.N_min >= 0.0:
             continue
@@ -355,7 +368,8 @@ def _brace_bolt_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     missing = set()
     for mid, mr in case.members.items():
         m = model.members[mid]
-        if m.member_set not in ("bracing", "row spacers"):
+        if m.member_set not in ("bracing", "row spacers", "plan bracing",
+                                "spine bracing"):
             continue
         brace = model.section_of(m)
         upright = upright_at.get(m.node_i) or upright_at.get(m.node_j)
@@ -706,6 +720,77 @@ def _sway_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             f"max sway={d:.2f} mm, limit=H/{ratio:.0f}={limit:.2f} mm "
             f"(H={H:.0f} mm)"))
     return out
+
+
+# ------------------------------------------------------------------ seismic
+def _storey_levels(model: RackModel) -> List[float]:
+    from ..seismic import beam_storey_levels
+    return beam_storey_levels(model)
+
+
+def _seismic_drift_checks(model: RackModel,
+                          case: CaseResult) -> List[CheckResult]:
+    """Inter-storey drift ratio <= 0.004 (IS 1893 Cl 7.11.1)."""
+    s = model.seismic
+    limit = (s.drift_limit_ratio if s else 0.004)
+    res = []
+    drifts = case.seismic_storey_drift
+    levels = _storey_levels(model)
+    for lo, hi in zip(levels, levels[1:]):
+        h = hi - lo
+        if h <= 1e-6:
+            continue
+        d = drifts.get(round(hi, 3), drifts.get(hi, 0.0))
+        ratio = d / h
+        res.append(CheckResult(
+            "SEISMIC_DRIFT", case.name, f"storey z={lo:.0f}-{hi:.0f}", "frame",
+            ratio / limit,
+            f"drift={d:.2f} mm over h={h:.0f} mm -> {ratio:.4f} "
+            f"(limit {limit}); IS 1893 Cl 7.11.1"))
+    return res
+
+
+def _seismic_pdelta_checks(model: RackModel,
+                           case: CaseResult) -> List[CheckResult]:
+    """P-Delta stability coefficient theta = P*Delta/(V*h) per storey.
+
+    theta<=0.10 -> P-Delta negligible (informative); 0.10<theta<=0.25 -> the
+    seismic forces should be amplified by 1/(1-theta); theta>0.25 -> fail."""
+    s = model.seismic
+    cap = s.theta_limit if s else 0.10
+    levels = _storey_levels(model)
+    z_min = levels[0]
+    # total seismic weight above each level, from the lumped node weights
+    from ..seismic import _node_weights
+    try:
+        weights = _node_weights(model, s) if s else {}
+    except Exception:
+        weights = {}
+    Vb = 0.0
+    if model.seismic_summary:
+        Vb = max(model.seismic_summary.get("base_shear_x_kN", 0.0),
+                 model.seismic_summary.get("base_shear_y_kN", 0.0)) * 1e3
+    res = []
+    for lo, hi in zip(levels, levels[1:]):
+        h = hi - lo
+        if h <= 1e-6:
+            continue
+        P = sum(w for nid, w in weights.items()
+                if model.nodes[nid].z >= hi - 1e-6)
+        # storey shear approximated as the share of base shear above this level
+        Wabove = P
+        Wtot = sum(weights.values()) or 1.0
+        V = Vb * (Wabove / Wtot) if Vb else 0.0
+        d = case.seismic_storey_drift.get(round(hi, 3),
+                                          case.seismic_storey_drift.get(hi, 0.0))
+        theta = (P * d) / (V * h) if V > 1e-9 else 0.0
+        res.append(CheckResult(
+            "SEISMIC_PDELTA", case.name, f"storey z={lo:.0f}-{hi:.0f}", "frame",
+            theta / 0.25,
+            f"theta={theta:.3f} (P={P/1e3:.0f} kN, V={V/1e3:.0f} kN, "
+            f"delta={d:.2f} mm, h={h:.0f} mm); <=0.10 P-Delta negligible, "
+            f">0.25 fails", informative=(theta <= cap)))
+    return res
 
 
 # ------------------------------------------------------------------ summary

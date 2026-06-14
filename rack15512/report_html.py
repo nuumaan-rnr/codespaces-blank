@@ -80,6 +80,13 @@ CLAUSES = {
                  "included in the analysis."),
     "STABILITY": ("EN 15512 §9.7.2",
                   "Second-order equilibrium / elastic stability."),
+    "SEISMIC_DRIFT": ("IS 1893:2016 Cl 7.11.1",
+                      "Seismic inter-storey drift ratio Δ/h ≤ 0.004 under the "
+                      "design seismic combinations."),
+    "SEISMIC_PDELTA": ("IS 1893:2016 Cl 7.x (stability coefficient)",
+                       "P-Δ stability coefficient θ = P·Δ/(V·h); θ≤0.10 P-Δ "
+                       "negligible, 0.10<θ≤0.25 amplify by 1/(1−θ), θ>0.25 "
+                       "not permitted."),
 }
 
 
@@ -199,6 +206,29 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
     except ValueError:
         pass
 
+    ss = getattr(model, "seismic_summary", None)
+    if ss:
+        a("<h2>3a. Seismic design (IS 1893:2016)</h2>")
+        a(f"<p>Zone {_esc(ss['zone'])} (Z={ss['Z']}), soil type "
+          f"{_esc(ss['soil'])}, importance I={ss['I']}, response reduction "
+          f"R={ss['R']}; method {_esc(ss['method'])}. Design coefficient "
+          f"Ah≈{ss['Ah_design']}. Seismic weight W={ss['seismic_weight_kN']} "
+          f"kN. Base shear V_B,x={ss['base_shear_x_kN']} kN, "
+          f"V_B,y={ss['base_shear_y_kN']} kN. Modal mass captured "
+          f"(X) {ss.get('captured_mass_x_pct')}%.</p>")
+        if ss.get("modes"):
+            a("<table><thead><tr><th>Mode</th><th>T [s]</th>"
+              "<th>Mass X %</th><th>Mass Y %</th></tr></thead><tbody>")
+            for md in ss["modes"]:
+                a(f"<tr><td>{md['mode']}</td><td>{md['T']}</td>"
+                  f"<td>{md['mass_x_pct']}</td><td>{md['mass_y_pct']}</td></tr>")
+            a("</tbody></table>")
+        a("<p class='basis'>Modal response spectrum analysis: Ah=(Z/2)(I/R)"
+          "(Sa/g); modes combined by SRSS, scaled to the empirical-period base "
+          "shear (Cl 7.7.3); directions combined 100%+30% (Cl 6.3.4.1); "
+          "seismic combinations 1.2(DL+IL±EL), 1.5(DL±EL), 0.9DL±1.5EL "
+          "(IS 800 LSD).</p>")
+
     # ---- 4 model views ---------------------------------------------------
     a("<h2>4. Model views (dimensions in mm)</h2>")
     a('<div class="grid2">')
@@ -227,7 +257,8 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
           "Governing member utilisation (red > 1 fails)"))
     order = ["STRESS", "BUCKLING", "BRACE_BUCKLING", "CONNECTOR",
              "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT", "ANCHORAGE",
-             "SPLICE", "DEFLECTION", "SWAY", "ALPHA_CR", "STABILITY"]
+             "SPLICE", "SEISMIC_DRIFT", "SEISMIC_PDELTA", "DEFLECTION",
+             "SWAY", "ALPHA_CR", "STABILITY"]
     n = 1
     for kind in order:
         rows = [c for c in checks if c.check == kind]

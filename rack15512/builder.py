@@ -44,9 +44,21 @@ from typing import Dict, List, Optional, Tuple, Union
 from .library import SectionLibrary
 from .master_xlsx import MasterWorkbook
 from .model import (BasePlate, Combination, Hinge, Imperfection, LoadCase,
-                    MemberLoad, NodalLoad, RackModel, Splice, Steel, Support)
+                    MemberLoad, NodalLoad, RackModel, SeismicSettings, Splice,
+                    Steel, Support)
 
 _TOL = 1.0     # mm: merge coincident elevations
+
+
+def _selected_bays(n_bays: int, pattern: str) -> List[int]:
+    """Bay indices (0..n_bays-1) to brace for the given module pattern."""
+    bays = list(range(n_bays))
+    p = (pattern or "all").lower()
+    if p == "alternate":
+        return bays[::2]
+    if p == "every_3rd":
+        return bays[::3]
+    return bays
 
 # standard footplates per upright depth: depth -> (plate X, plate Y) [mm]
 STANDARD_FOOTPLATES = {90.0: (100.0, 145.0), 120.0: (100.0, 176.0)}
@@ -108,6 +120,18 @@ class RackConfig:
     # optional different pattern below the first beam level (e.g. 'X'
     # below level 1 for accidental loads, 'D' above)
     bracing_type_zone1: Optional[str] = None
+    # ---- seismic bracing (truss members; IS 1893 lateral system) ----------
+    # plan bracing: horizontal X across each bay cell, at selected levels
+    plan_bracing: bool = False
+    plan_bracing_section: Optional[str] = "1C36x21x6x1.2"
+    plan_bracing_levels: Optional[List[float]] = None     # None = all beam levels
+    plan_bracing_modules: str = "all"     # 'all'|'alternate'|'every_3rd'
+    # spine bracing: vertical X down-aisle on the inner upright line(s)
+    spine_bracing: bool = False
+    spine_bracing_section: Optional[str] = None            # None = brace_section
+    spine_bracing_pitch: Optional[float] = None            # None = bracing_pitch
+    spine_bracing_modules: str = "all"
+    spine_bracing_area_factor: float = 0.15
     # upright splice: auto-placed at H/2 when frame height > splice_above
     # (max manufacturable upright length); set splice_z to position it
     splice_z: Optional[float] = None
@@ -179,6 +203,15 @@ class RackConfig:
     phi_s: float = 1.0 / 350.0              # out-of-plumb tolerance
     mesh_beam: int = 4
     mesh_upright: int = 1                   # per segment between elevations
+    # ---- seismic (IS 1893:2016); see model.SeismicSettings ----------------
+    seismic: bool = False
+    seismic_zone: str = "III"              # 'II'|'III'|'IV'|'V'
+    seismic_soil: str = "II"               # 'I'|'II'|'III'
+    seismic_importance: float = 1.0        # I
+    seismic_response_reduction: float = 4.0  # R
+    seismic_damping: float = 0.05
+    seismic_imposed_factor: float = 0.5    # kappa (share of pallet load)
+    seismic_n_modes: int = 6
 
 
 def bracing_elevations(cfg: RackConfig, frame_height: float) -> List[float]:
@@ -406,6 +439,60 @@ def build_rack(cfg: RackConfig) -> RackModel:
                              mtype="beam", mesh=1, member_set="row spacers")
                 mid += 1
 
+    # ---- seismic bracing: plan (horizontal) and spine (vertical X) ---------
+    def _register_brace(name: Optional[str]):
+        """Resolve a bracing section by name (fallback to the frame brace),
+        register it on the model, and return its CrossSection name."""
+        if not name:
+            return br.name
+        try:
+            sec = lib.get(_pick(lib, name, "bracing"))
+        except (KeyError, ValueError):
+            return br.name
+        fy = cfg.master.fy.get(sec.name) if cfg.master else None
+        if fy:
+            mat_name = f"steel_fy{fy:.0f}"
+            m.materials.setdefault(mat_name, Steel(mat_name, fy=fy))
+            sec.material = mat_name
+        else:
+            sec.material = "steel"
+        m.sections[sec.name] = sec
+        return sec.name
+
+    if cfg.plan_bracing:
+        psec = _register_brace(cfg.plan_bracing_section)
+        plan_z = cfg.plan_bracing_levels or beam_levels
+        for i in _selected_bays(cfg.n_bays, cfg.plan_bracing_modules):
+            for z in plan_z:
+                if not any(abs(zz - z) <= _TOL for zz in zs):
+                    continue
+                j = j_of(min(zs, key=lambda zz: abs(zz - z)))
+                for sa, sb, _o in rack_pairs:
+                    m.add_member(mid, nid(i, sa, j), nid(i + 1, sb, j), psec,
+                                 mtype="truss", member_set="plan bracing")
+                    mid += 1
+                    m.add_member(mid, nid(i, sb, j), nid(i + 1, sa, j), psec,
+                                 mtype="truss", member_set="plan bracing")
+                    mid += 1
+
+    if cfg.spine_bracing:
+        ssec = _register_brace(cfg.spine_bracing_section)
+        spine_lines = sorted({s for _sa, _sb, _o in rack_pairs
+                              for s in (1,) if 1 in sides}
+                             | ({2} if spacer_pair else set()))
+        spine_z = [0.0] + [z for z in beam_levels] \
+            + ([H] if H - beam_levels[-1] > _TOL else [])
+        for i in _selected_bays(cfg.n_bays, cfg.spine_bracing_modules):
+            for s in spine_lines:
+                for za, zb in zip(spine_z, spine_z[1:]):
+                    ja, jb = j_of(za), j_of(zb)
+                    m.add_member(mid, nid(i, s, ja), nid(i + 1, s, jb), ssec,
+                                 mtype="truss", member_set="spine bracing")
+                    mid += 1
+                    m.add_member(mid, nid(i + 1, s, ja), nid(i, s, jb), ssec,
+                                 mtype="truss", member_set="spine bracing")
+                    mid += 1
+
     # ---- EN 15512 buckling lengths for the uprights -------------------------
     # major axis (local z, down-aisle): beam gap of the level band
     bands = [0.0] + beam_levels + ([H] if H - beam_levels[-1] > _TOL else [])
@@ -443,6 +530,8 @@ def build_rack(cfg: RackConfig) -> RackModel:
     for mm in m.members.values():
         if mm.member_set == "bracing":
             mm.area_factor = cfg.brace_area_factor
+        elif mm.member_set in ("plan bracing", "spine bracing"):
+            mm.area_factor = cfg.spine_bracing_area_factor
 
     # bracing bolt-connection and footplate checks; when no plate is given
     # the standard footplate for the upright depth is used (90 -> 100x145,
@@ -575,5 +664,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.imperfection = Imperfection(
         n_cols=n_lines, phi_s=cfg.phi_s, phi_l=max(looseness_used),
         method="EHF", directions=["+x", "-x", "+y", "-y"])
+
+    # ---- seismic settings (IS 1893) -----------------------------------------
+    if cfg.seismic:
+        m.seismic = SeismicSettings(
+            enabled=True, zone=cfg.seismic_zone, soil_type=cfg.seismic_soil,
+            importance=cfg.seismic_importance,
+            response_reduction=cfg.seismic_response_reduction,
+            damping=cfg.seismic_damping,
+            imposed_factor=cfg.seismic_imposed_factor,
+            n_modes=cfg.seismic_n_modes)
 
     return m

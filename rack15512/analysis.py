@@ -59,4 +59,8 @@ def run_all(model: RackModel) -> List[CaseResult]:
                     case.sway_first_order = lin.max_sway
             results.append(case)
 
+    if model.seismic and model.seismic.enabled:
+        from .seismic import run_seismic
+        results += run_seismic(model)
+
     return results

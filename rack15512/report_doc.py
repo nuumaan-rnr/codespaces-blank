@@ -24,7 +24,8 @@ from .viewer import (plot_front_elevation, plot_model, plot_plan,
 
 CHECK_ORDER = ["STRESS", "BUCKLING", "BRACE_BUCKLING", "CONNECTOR",
                "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT", "ANCHORAGE",
-               "SPLICE", "DEFLECTION", "SWAY", "ALPHA_CR", "STABILITY"]
+               "SPLICE", "SEISMIC_DRIFT", "SEISMIC_PDELTA", "DEFLECTION",
+               "SWAY", "ALPHA_CR", "STABILITY"]
 
 
 def _png(fig) -> bytes:
@@ -147,6 +148,24 @@ def build_report_blocks(model, cases, checks, meta=None) -> List[tuple]:
                        f"{', '.join(model.imperfection.directions)}."))
     except ValueError:
         pass
+
+    ss = getattr(model, "seismic_summary", None)
+    if ss:
+        b.append(("h2", "3a  Seismic design (IS 1893:2016)"))
+        b.append(("p",
+                  f"Zone {ss['zone']} (Z={ss['Z']}), soil {ss['soil']}, "
+                  f"I={ss['I']}, R={ss['R']}; method {ss['method']}. "
+                  f"Ah~{ss['Ah_design']}, seismic weight "
+                  f"{ss['seismic_weight_kN']} kN, base shear "
+                  f"Vb,x={ss['base_shear_x_kN']} kN / "
+                  f"Vb,y={ss['base_shear_y_kN']} kN, modal mass captured (X) "
+                  f"{ss.get('captured_mass_x_pct')}%."))
+        if ss.get("modes"):
+            mrows = [["Mode", "T [s]", "Mass X %", "Mass Y %"]]
+            for md in ss["modes"]:
+                mrows.append([str(md["mode"]), str(md["T"]),
+                              str(md["mass_x_pct"]), str(md["mass_y_pct"])])
+            b.append(("table", mrows))
 
     # 4 model views
     b.append(("h2", "4  Model views (dimensions in mm)"))

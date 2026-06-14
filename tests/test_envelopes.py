@@ -72,9 +72,16 @@ def test_envelopes_group_uls_sls():
     assert uls.governing is not None
     # real per-member EN 15512 utilisation is carried for colouring
     assert uls.member_util
-    # the worst member utilisation equals the governing utilisation
-    assert max(uls.member_util.values()) == pytest.approx(
-        uls.governing.utilization, rel=1e-6)
+    # member_util colours members, so it equals the worst MEMBER-level check;
+    # the overall governing may be a node check (anchorage/base) and is at
+    # least as severe as the worst member utilisation
+    uls_names = {c.name for c in uls.cases}
+    worst_member = max(c.utilization for c in checks
+                       if c.case in uls_names and not c.informative
+                       and c.target.startswith("member"))
+    assert max(uls.member_util.values()) == pytest.approx(worst_member,
+                                                          rel=1e-6)
+    assert uls.governing.utilization >= max(uls.member_util.values()) - 1e-9
 
 
 def test_interactive_figures_build():
