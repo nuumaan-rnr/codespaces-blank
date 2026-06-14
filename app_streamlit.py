@@ -244,7 +244,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                            help="D = zigzag, X = crossed pairs")
         first_side = c[1].radio(
             "First diagonal connects to", ["outer", "inner"],
-            index=0 if g("bracing_first_side", "outer") == "outer" else 1,
+            index=0 if g("bracing_first_side", "inner") == "outer" else 1,
             help="The first diagonal above the bottom horizontal connects to "
                  "the OUTER (aisle-side) or INNER upright of each frame; both "
                  "frames of a back-to-back module are mirrored accordingly.")
@@ -275,11 +275,11 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                          0.05)
         bolt = c[1].selectbox("Brace bolt", ["M8", "M10", "M12", "M14", "M16"],
                               index=_idx(["8", "10", "12", "14", "16"],
-                                         str(int(g("bolt_d", 12.0)))))
+                                         str(int(g("bolt_d", 8.0)))))
         grade = c[2].selectbox("Bolt grade",
                                ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
                                index=_idx(["4.6", "4.8", "5.6", "5.8", "8.8",
-                                           "10.9"], g("bolt_grade", "4.6")))
+                                           "10.9"], g("bolt_grade", "8.8")))
         brace_planes = st.number_input(
             "Brace shear planes (1 single C, 2 double / back-to-back C)",
             1, 2, int(g("brace_planes", 1)))
@@ -287,7 +287,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         fck = c[0].number_input("Concrete f_ck [MPa]", 15.0, 60.0,
                                 float(g("concrete_fck", 25.0)), 5.0)
         plate_fy = c[1].number_input("Plate fy [MPa]", 200.0, 460.0,
-                                     float(g("plate_fy", 250.0)), 5.0)
+                                     float(g("plate_fy", 310.0)), 5.0)
         c[2].caption("Footplate auto: 90→100×145×4, 120→100×176×4 "
                      "(blank fields below)")
         c = st.columns(3)
@@ -331,7 +331,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                  float(g("dead_load_beam", 0.05)))
         place = c[1].number_input("Placement load [kN]", 0.0, 5.0,
                                   float(g("placement_load", 500.0) / 1e3))
-        phi_s = c[2].number_input("Out-of-plumb (1/x)", 100.0, 1000.0, 350.0)
+        phi_s = c[2].number_input("Out-of-plumb (1/x)", 100.0, 1000.0, 300.0)
         c = st.columns(3)
         ax = c[0].number_input("Accidental X [kN]", 0.0, 10.0,
                                float(g("accidental_load_x", 1250.0) / 1e3))
