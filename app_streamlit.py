@@ -700,6 +700,12 @@ def render_view_config():
             results = _load_results(cdir)
             if results:
                 cases, checks = results["cases"], results["checks"]
+                res_mids = {mid for c in cases for mid in c.members}
+                if res_mids and not res_mids <= set(model.members):
+                    st.warning("⚠ The saved results are from a different "
+                               "configuration (the geometry has changed since "
+                               "the last run). Re-run the analysis to refresh "
+                               "the results and report.")
                 envs = build_envelopes(model, cases, checks)
                 opts = ([f"Envelope: {e.name}" for e in envs]
                         + [f"Case: {c.name}" for c in cases])

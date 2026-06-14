@@ -35,6 +35,25 @@ def test_ignore_placement_and_accidental():
     assert set(none.load_cases) == {"dead", "pallets"}
 
 
+def test_build_envelopes_tolerates_stale_results():
+    """Results from a heavier model (more members) must not crash envelope
+    building against a lighter, edited model (KeyError guard)."""
+    big = build_rack(RackConfig(module="back-to-back", n_bays=1, depth=1000.0,
+                                b2b_gap=250.0, beam_levels=[1500.0],
+                                spine_bracing=True, plan_bracing=True))
+    big.combinations = big.combinations[:1]
+    big.imperfection.directions = ["+x"]
+    cases = run_all(big)
+    checks = run_checks(big, cases)
+    small = build_rack(RackConfig(module="back-to-back", n_bays=1,
+                                  depth=1000.0, b2b_gap=250.0,
+                                  beam_levels=[1500.0]))
+    assert len(small.members) < len(big.members)
+    envs = build_envelopes(small, cases, checks)        # must not raise
+    uls = next(e for e in envs if e.name == "ULS (all)")
+    assert set(uls.members) <= set(small.members)
+
+
 def test_frame_spacer_and_bracing_are_truss():
     m = _model(module="back-to-back", depth=1000.0, b2b_gap=250.0)
     spacers = [x for x in m.members.values()

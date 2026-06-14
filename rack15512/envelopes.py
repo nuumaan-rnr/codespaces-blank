@@ -66,6 +66,8 @@ def _build_member_envelope(model, cases) -> Dict[int, MemberEnvelope]:
         if not case.converged:
             continue
         for mid, mr in case.members.items():
+            if mid not in model.members:
+                continue          # stale results vs the current model geometry
             e = env.get(mid)
             if e is None:
                 e = MemberEnvelope(member=mid,
