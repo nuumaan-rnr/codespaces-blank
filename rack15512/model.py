@@ -375,6 +375,8 @@ class CheckSettings:
     bolt_d: Optional[float] = None           # bolt diameter [mm], e.g. 12
     bolt_grade: str = "4.6"                  # 4.6/4.8/5.6/5.8/6.8/8.8/10.9
     bolts_per_connection: int = 1
+    brace_planes: int = 1          # shear planes of the brace bolt (1 single C,
+    #                                2 double / back-to-back C) -> bolt shear
     gamma_M2: float = 1.25
     # fallback ultimate strength when a section has no fu in the master
     fu_over_fy: float = 1.10

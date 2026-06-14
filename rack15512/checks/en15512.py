@@ -386,11 +386,15 @@ def _brace_bolt_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             missing.add(brace.name if brace.e1 is None or brace.t is None
                         else (upright.name if upright else "?"))
             continue
-        parts = {"bolt shear": st.bolts_per_connection * Fv}
+        planes = max(int(getattr(st, "brace_planes", 1) or 1), 1)
+        # n shear planes -> bolt shear x n; n brace plies -> brace bearing x n;
+        # the upright (single wall) bearing is unchanged
+        parts = {"bolt shear": st.bolts_per_connection * planes * Fv}
         for label, sec in plies:
             fu = _fu_of(model, sec)
-            parts[f"bearing {label}"] = st.bolts_per_connection * _bearing(
-                d, d0, fub, sec, fu, st.gamma_M2)
+            factor = planes if label == "brace" else 1
+            parts[f"bearing {label}"] = st.bolts_per_connection * factor \
+                * _bearing(d, d0, fub, sec, fu, st.gamma_M2)
         gov_label, R = min(parts.items(), key=lambda kv: kv[1])
         N = max(abs(mr.N_min), abs(mr.N_max))
         res.append(CheckResult(

@@ -277,6 +277,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
                                index=_idx(["4.6", "4.8", "5.6", "5.8", "8.8",
                                            "10.9"], g("bolt_grade", "4.6")))
+        brace_planes = st.number_input(
+            "Brace shear planes (1 single C, 2 double / back-to-back C)",
+            1, 2, int(g("brace_planes", 1)))
         c = st.columns(3)
         fck = c[0].number_input("Concrete f_ck [MPa]", 15.0, 60.0,
                                 float(g("concrete_fck", 25.0)), 5.0)
@@ -430,7 +433,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
         base_stiffness="auto" if base_auto else kbase * 1e6,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
-        bolt_grade=grade, concrete_fck=fck, plate_fy=plate_fy,
+        bolt_grade=grade, brace_planes=int(brace_planes),
+        concrete_fck=fck, plate_fy=plate_fy,
         plate_b=pb or None, plate_d=pd_ or None, plate_t=pt or None,
         n_anchors=int(n_anch), anchor_d=float(anch_d[1:]),
         anchor_grade=anch_grade, anchor_hef=anch_hef,
@@ -980,10 +984,16 @@ def render_seismic_study():
                "anchors are designed separately (anchor designer) after the "
                "analysis, so they don't govern the bracing here.")
 
+    from rack15512.cf_sections import STD_1C
     lib, master, master_id = resolve_master(conf.master_id, conf.master_path)
     cfg0 = rackconfig_from_dict(conf.config, master=master)
     blevels = _beam_levels(cfg0)
-    br_opts = ["(frame brace)"] + list(lib.names("bracing") or lib.names())
+    _libbr = [n for n in (lib.names("bracing") or lib.names())
+              if n not in STD_1C]
+    # spine: full 1C family; plan: the 1C60x40-1C80x40 family (heavier)
+    spine_opts = ["(frame brace)"] + STD_1C + _libbr
+    plan_opts = [n for n in STD_1C if "60x40" in n or "80x40" in n] + _libbr
+    ca_opts = [f"(keep: {cfg0.brace_section})"] + STD_1C + _libbr
 
     ui.section("📋", "Seismic parameters (IS 1893:2016)")
     c = st.columns(5)
@@ -1006,8 +1016,8 @@ def render_seismic_study():
     c = st.columns(3)
     da_on = c[0].checkbox("Spine X bracing (down-aisle)",
                           bool(cfg0.spine_bracing) or True)
-    da_sec = c[1].selectbox("Spine section", br_opts,
-                            index=_idx(br_opts, cfg0.spine_bracing_section
+    da_sec = c[1].selectbox("Spine section (1C family)", spine_opts,
+                            index=_idx(spine_opts, cfg0.spine_bracing_section
                                        or "(frame brace)"))
     da_mod = c[2].selectbox(
         "Spine modules (≤ alternate)", ["alternate", "every_3rd"],
@@ -1021,15 +1031,25 @@ def render_seismic_study():
     st.caption(f"Spine is a full-height X tower at the {spine_where}, tied to "
                "the frame(s) by horizontal frame spacers at every level. Plan "
                "bracing is placed only in the spine modules.")
+    st.markdown("**Cross-aisle (CA) frame bracing** — overrides the whole frame")
     c = st.columns(3)
     Hmax = float(cfg0.frame_height or (blevels[-1] if blevels else 3000.0))
     ca_h = c[0].number_input("CA X up to height [mm] (0 = none)", 0.0, Hmax,
                              float(cfg0.ca_x_height or 0.0), 50.0)
-    pl_on = c[1].checkbox("Plan bracing (in spine modules)",
+    ca_sec = c[1].selectbox("CA bracing section (overrides full frame)",
+                            ca_opts, index=0)
+    ca_planes = c[2].number_input("Brace shear planes", 1, 2,
+                                  int(getattr(cfg0, "brace_planes", 1)),
+                                  help="1 = single C, 2 = double / back-to-back "
+                                       "C (affects bolt-shear / bearing).")
+    st.caption("Changing the CA section replaces the cross-aisle diagonal "
+               "member for the whole frame (not added on top).")
+    c = st.columns(3)
+    pl_on = c[0].checkbox("Plan bracing (in spine modules)",
                           bool(cfg0.plan_bracing))
-    pl_sec = c[2].selectbox("Plan section", br_opts,
-                            index=_idx(br_opts, cfg0.plan_bracing_section
-                                       or "(frame brace)"))
+    pl_sec = c[1].selectbox("Plan section (1C 60x40–80x40)", plan_opts,
+                            index=_idx(plan_opts, cfg0.plan_bracing_section
+                                       or plan_opts[0]))
     pl_levels = st.multiselect(
         "Plan bracing at beam levels (≤ alternate)", blevels,
         default=(cfg0.plan_bracing_levels or blevels[::2]),
@@ -1042,10 +1062,12 @@ def render_seismic_study():
         beam_opts, index=_idx(beam_opts, cfg0.spacer_section
                               or "(frame brace)"))
 
+    ca_brace = cfg0.brace_section if ca_sec.startswith("(keep") else ca_sec
     cfg = dataclasses.replace(
         cfg0, seismic=True, seismic_zone=zone, seismic_soil=soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_damping=s_damp,
+        brace_section=ca_brace, brace_planes=int(ca_planes),
         spine_bracing=da_on,
         spine_bracing_section=None if da_sec == "(frame brace)" else da_sec,
         spine_bracing_modules=da_mod, ca_x_height=(ca_h or None),

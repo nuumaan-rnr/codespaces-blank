@@ -180,6 +180,7 @@ class RackConfig:
     bolt_d: Optional[float] = 12.0          # mm (M12)
     bolt_grade: str = "4.6"
     bolts_per_connection: int = 1
+    brace_planes: int = 1              # shear planes of the brace bolt
     # footplate / base plate (BASEPLATE check)
     concrete_fck: float = 25.0              # MPa
     plate_fy: float = 250.0                 # MPa
@@ -271,8 +272,18 @@ def build_rack(cfg: RackConfig) -> RackModel:
         raise ValueError("define at least one beam level "
                          "(RackConfig.levels or beam_levels)")
 
+    def _bracing_section(name):
+        """Resolve a bracing CrossSection; a standard 1C lipped-channel code
+        not in the master is generated on the fly (else fall back per role)."""
+        if name and name not in lib.sections:
+            from .cf_sections import lipped_channel, parse_1c
+            dims = parse_1c(name)
+            if dims:
+                return lipped_channel(name, *dims)
+        return lib.get(_pick(lib, name, "bracing"))
+
     up = lib.get(_pick(lib, cfg.upright_section, "upright"))
-    br = lib.get(_pick(lib, cfg.brace_section, "bracing"))
+    br = _bracing_section(cfg.brace_section)
     beam_secs = {name: lib.get(_pick(lib, name, "beam"))
                  for name in {s for _, s, _ in specs}}
     specs = [(z, _pick(lib, s, "beam"), w) for z, s, w in specs]
@@ -476,13 +487,12 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # ---- seismic bracing: plan (horizontal) and spine (vertical X) ---------
     def _register_brace(name: Optional[str]):
         """Resolve a bracing section by name (fallback to the frame brace),
-        register it on the model, and return its CrossSection name."""
+        register it on the model, and return its CrossSection name.  Section
+        codes of the standard 1C lipped-channel family are generated on the
+        fly when not already in the master."""
         if not name:
             return br.name
-        try:
-            sec = lib.get(_pick(lib, name, "bracing"))
-        except (KeyError, ValueError):
-            return br.name
+        sec = _bracing_section(name)
         fy = cfg.master.fy.get(sec.name) if cfg.master else None
         if fy:
             mat_name = f"steel_fy{fy:.0f}"
@@ -598,6 +608,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.checks.bolt_d = cfg.bolt_d
     m.checks.bolt_grade = cfg.bolt_grade
     m.checks.bolts_per_connection = cfg.bolts_per_connection
+    m.checks.brace_planes = cfg.brace_planes
     pb, pd_, pt = cfg.plate_b, cfg.plate_d, cfg.plate_t
     if pb is None and pd_ is None and pt is None:
         std = standard_footplate(up.depth_h)
