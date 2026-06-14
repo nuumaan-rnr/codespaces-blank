@@ -1161,6 +1161,7 @@ with st.sidebar:
     st.divider()
     st.caption("OpenSees 2nd-order · semi-rigid · units N, mm, MPa")
     st.caption(f"© {B.COMPANY} · {B.WEBSITE}")
+    st.caption(f"build {B.BUILD}")
 
 _VIEWS = {
     "dashboard": render_dashboard,
