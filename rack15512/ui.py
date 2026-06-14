@@ -224,6 +224,29 @@ textarea {{
 .rnr-tile .v {{ color:{v['teal']}; font-size:1.5rem; font-weight:800; }}
 .rnr-chiprow {{ display:flex; gap:8px; flex-wrap:wrap; }}
 .rnr-muted {{ color:var(--muted); }}
+.rnr-topbar {{ display:flex; align-items:center; gap:10px; margin:-8px 0 18px;
+  padding:9px 16px; border-radius:12px; font-size:.86rem; font-weight:600;
+  background:linear-gradient(90deg,{v['teal']}14,{v['teal']}05);
+  border:1px solid {v['teal']}33; color:var(--text); }}
+.rnr-topbar .ic {{ font-size:1rem; }}
+.rnr-cmp {{ background:var(--surface); border:1px solid var(--border);
+  border-radius:16px; padding:6px 16px 14px; box-shadow:var(--shadow);
+  height:100%; }}
+.rnr-cmp-head {{ display:flex; align-items:center; justify-content:space-between;
+  gap:8px; padding:12px 0 10px; border-bottom:1px solid var(--border);
+  margin-bottom:6px; }}
+.rnr-cmp-head .t {{ font-weight:800; font-size:1.05rem; color:var(--text);
+  letter-spacing:-.01em; }}
+.rnr-cmp-row {{ padding:8px 0; border-bottom:1px solid var(--border); }}
+.rnr-cmp-row:last-child {{ border-bottom:none; }}
+.rnr-cmp-row .k {{ font-size:.72rem; color:var(--muted); font-weight:600;
+  text-transform:uppercase; letter-spacing:.05em; }}
+.rnr-cmp-row .v {{ font-size:1.02rem; font-weight:700; color:var(--text);
+  margin-top:1px; }}
+.rnr-cmp-bar {{ margin-top:6px; height:6px; border-radius:999px;
+  background:var(--surface2); border:1px solid var(--border);
+  overflow:hidden; }}
+.rnr-cmp-bar span {{ display:block; height:100%; border-radius:999px; }}
 #MainMenu, footer, [data-testid="stToolbar"] {{ visibility:hidden; }}
 </style>""", unsafe_allow_html=True)
 
@@ -296,3 +319,51 @@ def theme_toggle() -> None:
     cur = st.toggle("🌙 Dark mode", key="dark_mode")
     if cur != load_dark_pref():
         _save_dark_pref(cur)
+
+
+def toast_verdict(verdict: str) -> None:
+    """Pop a short toast announcing the analysis outcome."""
+    v = (verdict or "").upper()
+    if v == "PASS":
+        st.toast("Analysis complete — design **PASSES** EN 15512.", icon="✅")
+    elif v == "FAIL":
+        st.toast("Analysis complete — design **FAILS** one or more checks.",
+                 icon="⚠️")
+    else:
+        st.toast("Analysis complete.", icon="✅")
+
+
+def topbar(message: str, kind: str = "info") -> None:
+    """A slim announcement strip pinned across the top of the page."""
+    palette = {
+        "info": ("teal", "💡"),
+        "tip": ("teal", "✨"),
+        "warn": ("grey", "⚠️"),
+    }
+    _, icon = palette.get(kind, palette["info"])
+    st.markdown(
+        f'<div class="rnr-topbar"><span class="ic">{icon}</span>'
+        f'<span>{_html.escape(message)}</span></div>',
+        unsafe_allow_html=True)
+
+
+def compare_card(title: str, rows, verdict: str = "") -> str:
+    """Render one configuration column for the side-by-side comparison.
+
+    rows = [(label, value, ratio_or_None)]; ratio in [0,1] draws a util bar.
+    """
+    head = (f'<div class="rnr-cmp-head"><div class="t">{_html.escape(title)}'
+            f'</div>{pill(verdict) if verdict else ""}</div>')
+    body = []
+    for label, value, ratio in rows:
+        bar = ""
+        if ratio is not None:
+            pct = max(0.0, min(float(ratio), 1.0)) * 100
+            over = float(ratio) > 1.0
+            col = "#e35335" if over else "var(--teal)"
+            bar = (f'<div class="rnr-cmp-bar"><span style="width:{pct:.0f}%;'
+                   f'background:{col}"></span></div>')
+        body.append(
+            f'<div class="rnr-cmp-row"><div class="k">{_html.escape(label)}'
+            f'</div><div class="v">{_html.escape(str(value))}</div>{bar}</div>')
+    return f'<div class="rnr-cmp">{head}{"".join(body)}</div>'

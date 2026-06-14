@@ -29,6 +29,20 @@ def test_palettes_have_required_keys():
     assert ui._LIGHT["teal"].startswith("#") and ui._DARK["teal"].startswith("#")
 
 
+def test_compare_card_html():
+    rows = [("Governing util.", "0.77", 0.77),
+            ("Module", "single", None),
+            ("util · STRESS", "1.20", 1.2)]
+    h = ui.compare_card("Cfg A", rows, verdict="PASS")
+    assert "rnr-cmp" in h and "Cfg A" in h
+    assert "rnr-pill pass" in h            # verdict pill embedded
+    assert "Governing util." in h and "0.77" in h
+    # util bars only where a ratio is given
+    assert h.count("rnr-cmp-bar") == 2
+    # over-unity ratio drawn red
+    assert "#e35335" in h
+
+
 def test_dark_pref_roundtrip(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert ui.load_dark_pref() is False        # no file -> default light

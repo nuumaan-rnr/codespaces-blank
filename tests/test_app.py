@@ -91,5 +91,38 @@ def test_view_saved_config_shows_results(tmp_path, monkeypatch):
     assert "Governing" in md and "STRESS" in md
 
 
+def test_compare_view_shows_two_configs(tmp_path, monkeypatch):
+    if not os.path.exists(MASTER):
+        pytest.skip("Master.xlsx not present")
+    monkeypatch.chdir(tmp_path)
+    from rack15512.builder import LevelSpec, RackConfig
+    from rack15512.master_store import MasterStore
+    from rack15512.project import ProjectStore
+    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    ps = ProjectStore("projects")
+    proj = ps.create_project("Job")
+    sysm = ps.add_system(proj.id, "A1")
+    for nm, util in (("Cfg A", 0.77), ("Cfg B", 1.10)):
+        cfg = RackConfig(n_bays=1,
+                         levels=[LevelSpec(1500.0, "RHS 112x50x2.0", 20000.0)],
+                         upright_section="UP0016", brace_section="C 36X21X1.5")
+        conf = ps.add_configuration(proj.id, sysm.id, nm, cfg,
+                                    master_id="standard")
+        ps.update_run_summary(proj.id, sysm.id, conf.id, {
+            "verdict": "PASS" if util <= 1 else "FAIL", "n_cases": 16,
+            "governing": {"check": "STRESS", "target": "member 9",
+                          "utilization": util},
+            "max_utilization_by_check": {"STRESS": util}})
+
+    at = AppTest.from_file(APP, default_timeout=90)
+    _setss(at, view="compare", project_id=proj.id)
+    at.run()
+    assert not at.exception
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "rnr-cmp" in md                 # comparison cards rendered
+    assert "Cfg A" in md and "Cfg B" in md
+    assert "util · STRESS" in md
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

@@ -140,6 +140,41 @@ def master_selector(default_id=None):
 
 
 # ----------------------------------------------------------- configuration
+def _config_warnings(cfg, lib):
+    """Lightweight pre-flight checks shown inline before running."""
+    w = []
+    names = set(lib.sections)
+    if cfg.upright_section not in names:
+        w.append(("warn", f"Upright '{cfg.upright_section}' is not in the "
+                          "selected master — the first upright will be used."))
+    if cfg.brace_section not in names:
+        w.append(("warn", f"Bracing '{cfg.brace_section}' is not in the "
+                          "master — the first bracing will be used."))
+    levels = cfg.levels or []
+    for k, l in enumerate(levels, 1):
+        if l.beam_section and l.beam_section not in names:
+            w.append(("warn", f"Level {k} beam '{l.beam_section}' is not in "
+                              "the master — the first beam will be used."))
+    top = (sum(l.gap for l in levels) if levels
+           else (max(cfg.beam_levels) if cfg.beam_levels else 0))
+    H = cfg.frame_height or top
+    if H + 1 < top:
+        w.append(("error", f"Frame height {H:.0f} mm is below the top beam "
+                           f"level {top:.0f} mm."))
+    if cfg.bracing_start >= H:
+        w.append(("warn", "First horizontal is at/above the frame top — the "
+                          "frame will have no bracing."))
+    if cfg.module == "back-to-back" and cfg.b2b_gap <= 0:
+        w.append(("error", "Back-to-back gap must be greater than 0."))
+    if levels and all((l.pallet_load or 0) <= 0 for l in levels):
+        w.append(("warn", "All pallet loads are zero — only self-weight "
+                          "and dead load will be applied."))
+    if 0 < cfg.accidental_height >= H and cfg.include_accidental:
+        w.append(("warn", "Accidental-load height is above the frame top; "
+                          "it will be ignored."))
+    return w
+
+
 def configuration_form(lib, master, cfg0: RackConfig | None):
     """Render the full configuration form; return a RackConfig (master not
     attached). cfg0 pre-fills the widgets when editing."""
@@ -306,6 +341,8 @@ def _idx(options, value):
 
 # --------------------------------------------------------------- dashboard
 def render_dashboard():
+    ui.topbar("Tip: run a few configurations, then use Compare to see their "
+              "EN 15512 utilisations side by side.", kind="tip")
     ui.hero("Storage Rack Design", "Design, verify and document selective "
             "pallet racking to EN 15512 — second-order analysis with "
             "semi-rigid connections.", eyebrow=f"{B.COMPANY} · {B.PRODUCT}")
@@ -407,11 +444,16 @@ def render_project():
     ui.hero(proj.name, meta, eyebrow="Project",
             crumbs=["Dashboard", proj.name])
 
-    with st.expander("➕ Add a system"):
+    n_total_cfg = sum(len(s.configurations) for s in proj.systems)
+    hc = st.columns([3, 1])
+    with hc[0].expander("➕ Add a system"):
         sn = st.text_input("System name", key="newsysname")
         if st.button("Add system") and sn.strip():
             sysm = PSTORE.add_system(proj.id, sn)
             goto("project", project_id=proj.id, system_id=sysm.id)
+    if n_total_cfg >= 2 and hc[1].button("⚖️ Compare configurations",
+                                         use_container_width=True):
+        goto("compare", project_id=proj.id)
 
     if not proj.systems:
         st.info("Add a system, then create a configuration in it.")
@@ -576,7 +618,7 @@ def render_view_config():
                 lambda progress: run_configuration(
                     PSTORE, proj.id, sysm.id, conf.id, progress=progress),
                 label="OpenSees second-order analysis")
-            st.success(f"{summary['verdict']}")
+            ui.toast_verdict(summary["verdict"])
             st.rerun()
 
     with t_report:
@@ -654,6 +696,100 @@ def render_view_config():
         st.json(conf.config)
 
 
+# --------------------------------------------------- compare configurations
+def _config_facts(conf):
+    """Pull comparable facts out of a stored configuration."""
+    cfg = conf.config or {}
+    rs = conf.run_summary or {}
+    gov = rs.get("governing") or {}
+    levels = cfg.get("levels") or []
+    return {
+        "verdict": rs.get("verdict", "not run"),
+        "governing": gov.get("check", "—"),
+        "gov_util": gov.get("utilization"),
+        "max_stress": rs.get("max_stress"),
+        "by_check": rs.get("max_utilization_by_check", {}) or {},
+        "module": cfg.get("module", "single"),
+        "n_bays": cfg.get("n_bays", "—"),
+        "bay_width": cfg.get("bay_width", "—"),
+        "depth": cfg.get("depth", "—"),
+        "n_levels": len(levels),
+        "frame_height": cfg.get("frame_height", "—"),
+        "upright": cfg.get("upright_section", "—"),
+        "brace": cfg.get("brace_section", "—"),
+    }
+
+
+def _fmt(x):
+    return f"{x:g}" if isinstance(x, (int, float)) else str(x)
+
+
+def render_compare():
+    proj = PSTORE.load(ss.project_id)
+    if st.button("← Back to project"):
+        goto("project", project_id=proj.id)
+    ui.hero("Compare Configurations", proj.name, eyebrow="Comparison",
+            crumbs=["Dashboard", proj.name, "Compare"])
+
+    # flat list of (label, system, conf) across all systems
+    choices = []
+    for sysm in proj.systems:
+        for conf in sysm.configurations:
+            choices.append((f"{sysm.name} · {conf.name}  [{conf.id}]",
+                            sysm, conf))
+    if len(choices) < 2:
+        ui.empty_state("⚖️", "Need at least two configurations",
+                       "Create and run a few configurations, then compare "
+                       "their utilisations side by side.")
+        return
+
+    labels = [c[0] for c in choices]
+    picked = st.multiselect("Configurations to compare", labels,
+                            default=labels[:min(3, len(labels))],
+                            max_selections=4)
+    if len(picked) < 2:
+        st.info("Pick at least two configurations.")
+        return
+
+    sel = [choices[labels.index(p)] for p in picked]
+
+    # union of all check names, for aligned utilisation rows
+    facts = [(_label, _config_facts(conf)) for _label, _sysm, conf in sel]
+    all_checks = []
+    for _, f in facts:
+        for k in f["by_check"]:
+            if k not in all_checks:
+                all_checks.append(k)
+
+    cols = st.columns(len(sel))
+    for col, (_lbl, _sysm, conf) in zip(cols, sel):
+        f = _config_facts(conf)
+        rows = [
+            ("Governing check", f["governing"], None),
+            ("Governing util.",
+             _fmt(f["gov_util"]) if f["gov_util"] is not None else "—",
+             f["gov_util"]),
+            ("Max stress util.",
+             _fmt(f["max_stress"]) if f["max_stress"] is not None else "—",
+             f["max_stress"]),
+            ("Module", f["module"], None),
+            ("Bays × span",
+             f"{_fmt(f['n_bays'])} × {_fmt(f['bay_width'])} mm", None),
+            ("Levels / height",
+             f"{f['n_levels']} / {_fmt(f['frame_height'])} mm", None),
+            ("Upright / brace", f"{f['upright']} / {f['brace']}", None),
+        ]
+        for chk in all_checks:
+            val = f["by_check"].get(chk)
+            rows.append((f"util · {chk}",
+                         _fmt(val) if val is not None else "—", val))
+        col.markdown(ui.compare_card(conf.name, rows, verdict=f["verdict"]),
+                     unsafe_allow_html=True)
+
+    st.caption("Utilisation bars are filled relative to 1.0; red means the "
+               "ratio exceeds unity (fails that check).")
+
+
 # ----------------------------------------------------- create/edit a config
 def render_configure():
     proj = PSTORE.load(ss.project_id)
@@ -672,6 +808,12 @@ def render_configure():
 
     cfg = configuration_form(lib, master, ss.edit_cfg)
     notes = st.text_input("Notes", "")
+
+    # pre-flight validation hints
+    warns = _config_warnings(cfg, lib)
+    errs = [m for lvl, m in warns if lvl == "error"]
+    for lvl, m in warns:
+        (st.error if lvl == "error" else st.warning)(m)
 
     c = st.columns(3)
     if c[0].button("👁 Preview model", use_container_width=True):
@@ -701,6 +843,7 @@ def render_configure():
                 lambda progress: run_configuration(
                     PSTORE, proj.id, sysm.id, conf.id, progress=progress),
                 label="OpenSees second-order analysis")
+            ui.toast_verdict(summary["verdict"])
             # popup with cases/combinations/convergence/stress + results link
             _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
 
@@ -813,6 +956,7 @@ _VIEWS = {
     "project": render_project,
     "configure": render_configure,
     "view_config": render_view_config,
+    "compare": render_compare,
     "masters": render_masters,
 }
 _VIEWS.get(ss.view, render_dashboard)()
