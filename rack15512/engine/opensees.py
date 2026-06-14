@@ -100,23 +100,41 @@ class OpenSeesEngine:
         from ..results import ModalResult
         try:
             self._build(model, order=1, geom_sway=None)
+            # negligible regularizing mass on every node's translational DOFs so
+            # the banded ARPACK solver has a non-singular mass matrix (many rack
+            # DOFs carry no lumped mass); too small to affect the real modes.
+            tiny = max(sum(masses.values()) * 1.0e-9, 1.0e-12)
+            for tag in self._node_tag.values():
+                ops.mass(tag, tiny, tiny, tiny, 0.0, 0.0, 0.0)
             for nid, mss in masses.items():
                 tag = self._node_tag.get(nid)
                 if tag is not None and mss > 0.0:
-                    ops.mass(tag, mss, mss, mss, 0.0, 0.0, 0.0)
+                    ops.mass(tag, mss + tiny, mss + tiny, mss + tiny,
+                             0.0, 0.0, 0.0)
             ops.constraints("Transformation")
             ops.numberer("RCM")
-            ops.system("FullGeneral")
             ops.test("NormDispIncr", 1.0e-6, 50)
             ops.algorithm("Linear")
             ops.integrator("LoadControl", 1.0)
             ops.analysis("Static")
             n = max(1, min(int(n_modes), len(self._node_tag) * 3 - 1))
-            eigvals = ops.eigen("-fullGenLapack", n)
+            # Prefer the fast banded ARPACK solver; only fall back to the dense
+            # (very slow) LAPACK solver if ARPACK fails or returns junk.
+            eigvals = None
+            for solver, sysname in (("-genBandArpack", "BandGeneral"),
+                                    ("-fullGenLapack", "FullGeneral")):
+                try:
+                    ops.system(sysname)
+                    ev = ops.eigen(solver, n)
+                    if ev and all(v is not None and v > 0.0 for v in ev):
+                        eigvals = ev
+                        break
+                except Exception:
+                    continue
+            if eigvals is None:
+                raise ValueError("eigen returned no valid eigenvalues")
             periods, omega2 = [], []
             for w2 in eigvals:
-                if w2 is None or w2 <= 0.0:
-                    raise ValueError("non-positive eigenvalue")
                 omega2.append(w2)
                 periods.append(2.0 * math.pi / math.sqrt(w2))
             shapes: Dict[int, List[Tuple[float, float, float]]] = {}
@@ -294,6 +312,11 @@ class OpenSeesEngine:
     def _apply_loads(self, model: RackModel, loads: AssembledLoads) -> None:
         ops.timeSeries("Linear", 1)
         ops.pattern("Plain", 1, 1)
+        self._apply_load_values(model, loads)
+
+    def _apply_load_values(self, model: RackModel,
+                           loads: AssembledLoads) -> None:
+        """Apply load values into the currently-open load pattern."""
         for nid, f in loads.nodal.items():
             ops.load(self._node_tag[nid], *f)
         for mid, (qx, qy, qz) in loads.member.items():
@@ -313,6 +336,49 @@ class OpenSeesEngine:
                 ops.eleLoad("-ele", seg.ele_tag, "-type", "-beamUniform",
                             wy, wz, wx)
 
+    def run_static_batch(self, model: RackModel, jobs: List[dict]
+                         ) -> List[CaseResult]:
+        """Build the (linear) model ONCE and solve several independent load
+        cases, returning one CaseResult each.  Used for the seismic per-mode
+        recovery and gravity rows so the model is not rebuilt per case (the
+        rebuild dominates the cost for a braced rack)."""
+        results: List[CaseResult] = []
+        self._build(model, order=1, geom_sway=None)
+        for i, job in enumerate(jobs, start=1):
+            # clear any member UDLs left on the segments from a previous job
+            for mm in self._members.values():
+                for seg in mm.segments:
+                    seg.wx = seg.wy = seg.wz = 0.0
+            ops.timeSeries("Linear", i)
+            ops.pattern("Plain", i, i)
+            self._apply_load_values(model, job["loads"])
+            ok = self._solve_linear()
+            res = CaseResult(name=job["name"], combo=job["combo"],
+                             kind=job["kind"], order=1, converged=ok)
+            if ok:
+                self._collect(model, res, with_defl=False)
+            results.append(res)
+            ops.remove("loadPattern", i)
+            ops.reset()
+            ops.wipeAnalysis()
+        ops.wipe()
+        return results
+
+    def _solve_linear(self) -> bool:
+        """Single-factorization linear static solve for the batch (no Newton
+        iteration); a sparse direct solver where available, else banded."""
+        ops.constraints("Transformation")
+        ops.numberer("RCM")
+        try:
+            ops.system("UmfPack")
+        except Exception:
+            ops.system("BandGeneral")
+        ops.test("NormDispIncr", 1.0e-8, 1)
+        ops.algorithm("Linear")
+        ops.integrator("LoadControl", 1.0)
+        ops.analysis("Static")
+        return ops.analyze(1) == 0
+
     # ------------------------------------------------------------------ solve
     def _solve(self, model: RackModel, n_steps: int) -> bool:
         st = model.analysis
@@ -326,7 +392,8 @@ class OpenSeesEngine:
         return ops.analyze(n_steps) == 0
 
     # ---------------------------------------------------------------- results
-    def _collect(self, model: RackModel, res: CaseResult) -> None:
+    def _collect(self, model: RackModel, res: CaseResult,
+                 with_defl: bool = True) -> None:
         for nid, tag in self._node_tag.items():
             res.displacements[nid] = tuple(ops.nodeDisp(tag))
 
@@ -343,9 +410,10 @@ class OpenSeesEngine:
             res.reactions[sup.node] = tuple(r)
 
         for mid, mmap in self._members.items():
-            res.members[mid] = self._member_result(mmap)
+            res.members[mid] = self._member_result(mmap, with_defl)
 
-    def _member_result(self, mmap: _MemberMap) -> MemberResult:
+    def _member_result(self, mmap: _MemberMap,
+                       with_defl: bool = True) -> MemberResult:
         mr = MemberResult(member=mmap.member.id, length=mmap.length)
 
         if mmap.truss_tag is not None:
@@ -355,12 +423,15 @@ class OpenSeesEngine:
             return mr
 
         # local transverse displacements of nodes, for chord deflections
+        # (skipped for the seismic batch - member deflection is not checked at
+        # ULS/SEISMIC, and the per-node displacements are collected separately)
         def local_vw(tag: int) -> Tuple[float, float]:
             d = ops.nodeDisp(tag)
             return (_dot(d[:3], mmap.yh), _dot(d[:3], mmap.zh))
 
-        v_i, w_i = local_vw(mmap.segments[0].tag_i)
-        v_j, w_j = local_vw(mmap.segments[-1].tag_j)
+        if with_defl:
+            v_i, w_i = local_vw(mmap.segments[0].tag_i)
+            v_j, w_j = local_vw(mmap.segments[-1].tag_j)
 
         def chord_defl(tag: int, x: float) -> Tuple[float, float]:
             v, w = local_vw(tag)
@@ -398,6 +469,9 @@ class OpenSeesEngine:
                 if k > 0 and x == 0.0:
                     continue                     # avoid duplicate stations
                 st = section_forces(x)
+                if not with_defl:
+                    mr.stations.append(st)
+                    continue
                 if x == 0.0:
                     st.defl_y, st.defl_z = chord_defl(seg.tag_i, seg.x_start)
                 elif x == seg.length:

@@ -52,9 +52,12 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
 
     step("Building the 3D model", 0.10)
     model = build_rack(cfg)
-    step("Running second-order analysis (all combinations)", 0.30)
-    cases = run_all(model)
-    step("Verifying EN 15512 design checks", 0.75)
+    seismic_on = bool(model.seismic and model.seismic.enabled)
+    step("Running second-order analysis (gravity combinations)", 0.30)
+    # run_all reports finer seismic sub-stages (0.45..0.72) via `progress`
+    cases = run_all(model, progress=progress)
+    step("Verifying " + ("EN 15512 + IS 1893 design checks" if seismic_on
+                         else "EN 15512 design checks"), 0.75)
     checks = run_checks(model, cases)
     step("Writing report and plots", 0.90)
 

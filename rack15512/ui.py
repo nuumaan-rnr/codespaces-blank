@@ -11,6 +11,7 @@ from __future__ import annotations
 import html as _html
 import json as _json
 import os as _os
+import time as _time
 
 import streamlit as st
 
@@ -77,7 +78,19 @@ html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"] {{
 .stApp, [data-testid="stAppViewContainer"] {{
   background:var(--bg); color:var(--text);
 }}
-[data-testid="stHeader"] {{ background:transparent; }}
+[data-testid="stHeader"] {{ background:transparent; z-index:1000000; }}
+/* keep the sidebar expand control visible + clickable after collapsing
+   (covers the several test-ids Streamlit has used across versions) */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stExpandSidebarButton"],
+[data-testid="baseButton-headerNoPadding"] {{
+  display:flex !important; visibility:visible !important; opacity:1 !important;
+  z-index:1000002 !important; color:var(--text) !important;
+  background:var(--surface) !important; border:1px solid var(--border);
+  border-radius:8px;
+}}
 [data-testid="stMain"] .block-container {{
   padding-top:2.2rem; padding-bottom:4rem; max-width:1280px;
   animation:fade .5s ease;
@@ -301,17 +314,28 @@ def section(icon: str, title: str) -> None:
 
 
 def run_with_status(run_fn, label="Running analysis"):
-    """Execute run_fn(progress=cb) showing a staged status box and a
-    progress bar; returns run_fn's result."""
+    """Execute run_fn(progress=cb) showing a staged status box, a progress bar,
+    and the elapsed time; returns run_fn's result.  Each stage line carries the
+    running elapsed time, so the most recent (bottom) line always shows it; the
+    stages cover both the second-order analysis and the seismic run."""
     box = st.status(f"⚙️  {label}…", expanded=True)
     bar = box.progress(0.0)
+    start = _time.time()
 
     def cb(stage, frac):
         bar.progress(min(max(frac, 0.0), 1.0))
-        box.write(f"• {stage}")
-    result = run_fn(progress=cb)
-    box.update(label="✅  Analysis complete", state="complete",
-               expanded=False)
+        box.write(f"• {stage}  ·  ⏱ {_time.time() - start:.0f}s")
+    try:
+        result = run_fn(progress=cb)
+    except Exception as exc:                      # surface failures, don't hang
+        box.update(label=f"❌  Run failed after {_time.time()-start:.0f}s",
+                   state="error", expanded=True)
+        box.write(f"Error: {exc}")
+        raise
+    total = _time.time() - start
+    bar.progress(1.0)
+    box.update(label=f"✅  Analysis complete in {total:.0f}s",
+               state="complete", expanded=False)
     return result
 
 

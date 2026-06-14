@@ -350,9 +350,17 @@ def _storey_results(cr: CaseResult, model: RackModel, E, s) -> None:
 
 
 # ------------------------------------------------------------------ orchestrator
-def run_seismic(model: RackModel) -> List[CaseResult]:
-    """Run the full IS 1893 modal RSA and return the SEISMIC design cases."""
+def run_seismic(model: RackModel, progress=None) -> List[CaseResult]:
+    """Run the full IS 1893 modal RSA and return the SEISMIC design cases.
+
+    ``progress(stage, frac)`` (frac absolute 0..1) is called for each phase so
+    the UI can show a live status / progress bar for the seismic run."""
     from .engine.opensees import OpenSeesEngine
+
+    def step(stage, frac):
+        if progress:
+            progress(stage, frac)
+
     s = model.seismic
     if not s or not s.enabled:
         return []
@@ -363,52 +371,59 @@ def run_seismic(model: RackModel) -> List[CaseResult]:
     if total_W <= 0.0:
         return []
 
-    # ---- modal analysis, auto-increasing modes for >=90% mass (Cl 7.7.5.2) ---
-    modal = None
-    n = s.n_modes
-    while n <= s.max_modes:
-        modal = engine.modal(model, masses, n)
-        if not modal.converged:
-            break
-        capt = max(_captured(weights, modal.shapes, 0, total_W),
-                   _captured(weights, modal.shapes, 1, total_W))
-        if capt >= 0.90 or n >= s.max_modes:
-            break
-        n = min(n * 2, s.max_modes)
+    # ---- modal analysis (Cl 7.7.5.2): request enough modes for >=90% mass in
+    # a single build; eigen returns the lowest modes and the per-mode static
+    # recovery is cheap, so we ask for max_modes once rather than rebuilding.
+    step("Seismic: modal (eigenvalue) analysis", 0.45)
+    n = max(s.n_modes, min(s.max_modes, len(model.nodes) * 3 - 1))
+    modal = engine.modal(model, masses, n)
 
     envs: Dict[str, SeismicEnvelope] = {}
     method = "RSA"
+    grav_jobs = [{"loads": assemble(model, _gravity_combo(r[1], r[2], model)),
+                  "name": f"_grav{r[0]}", "combo": r[0], "kind": "SEISMIC",
+                  "_grav": True} for r in s.combos]
     if modal and modal.converged and modal.periods:
+        nmodes = len(modal.periods)
+        step(f"Seismic: response spectrum, {nmodes} modes — recovering forces "
+             "(single build, all modes + combinations)", 0.52)
+        # ONE build for every per-mode recovery AND every gravity row
+        mode_jobs = []
         for comp, d in ((0, "X"), (1, "Y")):
-            per_mode = []
             for k, Tk in enumerate(modal.periods):
                 Ah = horizontal_seismic_coefficient(Tk, s)
-                loads = modal_force_loads(model, weights, modal.shapes, k,
-                                          comp, Ah)
-                per_mode.append(engine.run_case(
-                    model, loads, name=f"_m{k}{d}", combo="seismic",
-                    kind="SEISMIC", order=1))
+                mode_jobs.append({"loads": modal_force_loads(
+                    model, weights, modal.shapes, k, comp, Ah),
+                    "name": f"_m{k}{d}", "combo": "seismic",
+                    "kind": "SEISMIC", "_d": d})
+        allres = engine.run_static_batch(model, mode_jobs + grav_jobs)
+        recovered = allres[:len(mode_jobs)]
+        grav_results = allres[len(mode_jobs):]
+        step("Seismic: SRSS modal combination + base-shear scaling", 0.62)
+        for comp, d in ((0, "X"), (1, "Y")):
+            per_mode = [r for r, j in zip(recovered, mode_jobs)
+                        if j["_d"] == d]
             env = srss_envelope(per_mode, modal.periods, d, s)
             _scale_to_static(env, model, weights, modal.shapes, modal.periods,
                              s, comp, total_W)
             envs[d] = env
     else:
         method = "ELF"
+        step("Seismic: equivalent static (ELF) fallback", 0.55)
         for comp, d in ((0, "X"), (1, "Y")):
             envs[d] = _elf_envelope(engine, model, weights, total_W, s, comp, d)
+        grav_results = engine.run_static_batch(model, grav_jobs)
 
+    step("Seismic: directional (100%+30%) + design combinations", 0.66)
     E = _directional(envs["X"], envs["Y"])
 
     cases: List[CaseResult] = []
-    for row in s.combos:
-        _, f_d, f_il, _ = row
-        grav = engine.run_case(
-            model, assemble(model, _gravity_combo(f_d, f_il, model)),
-            name=f"_grav{row[0]}", combo=row[0], kind="SEISMIC", order=1)
+    for row, grav in zip(s.combos, grav_results):
         if grav.converged:
             cases += superpose_seismic_cases(grav, E, model, row, s)
 
     model.seismic_summary = _summary(model, s, modal, envs, method, total_W)
+    step("Seismic: complete", 0.72)
     return cases
 
 

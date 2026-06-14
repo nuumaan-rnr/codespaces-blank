@@ -333,7 +333,7 @@ class SeismicSettings:
     damping: float = 0.05          # for CQC
     imposed_factor: float = 0.5    # kappa: share of pallet load in seismic mass
     n_modes: int = 6               # initial/min eigen request
-    max_modes: int = 30            # cap when auto-increasing for 90% mass
+    max_modes: int = 12            # cap when auto-increasing for 90% mass
     combination: str = "SRSS"      # 'SRSS' | 'CQC'
     include_self_mass: bool = True  # add member A*L*rho to the lumped mass
     apply_base_shear_scaling: bool = True   # Cl 7.7.3

@@ -13,7 +13,7 @@ from .model import DIRECTION_VECTORS, RackModel
 from .results import CaseResult
 
 
-def run_all(model: RackModel) -> List[CaseResult]:
+def run_all(model: RackModel, progress=None) -> List[CaseResult]:
     errors = model.validate()
     if errors:
         raise ValueError("Model validation failed:\n  " + "\n  ".join(errors))
@@ -61,6 +61,6 @@ def run_all(model: RackModel) -> List[CaseResult]:
 
     if model.seismic and model.seismic.enabled:
         from .seismic import run_seismic
-        results += run_seismic(model)
+        results += run_seismic(model, progress=progress)
 
     return results
