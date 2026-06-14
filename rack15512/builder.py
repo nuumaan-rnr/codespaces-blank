@@ -225,6 +225,10 @@ class RackConfig:
     seismic_damping: float = 0.05
     seismic_imposed_factor: float = 0.5    # kappa (share of pallet load)
     seismic_n_modes: int = 6
+    # storey-drift limit Δ/h and P-Δ theta cap (rack values per EN 1998-1 /
+    # EN 16681; IS 1893 has no rack-specific code)
+    seismic_drift_limit: float = 0.010
+    seismic_theta_max: float = 0.30
 
 
 def bracing_elevations(cfg: RackConfig, frame_height: float) -> List[float]:
@@ -749,6 +753,8 @@ def build_rack(cfg: RackConfig) -> RackModel:
             structure_type=cfg.seismic_structure_type,
             damping=cfg.seismic_damping,
             imposed_factor=cfg.seismic_imposed_factor,
-            n_modes=cfg.seismic_n_modes)
+            n_modes=cfg.seismic_n_modes,
+            drift_limit_ratio=cfg.seismic_drift_limit,
+            theta_max=cfg.seismic_theta_max)
 
     return m

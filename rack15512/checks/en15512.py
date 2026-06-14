@@ -781,10 +781,12 @@ def _seismic_pdelta_checks(model: RackModel,
                            case: CaseResult) -> List[CheckResult]:
     """P-Delta stability coefficient theta = P*Delta/(V*h) per storey.
 
-    theta<=0.10 -> P-Delta negligible (informative); 0.10<theta<=0.25 -> the
-    seismic forces should be amplified by 1/(1-theta); theta>0.25 -> fail."""
+    theta<=0.10 -> P-Delta negligible (informative); 0.10<theta<=theta_max ->
+    amplify the seismic effects by 1/(1-theta); theta>theta_max -> fail.
+    theta_max = 0.30 for racks per EN 1998-1 §4.4.2.2 (configurable)."""
     s = model.seismic
     cap = s.theta_limit if s else 0.10
+    theta_max = (s.theta_max if s and getattr(s, "theta_max", None) else 0.30)
     levels = _storey_levels(model)
     z_min = levels[0]
     # total seismic weight above each level, from the lumped node weights
@@ -813,10 +815,11 @@ def _seismic_pdelta_checks(model: RackModel,
         theta = (P * d) / (V * h) if V > 1e-9 else 0.0
         res.append(CheckResult(
             "SEISMIC_PDELTA", case.name, f"storey z={lo:.0f}-{hi:.0f}", "frame",
-            theta / 0.25,
+            theta / theta_max,
             f"theta={theta:.3f} (P={P/1e3:.0f} kN, V={V/1e3:.0f} kN, "
-            f"delta={d:.2f} mm, h={h:.0f} mm); <=0.10 P-Delta negligible, "
-            f">0.25 fails", informative=(theta <= cap)))
+            f"delta={d:.2f} mm, h={h:.0f} mm); <={cap:.2f} negligible, "
+            f"<={theta_max:.2f} amplify 1/(1-theta), >{theta_max:.2f} fails "
+            "(EN 1998-1 4.4.2.2)", informative=(theta <= cap)))
     return res
 
 

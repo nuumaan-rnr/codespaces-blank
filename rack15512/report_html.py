@@ -80,13 +80,17 @@ CLAUSES = {
                  "included in the analysis."),
     "STABILITY": ("EN 15512 §9.7.2",
                   "Second-order equilibrium / elastic stability."),
-    "SEISMIC_DRIFT": ("IS 1893:2016 Cl 7.11.1",
-                      "Seismic inter-storey drift ratio Δ/h ≤ 0.004 under the "
-                      "design seismic combinations."),
-    "SEISMIC_PDELTA": ("IS 1893:2016 Cl 7.x (stability coefficient)",
+    "SEISMIC_DRIFT": ("EN 1998-1 §4.4.3.2 / EN 16681 §8.5 (IS 1893 Cl 7.11.1)",
+                      "Inter-storey drift ratio Δ/h under the unfactored "
+                      "1.0(DL+EL) seismic case (partial load factor 1.0). Limit "
+                      "is rack-specific: racks have no brittle attachments, so "
+                      "EN 1998-1/EN 16681 permit up to 0.010·h (vs the IS 1893 "
+                      "building value 0.004·h); the applied limit is shown in "
+                      "each row."),
+    "SEISMIC_PDELTA": ("EN 1998-1 §4.4.2.2 (stability coefficient)",
                        "P-Δ stability coefficient θ = P·Δ/(V·h); θ≤0.10 P-Δ "
-                       "negligible, 0.10<θ≤0.25 amplify by 1/(1−θ), θ>0.25 "
-                       "not permitted."),
+                       "negligible, 0.10<θ≤0.30 amplify effects by 1/(1−θ), "
+                       "θ>0.30 not permitted (rack cap)."),
 }
 
 

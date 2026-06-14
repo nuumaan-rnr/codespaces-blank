@@ -338,8 +338,13 @@ class SeismicSettings:
     combination: str = "SRSS"      # 'SRSS' | 'CQC'
     include_self_mass: bool = True  # add member A*L*rho to the lumped mass
     apply_base_shear_scaling: bool = True   # Cl 7.7.3
-    drift_limit_ratio: float = 0.004        # Cl 7.11.1
-    theta_limit: float = 0.10               # P-Delta stability (informative)
+    # storey-drift limit ratio Δ/h.  Racks have no brittle non-structural
+    # attachments, so EN 1998-1 §4.4.3.2 / EN 16681 §8.5 permit larger drifts
+    # than the IS 1893 Cl 7.11.1 building value (0.004): 0.005 brittle, 0.0075
+    # ductile, 0.010 none (racks).  Default to the rack value; overridable.
+    drift_limit_ratio: float = 0.010
+    theta_limit: float = 0.10               # P-Δ negligible threshold (EN 4.4.2)
+    theta_max: float = 0.30                 # P-Δ not permitted (EN 1998-1 4.4.2.2)
     # IS 800 LSD seismic combination rows: (label, f_dead, f_imposed, f_seismic)
     combos: Tuple[Tuple[str, float, float, float], ...] = (
         ("1.2(DL+IL+EL)", 1.2, 1.2, 1.2),

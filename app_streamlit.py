@@ -1012,6 +1012,39 @@ def render_seismic_study():
     st.caption(f"Z = {Z} · damping {s_damp*100:.0f}% · "
                f"Ah(plateau) = {(Z/2)*(s_I/s_R)*2.5:.4f}")
 
+    # ---- drift / P-Delta limits (rack-specific, EN 1998-1 / EN 16681) -------
+    DRIFT_OPTS = {
+        "EN 1998-1 §4.4.3.2 / EN 16681 — racks, no brittle attachments "
+        "(0.010 h)": 0.010,
+        "EN 1998-1 — ductile non-structural (0.0075 h)": 0.0075,
+        "EN 1998-1 — brittle non-structural (0.005 h)": 0.005,
+        "IS 1893 Cl 7.11.1 — buildings (0.004 h)": 0.004,
+    }
+    cur = next((k for k, v in DRIFT_OPTS.items()
+                if abs(v - float(cfg0.seismic_drift_limit)) < 1e-6),
+               list(DRIFT_OPTS)[0])
+    c = st.columns([3, 1])
+    drift_lbl = c[0].selectbox("Storey-drift limit Δ/h", list(DRIFT_OPTS),
+                               index=list(DRIFT_OPTS).index(cur))
+    s_drift = DRIFT_OPTS[drift_lbl]
+    s_theta = c[1].number_input("P-Δ θ cap", 0.10, 0.30,
+                                float(cfg0.seismic_theta_max), 0.05,
+                                help="EN 1998-1 §4.4.2.2: θ>0.30 not permitted "
+                                     "(racks). θ≤0.10 negligible.")
+    # rack-suitability validation against EN 16681
+    notes = []
+    if s_R > 4.0:
+        notes.append(f"R = {s_R:g} is high for a rack: EN 16681 behaviour "
+                     "factors are typically q ≈ 1.5–2 (down-aisle moment "
+                     "frame) and 2–4 (braced). Use a lower R unless justified.")
+    if s_drift <= 0.004:
+        notes.append("0.004 h is the IS building limit; racks without brittle "
+                     "attachments may use up to 0.010 h (EN 16681).")
+    if s_I < 1.0:
+        notes.append("Importance I < 1.0 is unusual; use ≥ 1.0.")
+    for nt in notes:
+        st.warning("⚠ " + nt)
+
     ui.section("◫", "Bracing specification (truss members) — runs exactly this")
     c = st.columns(3)
     da_on = c[0].checkbox("Spine X bracing (down-aisle)",
@@ -1066,7 +1099,8 @@ def render_seismic_study():
     cfg = dataclasses.replace(
         cfg0, seismic=True, seismic_zone=zone, seismic_soil=soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
-        seismic_damping=s_damp,
+        seismic_damping=s_damp, seismic_drift_limit=s_drift,
+        seismic_theta_max=s_theta,
         brace_section=ca_brace, brace_planes=int(ca_planes),
         spine_bracing=da_on,
         spine_bracing_section=None if da_sec == "(frame brace)" else da_sec,
