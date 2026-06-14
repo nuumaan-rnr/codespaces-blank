@@ -46,6 +46,7 @@ ss.setdefault("edit_cfg", None)        # RackConfig pre-fill when editing
 ss.setdefault("dark_mode", ui.load_dark_pref())   # persisted across sessions
 
 ui.apply_theme()
+ui.console()           # CAD-style command/log bar pinned to the page bottom
 
 
 def goto(view, **kw):

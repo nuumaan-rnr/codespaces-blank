@@ -14,6 +14,10 @@ from .results import CaseResult
 
 
 def run_all(model: RackModel, progress=None) -> List[CaseResult]:
+    def step(stage, frac):
+        if progress:
+            progress(stage, frac)
+
     errors = model.validate()
     if errors:
         raise ValueError("Model validation failed:\n  " + "\n  ".join(errors))
@@ -22,7 +26,10 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
     order = model.analysis.order
     results: List[CaseResult] = []
 
-    for combo in model.combinations:
+    n_combo = len(model.combinations) or 1
+    for ci, combo in enumerate(model.combinations):
+        step(f"Running {combo.kind} combination {combo.name}",
+             0.30 + 0.14 * ci / n_combo)
         base_loads = assemble(model, combo)
         apply_imp = combo.imperfection and (combo.kind == "ULS"
                                             or combo.imp_directions)

@@ -92,7 +92,7 @@ html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"] {{
   border-radius:8px;
 }}
 [data-testid="stMain"] .block-container {{
-  padding-top:2.2rem; padding-bottom:4rem; max-width:1280px;
+  padding-top:2.2rem; padding-bottom:170px; max-width:1280px;
   animation:fade .5s ease;
 }}
 @keyframes fade {{ from {{opacity:0; transform:translateY(6px)}}
@@ -242,6 +242,26 @@ textarea {{
   background:linear-gradient(90deg,{v['teal']}14,{v['teal']}05);
   border:1px solid {v['teal']}33; color:var(--text); }}
 .rnr-topbar .ic {{ font-size:1rem; }}
+/* CAD-style command/log bar pinned to the bottom of the page */
+.rnr-console {{ position:fixed; left:0; right:0; bottom:0; z-index:999990;
+  background:var(--surface); border-top:2px solid {v['teal']};
+  box-shadow:0 -4px 16px rgba(0,0,0,.10);
+  font-family:'JetBrains Mono',ui-monospace,monospace; }}
+.rnr-console .hd {{ display:flex; align-items:center; gap:8px;
+  padding:6px 16px; border-bottom:1px solid var(--border);
+  font-size:.8rem; font-weight:700; color:var(--text); }}
+.rnr-console .hd .dot {{ width:9px; height:9px; border-radius:50%;
+  background:{v['teal']}; box-shadow:0 0 0 3px {v['teal']}33; }}
+.rnr-console .hd .dot.err {{ background:#e35335; box-shadow:0 0 0 3px #e3533533; }}
+.rnr-console .hd .lbl {{ color:var(--muted); font-weight:600;
+  text-transform:uppercase; letter-spacing:.08em; font-size:.66rem; }}
+.rnr-console .body {{ height:104px; overflow-y:auto; padding:6px 16px 8px;
+  display:flex; flex-direction:column; gap:1px; }}
+.rnr-console .ln {{ color:var(--muted); font-size:.74rem; line-height:1.55;
+  white-space:pre-wrap; }}
+.rnr-console .ln .t {{ color:{v['teal']}; }}
+.rnr-console .ln.err {{ color:#e35335; }}
+.rnr-console .ln.ok {{ color:{v['teal']}; font-weight:600; }}
 .rnr-cmp {{ background:var(--surface); border:1px solid var(--border);
   border-radius:16px; padding:6px 16px 14px; box-shadow:var(--shadow);
   height:100%; }}
@@ -313,29 +333,78 @@ def section(icon: str, title: str) -> None:
                 f'{_html.escape(title)}</div>', unsafe_allow_html=True)
 
 
+# --------------------------------------------------------------- command log
+_CONSOLE_PH = None       # placeholder for the live bottom console
+
+
+def log(msg: str, level: str = "info") -> None:
+    """Append a line to the persistent command log (session-scoped)."""
+    buf = st.session_state.setdefault("_log", [])
+    buf.append((_time.strftime("%H:%M:%S"), level, str(msg)))
+    if len(buf) > 500:
+        del buf[:-500]
+
+
+def console() -> None:
+    """Create / render the CAD-style command bar pinned to the page bottom.
+    Call once per page (early), so runs can update it live afterwards."""
+    global _CONSOLE_PH
+    _CONSOLE_PH = st.empty()
+    _render_console()
+
+
+def _render_console() -> None:
+    if _CONSOLE_PH is None:
+        return
+    buf = st.session_state.get("_log", [])
+    latest = buf[-1] if buf else ("", "info", "Ready")
+    rows = []
+    for ts, lvl, msg in reversed(buf[-200:]):       # newest first = always seen
+        cls = "err" if lvl == "error" else "ok" if lvl == "ok" else ""
+        rows.append(f'<div class="ln {cls}"><span class="t">{ts}</span>  '
+                    f'{_html.escape(msg)}</div>')
+    body = "".join(rows) or '<div class="ln">Ready.</div>'
+    dot = "err" if latest[1] == "error" else ""
+    _CONSOLE_PH.markdown(
+        f'<div class="rnr-console"><div class="hd">'
+        f'<span class="dot {dot}"></span><span class="lbl">command log</span>'
+        f'<span>{_html.escape(latest[2])}</span></div>'
+        f'<div class="body">{body}</div></div>', unsafe_allow_html=True)
+
+
 def run_with_status(run_fn, label="Running analysis"):
     """Execute run_fn(progress=cb) showing a staged status box, a progress bar,
     and the elapsed time; returns run_fn's result.  Each stage line carries the
     running elapsed time, so the most recent (bottom) line always shows it; the
-    stages cover both the second-order analysis and the seismic run."""
+    stages cover both the second-order analysis and the seismic run, and are
+    streamed live to the bottom command log."""
     box = st.status(f"⚙️  {label}…", expanded=True)
     bar = box.progress(0.0)
     start = _time.time()
+    log(f"▶ {label}")
+    _render_console()
 
     def cb(stage, frac):
         bar.progress(min(max(frac, 0.0), 1.0))
-        box.write(f"• {stage}  ·  ⏱ {_time.time() - start:.0f}s")
+        el = _time.time() - start
+        box.write(f"• {stage}  ·  ⏱ {el:.0f}s")
+        log(f"{stage}  ({el:.0f}s)")
+        _render_console()
     try:
         result = run_fn(progress=cb)
     except Exception as exc:                      # surface failures, don't hang
         box.update(label=f"❌  Run failed after {_time.time()-start:.0f}s",
                    state="error", expanded=True)
         box.write(f"Error: {exc}")
+        log(f"FAILED: {exc}", "error")
+        _render_console()
         raise
     total = _time.time() - start
     bar.progress(1.0)
     box.update(label=f"✅  Analysis complete in {total:.0f}s",
                state="complete", expanded=False)
+    log(f"✓ {label} complete in {total:.0f}s", "ok")
+    _render_console()
     return result
 
 
