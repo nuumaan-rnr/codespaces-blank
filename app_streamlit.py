@@ -1090,7 +1090,7 @@ def render_seismic_study():
 # ------------------------------------------------ anchor & footplate designer
 def render_anchor_designer():
     import math
-    from rack15512.checks.en15512 import (_anchorage_checks,
+    from rack15512.checks.en15512 import (_anchor_capacities, _anchorage_checks,
                                           _base_plate_checks)
     proj = PSTORE.load(ss.project_id)
     sysm = proj.system(ss.system_id)
@@ -1210,6 +1210,59 @@ def render_anchor_designer():
             st.markdown(f"**{title}** — util **{w.utilization:.2f}** "
                         f"(case {w.case}, {w.target})")
             st.caption(w.detail)
+
+    # Profis-style per-anchor breakdown for the governing anchorage case
+    cap = _anchor_capacities(bp)
+    if worst_an and cap:
+        gov_case = next((c for c in uls + seis if c.name == worst_an.case),
+                        None)
+        try:
+            node_id = int(worst_an.target.split()[1])
+        except (ValueError, IndexError):
+            node_id = None
+        if gov_case and node_id in (gov_case.reactions if gov_case else {}):
+            r = gov_case.reactions[node_id]
+            n = max(int(bp.n_anchors), 1)
+            s_lever = cap["s"]
+            uplift = max(-r[2], 0.0)
+            M = math.hypot(r[3], r[4])
+            V = math.hypot(r[0], r[1])
+            n_ed = uplift / n + (M / s_lever if s_lever > 0 else 0.0)
+            v_ed = V / n
+            bN = n_ed / cap["n_rd"] if cap["n_rd"] else 99.0
+            bV = v_ed / cap["v_rd"] if cap["v_rd"] else 99.0
+            comb = (min(bN, 1.0) ** 1.5 + min(bV, 1.0) ** 1.5
+                    if bN <= 1 and bV <= 1 else bN ** 1.5 + bV ** 1.5)
+            ui.section("📊", f"Per-anchor design — governing {worst_an.case} "
+                             f"({worst_an.target}), {n}×M{bp.anchor_d:.0f} "
+                             f"{bp.anchor_grade}")
+            st.caption(f"Per anchor: N_Ed = uplift/n + M/lever = "
+                       f"{n_ed/1e3:.2f} kN · V_Ed = V/n = {v_ed/1e3:.2f} kN "
+                       f"(lever s = {s_lever:.0f} mm)")
+
+            def _row(ls, dem, capk):
+                return {"limit state": ls, "demand [kN]": round(dem / 1e3, 2),
+                        "capacity [kN]": round(capk / 1e3, 2),
+                        "utilisation": round(dem / capk, 2) if capk else None}
+            rows = [
+                _row("Tension — steel (A_s·f_uk/γMs)", n_ed, cap["n_rd_s"]),
+                _row("Tension — pull-out (N_Rk,p/γMc)", n_ed, cap["n_rd_p"]),
+                _row("Tension — concrete cone (N_Rk,c/γMc)", n_ed, cap["n_rd_c"]),
+                _row("Shear — steel (0.5·A_s·f_uk/γMs)", v_ed, cap["v_rd_s"]),
+                _row("Shear — concrete (V_Rk,c/γMc)", v_ed, cap["v_rd_c"]),
+                {"limit state": "Combined (βN^1.5+βV^1.5 ≤ 1)",
+                 "demand [kN]": None, "capacity [kN]": 1.0,
+                 "utilisation": round(comb, 2)},
+            ]
+            st.dataframe(rows, use_container_width=True)
+            st.caption("Tension governed by "
+                       + ("steel" if cap["n_rd"] == cap["n_rd_s"]
+                          else "pull-out" if cap["n_rd"] == cap["n_rd_p"]
+                          else "concrete cone")
+                       + f" ({cap['n_rd']/1e3:.1f} kN); shear by "
+                       + ("steel" if cap["v_rd"] == cap["v_rd_s"]
+                          else "concrete")
+                       + f" ({cap['v_rd']/1e3:.1f} kN).")
 
     ok = all(r.ok for r in real) if real else False
     if st.button("💾 Save anchor & footplate to configuration",
