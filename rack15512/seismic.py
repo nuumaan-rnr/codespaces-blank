@@ -214,9 +214,13 @@ def empirical_period(model: RackModel, direction: str) -> float:
 
 def _scale_to_static(env, model, weights, shapes, periods, s, comp,
                      total_W) -> None:
-    """Scale the envelope up so V_dyn >= V_static (Cl 7.7.3)."""
-    if not s.apply_base_shear_scaling:
-        return
+    """Record dynamic vs static base shear; scale up only when enabled.
+
+    IS 1893 Cl 7.7.3 lets the dynamic (modal RSA) base shear be scaled up to
+    the empirical-period static base shear ``V_static``.  We always compute and
+    record both ``v_dyn`` and ``v_static`` (so the report can show the saving),
+    but only apply the scale factor when ``apply_base_shear_scaling`` is set.
+    """
     v_dyn_sq = 0.0
     for k, Tk in enumerate(periods):
         Ah = horizontal_seismic_coefficient(Tk, s)
@@ -226,8 +230,12 @@ def _scale_to_static(env, model, weights, shapes, periods, s, comp,
     direction = "X" if comp == 0 else "Y"
     t_emp = empirical_period(model, direction)   # uses the full rack height
     v_static = horizontal_seismic_coefficient(t_emp, s) * total_W
-    lam = max(1.0, v_static / v_dyn) if v_dyn > 1e-9 else 1.0
-    env.base_shear = max(v_dyn, v_static)
+    if s.apply_base_shear_scaling:
+        lam = max(1.0, v_static / v_dyn) if v_dyn > 1e-9 else 1.0
+        env.base_shear = max(v_dyn, v_static)
+    else:                                   # use the modal-period base shear
+        lam = 1.0
+        env.base_shear = v_dyn
     env.scale, env.v_dyn, env.v_static, env.t_emp = lam, v_dyn, v_static, t_emp
     if lam != 1.0:
         _apply_scale(env, lam)
@@ -535,6 +543,11 @@ def _summary(model, s, modal, envs, method, total_W) -> dict:
         "height_m": round(model.height() / 1000.0, 2),
         "T_emp_x": round(empirical_period(model, "X"), 3),
         "T_emp_y": round(empirical_period(model, "Y"), 3),
+        "scaling_on": bool(s.apply_base_shear_scaling),
+        "sa_g_modal": (round(design_spectrum_sa_g(modes[0]["T"], s.soil_type), 2)
+                       if modes else None),
+        "sa_g_emp_x": round(design_spectrum_sa_g(
+            empirical_period(model, "X"), s.soil_type), 2),
         "v_dyn_x_kN": round(envs.get("X", SeismicEnvelope("X")).v_dyn / 1e3, 1),
         "v_static_x_kN": round(
             envs.get("X", SeismicEnvelope("X")).v_static / 1e3, 1),

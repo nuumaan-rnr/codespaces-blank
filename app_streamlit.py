@@ -1047,6 +1047,14 @@ def render_seismic_study():
                                 float(cfg0.seismic_theta_max), 0.05,
                                 help="EN 1998-1 §4.4.2.2: θ>0.30 not permitted "
                                      "(racks). θ≤0.10 negligible.")
+    s_scale = st.checkbox(
+        "Scale RSA up to the empirical-period base shear (IS 1893 Cl 7.7.3)",
+        value=bool(getattr(cfg0, "seismic_scale_base_shear", True)),
+        help="On = code-compliant (pins base shear to V_static at the "
+             "empirical Ta, which for short racks sits on the Sa/g=2.5 "
+             "plateau). Off = use the lower modal-period base shear directly "
+             "(realises the long-period saving; departs from the strict "
+             "clause — engineer's call).")
     # rack-suitability validation against EN 16681
     notes = []
     if s_R > 4.0:
@@ -1133,7 +1141,7 @@ def render_seismic_study():
         cfg0, seismic=True, seismic_zone=zone, seismic_soil=soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_damping=s_damp, seismic_drift_limit=s_drift,
-        seismic_theta_max=s_theta,
+        seismic_theta_max=s_theta, seismic_scale_base_shear=s_scale,
         brace_section=ca_brace, brace_planes=int(ca_planes),
         spine_bracing=da_on,
         spine_bracing_section=None if da_sec == "(frame brace)" else da_sec,

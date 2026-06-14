@@ -229,6 +229,10 @@ class RackConfig:
     # EN 16681; IS 1893 has no rack-specific code)
     seismic_drift_limit: float = 0.010
     seismic_theta_max: float = 0.30
+    # scale the RSA up to the empirical-period base shear (IS 1893 Cl 7.7.3).
+    # Off = use the (lower) modal-period base shear directly (departs from the
+    # strict clause; sometimes used for flexible long-period racks).
+    seismic_scale_base_shear: bool = True
 
 
 def bracing_elevations(cfg: RackConfig, frame_height: float) -> List[float]:
@@ -755,6 +759,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             imposed_factor=cfg.seismic_imposed_factor,
             n_modes=cfg.seismic_n_modes,
             drift_limit_ratio=cfg.seismic_drift_limit,
-            theta_max=cfg.seismic_theta_max)
+            theta_max=cfg.seismic_theta_max,
+            apply_base_shear_scaling=cfg.seismic_scale_base_shear)
 
     return m

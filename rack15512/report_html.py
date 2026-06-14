@@ -230,13 +230,19 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
                   f"<td>{md['mass_x_pct']}</td><td>{md['mass_y_pct']}</td></tr>")
             a("</tbody></table>")
         if ss.get("T_emp_x") is not None:
+            scaling = ("ON — base shear pinned to V_static(T_a) per Cl 7.7.3"
+                       if ss.get("scaling_on", True) else
+                       "OFF — design uses the modal-period base shear directly")
             a(f"<p>Period basis (Cl 7.6, h = full rack height "
               f"{ss.get('height_m')} m, base plate to top of uprights): "
               f"empirical T_a,x = {ss['T_emp_x']} s, T_a,y = {ss['T_emp_y']} s; "
               f"fundamental modal T₁ = {ss.get('fundamental_T')} s. "
+              f"Sa/g at T_a,x = {ss.get('sa_g_emp_x')} (plateau if 2.50) vs "
+              f"Sa/g at T₁ = {ss.get('sa_g_modal')} (descending branch). "
               f"Base-shear scaling X (Cl 7.7.3): V_dyn = {ss.get('v_dyn_x_kN')} "
               f"kN vs V_static(T_a) = {ss.get('v_static_x_kN')} kN → scale "
-              f"×{ss.get('scale_x')} (Y ×{ss.get('scale_y')}).</p>")
+              f"×{ss.get('scale_x')} (Y ×{ss.get('scale_y')}). Scaling: "
+              f"{scaling}.</p>")
         a("<p class='basis'>Modal response spectrum analysis: Ah=(Z/2)(I/R)"
           "(Sa/g); modes combined by SRSS, scaled to the empirical-period base "
           "shear (Cl 7.7.3) with T_a from the full rack height; directions "
