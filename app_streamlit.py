@@ -190,9 +190,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         ui.section("📐", "Geometry")
         c = st.columns(4)
         name = c[0].text_input("Configuration name", g("name", "Config 1"))
-        module = c[1].radio("Module", ["single", "back-to-back"],
-                            index=0 if g("module", "single") == "single" else 1)
-        n_bays = c[2].number_input("Bays", 1, 20, int(g("n_bays", 3)))
+        module = c[1].radio(
+            "Module", ["single", "back-to-back"],
+            index=0 if g("module", "back-to-back") == "single" else 1)
+        n_bays = c[2].number_input("Bays", 1, 20, int(g("n_bays", 5)))
         bay_width = c[3].number_input("Beam span [mm]", 1000.0, 4500.0,
                                       float(g("bay_width", 2700.0)), 50.0)
         c = st.columns(4)
@@ -201,10 +202,12 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         b2b_gap = c[1].number_input("Back-to-back gap [mm]", 50.0, 600.0,
                                     float(g("b2b_gap", 250.0)), 10.0,
                                     disabled=module == "single")
-        up_sec = c[2].selectbox("Upright", up_names,
-                                index=_idx(up_names, g("upright_section", None)))
-        br_sec = c[3].selectbox("Bracing", br_names,
-                                index=_idx(br_names, g("brace_section", None)))
+        up_sec = c[2].selectbox(
+            "Upright", up_names,
+            index=_idx(up_names, g("upright_section", "UP0010")))
+        br_sec = c[3].selectbox(
+            "Bracing", br_names,
+            index=_idx(br_names, g("brace_section", "C 36X21X1.2")))
 
     with st.container(border=True):
         ui.section("🪜", "Beam levels  ·  gap · section · load, per level")
