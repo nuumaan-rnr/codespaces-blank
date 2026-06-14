@@ -280,14 +280,18 @@ def _directional(ex: SeismicEnvelope, ey: SeismicEnvelope
 
 # --------------------------------------------------------------- superposition
 def superpose_seismic_cases(case_grav: CaseResult, E: Dict[str, object],
-                            model: RackModel, combo_row, s) -> List[CaseResult]:
-    """Gravity ± seismic at the response level -> two signed SEISMIC cases."""
+                            model: RackModel, combo_row, s,
+                            service: bool = False) -> List[CaseResult]:
+    """Gravity ± seismic at the response level -> two signed SEISMIC cases.
+    ``service=True`` marks the unfactored 1.0(DL+EL) case used for the drift /
+    P-Delta limit checks."""
     label, _f_d, _f_il, f_el = combo_row
     out: List[CaseResult] = []
     for sign in (+1.0, -1.0):
         sgn = "+E" if sign > 0 else "-E"
         cr = CaseResult(name=f"SEIS {label} {sgn}", combo=label,
-                        kind="SEISMIC", order=1, converged=True)
+                        kind="SEISMIC", order=1, converged=True,
+                        seismic_service=service)
         for mid, mr_g in case_grav.members.items():
             env_f = E["member_force"].get(mid)
             env_d = E["member_defl"].get(mid)
@@ -407,9 +411,13 @@ def run_seismic(model: RackModel, progress=None) -> List[CaseResult]:
 
     envs: Dict[str, SeismicEnvelope] = {}
     method = "RSA"
+    # factored strength rows + the unfactored 1.0(DL+EL) row used ONLY for the
+    # drift / P-Delta limit checks (IS 1893 Cl 7.11.1, partial load factor 1.0)
+    service_row = ("1.0(DL+EL)", 1.0, s.imposed_factor, 1.0)
+    all_rows = list(s.combos) + [service_row]
     grav_jobs = [{"loads": assemble(model, _gravity_combo(r[1], r[2], model)),
                   "name": f"_grav{r[0]}", "combo": r[0], "kind": "SEISMIC",
-                  "_grav": True} for r in s.combos]
+                  "_grav": True} for r in all_rows]
     if modal and modal.converged and modal.periods:
         nmodes = len(modal.periods)
         step(f"Seismic: response spectrum, {nmodes} modes — recovering forces "
@@ -445,9 +453,10 @@ def run_seismic(model: RackModel, progress=None) -> List[CaseResult]:
     E = _directional(envs["X"], envs["Y"])
 
     cases: List[CaseResult] = []
-    for row, grav in zip(s.combos, grav_results):
+    for row, grav in zip(all_rows, grav_results):
         if grav.converged:
-            cases += superpose_seismic_cases(grav, E, model, row, s)
+            cases += superpose_seismic_cases(grav, E, model, row, s,
+                                             service=(row is service_row))
 
     model.seismic_summary = _summary(model, s, modal, envs, method, total_W)
     step("Seismic: complete", 0.72)

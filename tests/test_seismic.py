@@ -59,7 +59,10 @@ def test_seismic_pipeline_produces_cases_and_checks():
     from rack15512.analysis import run_all
     cases = run_all(model)
     seis = [c for c in cases if c.kind == "SEISMIC"]
-    assert len(seis) == 6                        # 3 LSD rows x 2 signs
+    # 3 factored LSD rows x 2 signs + 1 unfactored 1.0(DL+EL) drift row x 2
+    assert len(seis) == 8
+    svc = [c for c in seis if c.seismic_service]
+    assert len(svc) == 2                          # the 1.0(DL+EL) drift cases
     ss = model.seismic_summary
     assert ss["base_shear_x_kN"] > 0 and ss["fundamental_T"] > 0
     assert ss["captured_mass_x_pct"] >= 50.0

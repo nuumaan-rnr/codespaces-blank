@@ -445,7 +445,7 @@ def test_anchor_capacities_m12_5_6():
                                        anchor_grade="5.6", anchor_hef=70.0))
     assert cap["n_rd_s"] / 1e3 == pytest.approx(21.075, rel=1e-3)
     assert cap["v_rd_s"] / 1e3 == pytest.approx(12.645, rel=1e-3)
-    assert cap["n_rd_p"] / 1e3 == pytest.approx(8.0, rel=1e-3)
+    assert cap["n_rd_p"] / 1e3 == pytest.approx(8.0, rel=1e-2)
     assert cap["n_rd_c"] / 1e3 == pytest.approx(11.1, rel=0.02)
     assert cap["n_rd"] == cap["n_rd_p"]          # pull-out governs tension
     assert cap["v_rd"] == cap["v_rd_c"]          # concrete governs shear

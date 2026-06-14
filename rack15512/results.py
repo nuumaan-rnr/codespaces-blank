@@ -92,6 +92,9 @@ class CaseResult:
     # seismic per-storey results (set on SEISMIC cases): z_level -> value
     seismic_storey_drift: Dict[float, float] = field(default_factory=dict)
     seismic_storey_shear: Dict[float, float] = field(default_factory=dict)
+    # True for the unfactored 1.0(DL+EL) seismic case used for the drift /
+    # P-Delta limit checks (IS 1893 Cl 7.11.1, partial load factor 1.0)
+    seismic_service: bool = False
 
     @property
     def max_sway(self) -> float:

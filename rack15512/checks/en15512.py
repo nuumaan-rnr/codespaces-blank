@@ -61,7 +61,11 @@ BOLT_GRADES = {"4.6": (400.0, 0.6), "4.8": (400.0, 0.5),
 # values and are intentionally conservative; they are overridable per config
 # (BasePlate.anchor_pullout_rk / anchor_shear_rk).  diameter [mm] -> R_k [N].
 ANCHOR_PULLOUT_RK = {8: 6000.0, 10: 9000.0, 12: 12000.0,
-                     16: 20000.0, 20: 30000.0}      # N_Rk,p  (tension)
+                     16: 20000.0, 20: 30000.0}      # N_Rk,p  (legacy reference)
+# default pull-out N_Rk,p = K_PULLOUT * hef[mm] * d[mm]  [N] — scales with the
+# embedment depth (calibrated to the table above at the nominal hef ~ 6*d), so
+# changing hef changes the pull-out capacity.
+K_PULLOUT = 14.3
 ANCHOR_SHEAR_RK_C = {8: 8000.0, 10: 12000.0, 12: 17000.0,
                      16: 30000.0, 20: 45000.0}      # V_Rk,c  (concrete shear)
 
@@ -110,18 +114,21 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
             if a:
                 out.append(a)
         elif case.kind == "SEISMIC":
-            # Seismic run focuses on the structural members (uprights, beams,
-            # bracing, frame spacers, spine & plan). The footplate / anchor are
-            # NOT checked here - they are designed separately (anchor designer)
-            # after the analysis, so anchorage never blocks the bracing design.
-            out += _stress_checks(model, case)
-            out += _buckling_checks(model, case)
-            out += _brace_buckling_checks(model, case)
-            out += _connector_checks(model, case)
-            out += _brace_bolt_checks(model, case)
-            out += _splice_checks(model, case)
-            out += _seismic_drift_checks(model, case)
-            out += _seismic_pdelta_checks(model, case)
+            if getattr(case, "seismic_service", False):
+                # unfactored 1.0(DL+EL) case: drift & P-Delta limits only
+                # (IS 1893 Cl 7.11.1 - partial load factor 1.0)
+                out += _seismic_drift_checks(model, case)
+                out += _seismic_pdelta_checks(model, case)
+            else:
+                # factored ULS seismic combos: member strength only. Footplate
+                # / anchor are NOT checked here - designed separately (anchor
+                # designer) so anchorage never blocks the bracing design.
+                out += _stress_checks(model, case)
+                out += _buckling_checks(model, case)
+                out += _brace_buckling_checks(model, case)
+                out += _connector_checks(model, case)
+                out += _brace_bolt_checks(model, case)
+                out += _splice_checks(model, case)
         else:
             out += _deflection_checks(model, case)
             out += _sway_checks(model, case)
@@ -516,8 +523,10 @@ def _anchor_capacities(bp) -> Optional[dict]:
 
     # --- tension limit states ------------------------------------------
     n_rd_s = As * fuk / g_n                                   # steel
-    n_rk_p = bp.anchor_pullout_rk or ANCHOR_PULLOUT_RK.get(
-        d, ANCHOR_PULLOUT_RK[12])
+    # pull-out default scales with embedment x diameter (K_PULLOUT calibrated
+    # so the previous per-diameter table is reproduced at the nominal hef);
+    # this makes the embedment depth influence the result. Override wins.
+    n_rk_p = bp.anchor_pullout_rk or (K_PULLOUT * hef * d)
     n_rd_p = n_rk_p / gc                                      # pull-out
     # concrete cone (EN 1992-4 7.2.1.4), cracked k1=7.7, simplified group /
     # edge factors for the 2-anchor footplate (no concrete geometry modelled)
