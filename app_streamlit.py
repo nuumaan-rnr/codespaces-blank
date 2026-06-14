@@ -760,6 +760,7 @@ def render_view_config():
         rc = st.columns(2)
         if rc[0].button("▶ Run / re-run analysis", type="primary",
                         use_container_width=True):
+            ui.log(f"Run invoked: {proj.name} · {sysm.name} · {conf.name}")
             try:
                 summary, _ = ui.run_with_status(
                     lambda progress: run_configuration(
@@ -1047,6 +1048,7 @@ def render_configure():
                             silent=True)
         if conf:
             ss.config_id = conf.id
+            ui.log(f"Save & run invoked: {conf.name}")
             try:
                 summary, _ = ui.run_with_status(
                     lambda progress: run_configuration(
@@ -1075,10 +1077,12 @@ def _save_config(pid, sid, cfg, master_id, notes, silent=False):
             conf = PSTORE.add_configuration(pid, sid, cfg.name, cfg_save,
                                             master_id=master_id, notes=notes)
             verb = "Saved"
+        ui.log(f"{verb} configuration '{conf.name}' ({conf.id})", "ok")
         if not silent:
             st.success(f"{verb} configuration '{conf.name}' ({conf.id}).")
         return conf
     except (ValueError, KeyError) as e:
+        ui.log(f"Save failed: {e}", "error")
         st.error(f"Could not save: {e}")
         return None
 

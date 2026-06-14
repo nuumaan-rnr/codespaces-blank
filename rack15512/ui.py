@@ -245,8 +245,11 @@ textarea {{
 /* CAD-style command/log bar pinned to the bottom of the page */
 .rnr-console {{ position:fixed; left:0; right:0; bottom:0; z-index:999990;
   background:var(--surface); border-top:2px solid {v['teal']};
-  box-shadow:0 -4px 16px rgba(0,0,0,.10);
+  box-shadow:0 -4px 16px rgba(0,0,0,.10); transition:left .2s ease;
   font-family:'JetBrains Mono',ui-monospace,monospace; }}
+/* keep the bar in the content area so an expanded sidebar can't cover it */
+[data-testid="stApp"]:has([data-testid="stSidebar"][aria-expanded="true"])
+  .rnr-console {{ left:21rem; }}
 .rnr-console .hd {{ display:flex; align-items:center; gap:8px;
   padding:6px 16px; border-bottom:1px solid var(--border);
   font-size:.8rem; font-weight:700; color:var(--text); }}
@@ -338,11 +341,13 @@ _CONSOLE_PH = None       # placeholder for the live bottom console
 
 
 def log(msg: str, level: str = "info") -> None:
-    """Append a line to the persistent command log (session-scoped)."""
+    """Append a line to the persistent command log (session-scoped) and, if the
+    bottom command bar is already on the page, refresh it live."""
     buf = st.session_state.setdefault("_log", [])
     buf.append((_time.strftime("%H:%M:%S"), level, str(msg)))
     if len(buf) > 500:
         del buf[:-500]
+    _render_console()
 
 
 def console() -> None:
