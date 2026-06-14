@@ -120,18 +120,25 @@ class RackConfig:
     # optional different pattern below the first beam level (e.g. 'X'
     # below level 1 for accidental loads, 'D' above)
     bracing_type_zone1: Optional[str] = None
+    # cross-aisle X up to a height (seismic): force the CA frame bracing to the
+    # X pattern for panels at/below this elevation (None = leave bracing_type)
+    ca_x_height: Optional[float] = None
     # ---- seismic bracing (truss members; IS 1893 lateral system) ----------
-    # plan bracing: horizontal X across each bay cell, at selected levels
+    # plan bracing: horizontal X across each bay cell, at selected levels;
+    # placed only in the spine modules, at most alternate beam levels
     plan_bracing: bool = False
     plan_bracing_section: Optional[str] = "1C36x21x6x1.2"
     plan_bracing_levels: Optional[List[float]] = None     # None = all beam levels
-    plan_bracing_modules: str = "all"     # 'all'|'alternate'|'every_3rd'
-    # spine bracing: vertical X down-aisle on the inner upright line(s)
+    plan_bracing_modules: str = "alternate"   # 'alternate'|'every_3rd'
+    # spine bracing: full-height X tower at the back-to-back centre (or 150 mm
+    # behind a single rack), tied to the frame(s) by horizontal frame spacers;
+    # X panel per beam level; modules at most alternate
     spine_bracing: bool = False
     spine_bracing_section: Optional[str] = None            # None = brace_section
     spine_bracing_pitch: Optional[float] = None            # None = bracing_pitch
-    spine_bracing_modules: str = "all"
+    spine_bracing_modules: str = "alternate"  # 'alternate'|'every_3rd'
     spine_bracing_area_factor: float = 0.15
+    spine_offset_single: float = 150.0        # spine offset behind a single rack
     # upright splice: auto-placed at H/2 when frame height > splice_above
     # (max manufacturable upright length); set splice_z to position it
     splice_z: Optional[float] = None
@@ -405,6 +412,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
                     if cfg.bracing_type_zone1 and \
                             brace_zs[k + 1] <= beam_levels[0] + _TOL:
                         ptype = cfg.bracing_type_zone1
+                    if cfg.ca_x_height and \
+                            brace_zs[k + 1] <= cfg.ca_x_height + _TOL:
+                        ptype = "X"          # seismic CA X up to a height
                     if ptype.upper() == "X":
                         m.add_member(mid, nid(i, sa, ja), nid(i, sb, jb),
                                      br.name, mtype="truss",
@@ -460,10 +470,53 @@ def build_rack(cfg: RackConfig) -> RackModel:
         m.sections[sec.name] = sec
         return sec.name
 
-    if cfg.plan_bracing:
+    # bays that carry the spine (capped at 'alternate' density); plan bracing
+    # is placed only in these modules
+    def _cap(pattern: str) -> str:
+        return "alternate" if (pattern or "alternate") == "all" else pattern
+
+    spine_bays = (_selected_bays(cfg.n_bays, _cap(cfg.spine_bracing_modules))
+                  if cfg.spine_bracing else [])
+    _SP = 8                                  # spine upright-line index (>= 4)
+    y_spine = (cfg.depth + cfg.b2b_gap / 2.0 if cfg.module == "back-to-back"
+               else cfg.depth + cfg.spine_offset_single)
+    inner_sides = [1, 2] if spacer_pair else [1]   # frames the spacer ties to
+
+    if cfg.spine_bracing and spine_bays:
+        ssec = _register_brace(cfg.spine_bracing_section)
+        spine_z = [0.0] + list(beam_levels) \
+            + ([H] if H - beam_levels[-1] > _TOL else [])
+        spine_lines = sorted({i for b in spine_bays for i in (b, b + 1)})
+        for i in spine_lines:                # spine node column + base support
+            for z in spine_z:
+                m.add_node(nid(i, _SP, j_of(z)), i * cfg.bay_width, y_spine, z)
+            m.supports.append(Support(nid(i, _SP, j_of(0.0)),
+                                      ux=True, uy=True, uz=True))
+            for za, zb in zip(spine_z, spine_z[1:]):   # vertical chords
+                m.add_member(mid, nid(i, _SP, j_of(za)), nid(i, _SP, j_of(zb)),
+                             ssec, mtype="truss", member_set="spine bracing")
+                mid += 1
+            for z in spine_z:                # frame spacers tie the spine to the
+                j = j_of(z)                  # frame at EVERY level (out-of-plane
+                for s in inner_sides:        # restraint; avoids a mechanism)
+                    m.add_member(mid, nid(i, _SP, j), nid(i, s, j), ssec,
+                                 mtype="truss", member_set="frame spacer")
+                    mid += 1
+        for i in spine_bays:                 # full-height X per beam-level panel
+            for za, zb in zip(spine_z, spine_z[1:]):
+                ja, jb = j_of(za), j_of(zb)
+                m.add_member(mid, nid(i, _SP, ja), nid(i + 1, _SP, jb), ssec,
+                             mtype="truss", member_set="spine bracing")
+                mid += 1
+                m.add_member(mid, nid(i + 1, _SP, ja), nid(i, _SP, jb), ssec,
+                             mtype="truss", member_set="spine bracing")
+                mid += 1
+
+    # plan bracing: only in the spine modules, at most alternate beam levels
+    if cfg.plan_bracing and spine_bays:
         psec = _register_brace(cfg.plan_bracing_section)
-        plan_z = cfg.plan_bracing_levels or beam_levels
-        for i in _selected_bays(cfg.n_bays, cfg.plan_bracing_modules):
+        plan_z = cfg.plan_bracing_levels or beam_levels[::2]   # alternate
+        for i in spine_bays:
             for z in plan_z:
                 if not any(abs(zz - z) <= _TOL for zz in zs):
                     continue
@@ -474,24 +527,6 @@ def build_rack(cfg: RackConfig) -> RackModel:
                     mid += 1
                     m.add_member(mid, nid(i, sb, j), nid(i + 1, sa, j), psec,
                                  mtype="truss", member_set="plan bracing")
-                    mid += 1
-
-    if cfg.spine_bracing:
-        ssec = _register_brace(cfg.spine_bracing_section)
-        spine_lines = sorted({s for _sa, _sb, _o in rack_pairs
-                              for s in (1,) if 1 in sides}
-                             | ({2} if spacer_pair else set()))
-        spine_z = [0.0] + [z for z in beam_levels] \
-            + ([H] if H - beam_levels[-1] > _TOL else [])
-        for i in _selected_bays(cfg.n_bays, cfg.spine_bracing_modules):
-            for s in spine_lines:
-                for za, zb in zip(spine_z, spine_z[1:]):
-                    ja, jb = j_of(za), j_of(zb)
-                    m.add_member(mid, nid(i, s, ja), nid(i + 1, s, jb), ssec,
-                                 mtype="truss", member_set="spine bracing")
-                    mid += 1
-                    m.add_member(mid, nid(i + 1, s, ja), nid(i, s, jb), ssec,
-                                 mtype="truss", member_set="spine bracing")
                     mid += 1
 
     # ---- EN 15512 buckling lengths for the uprights -------------------------

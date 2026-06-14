@@ -110,14 +110,15 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
             if a:
                 out.append(a)
         elif case.kind == "SEISMIC":
+            # Seismic run focuses on the structural members (uprights, beams,
+            # bracing, frame spacers, spine & plan). The footplate / anchor are
+            # NOT checked here - they are designed separately (anchor designer)
+            # after the analysis, so anchorage never blocks the bracing design.
             out += _stress_checks(model, case)
             out += _buckling_checks(model, case)
             out += _brace_buckling_checks(model, case)
             out += _connector_checks(model, case)
             out += _brace_bolt_checks(model, case)
-            out += _base_plate_checks(model, case)
-            out += _base_restraint_checks(model, case)
-            out += _anchorage_checks(model, case)
             out += _splice_checks(model, case)
             out += _seismic_drift_checks(model, case)
             out += _seismic_pdelta_checks(model, case)
@@ -248,7 +249,7 @@ def _brace_buckling_checks(model: RackModel,
     for mid, mr in case.members.items():
         m = model.members[mid]
         if m.member_set not in ("bracing", "row spacers", "plan bracing",
-                                "spine bracing"):
+                                "spine bracing", "frame spacer"):
             continue
         if mr.N_min >= 0.0:
             continue
@@ -369,7 +370,7 @@ def _brace_bolt_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     for mid, mr in case.members.items():
         m = model.members[mid]
         if m.member_set not in ("bracing", "row spacers", "plan bracing",
-                                "spine bracing"):
+                                "spine bracing", "frame spacer"):
             continue
         brace = model.section_of(m)
         upright = upright_at.get(m.node_i) or upright_at.get(m.node_j)

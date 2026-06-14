@@ -29,7 +29,8 @@ from rack15512.model import CrossSection
 from rack15512.project import ProjectStore, rackconfig_from_dict
 from rack15512.project_run import run_configuration
 from rack15512.report import write_report
-from rack15512.viewer import plot_deformed, plot_frame_elevation, plot_model
+from rack15512.viewer import (plot_deformed, plot_frame_elevation,
+                              plot_front_elevation, plot_model, plot_plan)
 
 st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
                    initial_sidebar_state="expanded")
@@ -771,7 +772,7 @@ def render_view_config():
             except Exception as exc:
                 st.error(f"Analysis failed: {exc}")
                 st.exception(exc)
-        if rc[1].button("🌐 Seismic auto-design (IS 1893)",
+        if rc[1].button("🌐 Seismic design (IS 1893)",
                         use_container_width=True):
             goto("seismic_study", project_id=proj.id, system_id=sysm.id,
                  config_id=conf.id)
@@ -945,73 +946,144 @@ def render_compare():
                "ratio exceeds unity (fails that check).")
 
 
-# ----------------------------------------------------- seismic zone study
+# ------------------------------------------------ seismic design + preview
 def render_seismic_study():
+    import dataclasses
+    from rack15512.seismic import ZONE_FACTORS, design_spectrum_sa_g
+    from rack15512.seismic_study import _beam_levels, autodesign_seismic
     proj = PSTORE.load(ss.project_id)
     sysm = proj.system(ss.system_id)
     conf = sysm.configuration(ss.config_id)
     if st.button("← Back to results"):
         goto("view_config", project_id=proj.id, system_id=sysm.id,
              config_id=conf.id)
-    ui.hero("Seismic Auto-Design", f"{proj.name} · {conf.name}",
-            eyebrow="IS 1893 cost-saving design",
-            crumbs=["Dashboard", proj.name, conf.name, "Auto-design"])
-    st.caption("Fast deterministic escalation per zone (a few runs, not a full "
-               "sweep): 1) X spine bracing down-aisle → 2) add X cross-aisle "
-               "only if buckling fails → 3) add plan bracing in the spine "
-               "modules at the 1st, then 1st+2nd, then alternate beam levels — "
-               "stopping at the first arrangement that passes.")
+    ui.hero("Seismic Design (IS 1893)", f"{proj.name} · {conf.name}",
+            eyebrow="Bracing + response spectrum",
+            crumbs=["Dashboard", proj.name, conf.name, "Seismic"])
+    st.caption("Specify the seismic lateral system, preview the model with the "
+               "bracing, then run exactly that specification. Footplate / "
+               "anchors are designed separately (anchor designer) after the "
+               "analysis, so they don't govern the bracing here.")
 
-    c = st.columns(2)
-    zones = c[0].multiselect("Seismic zones to study", ["II", "III", "IV", "V"],
-                             default=["III", "IV"])
-    spine_mod = c[1].selectbox("Spine / plan modules", ["every_3rd",
-                                                        "alternate", "all"])
-    sweep_sec = st.checkbox("Also try heavier spine C-sections if still failing",
-                            value=False)
-    if not st.button("▶ Run auto-design", type="primary") or not zones:
-        st.info("Pick zones and press Run. Each step runs one modal analysis; "
-                "the escalation stops as soon as the rack passes.")
+    lib, master, master_id = resolve_master(conf.master_id, conf.master_path)
+    cfg0 = rackconfig_from_dict(conf.config, master=master)
+    blevels = _beam_levels(cfg0)
+    br_opts = ["(frame brace)"] + list(lib.names("bracing") or lib.names())
+
+    ui.section("📋", "Seismic parameters (IS 1893:2016)")
+    c = st.columns(4)
+    zone = c[0].selectbox("Zone", ["II", "III", "IV", "V"],
+                          index=_idx(["II", "III", "IV", "V"],
+                                     cfg0.seismic_zone))
+    soil = c[1].selectbox("Soil", ["I", "II", "III"],
+                          index=_idx(["I", "II", "III"], cfg0.seismic_soil))
+    s_I = c[2].number_input("Importance I", 1.0, 1.5,
+                            float(cfg0.seismic_importance), 0.1)
+    s_R = c[3].number_input("Response reduction R", 1.0, 6.0,
+                            float(cfg0.seismic_response_reduction), 0.5)
+    Z = ZONE_FACTORS[zone]
+    st.caption(f"Z = {Z} · Ah(plateau) = {(Z/2)*(s_I/s_R)*2.5:.4f}")
+
+    ui.section("◫", "Bracing specification (truss members) — runs exactly this")
+    c = st.columns(3)
+    da_on = c[0].checkbox("Spine X bracing (down-aisle)",
+                          bool(cfg0.spine_bracing) or True)
+    da_sec = c[1].selectbox("Spine section", br_opts,
+                            index=_idx(br_opts, cfg0.spine_bracing_section
+                                       or "(frame brace)"))
+    da_mod = c[2].selectbox(
+        "Spine modules (≤ alternate)", ["alternate", "every_3rd"],
+        index=_idx(["alternate", "every_3rd"],
+                   cfg0.spine_bracing_modules
+                   if cfg0.spine_bracing_modules in ("alternate", "every_3rd")
+                   else "alternate"))
+    spine_where = ("centre of the back-to-back flue"
+                   if cfg0.module == "back-to-back"
+                   else f"{cfg0.spine_offset_single:.0f} mm behind the rack")
+    st.caption(f"Spine is a full-height X tower at the {spine_where}, tied to "
+               "the frame(s) by horizontal frame spacers at every level. Plan "
+               "bracing is placed only in the spine modules.")
+    c = st.columns(3)
+    Hmax = float(cfg0.frame_height or (blevels[-1] if blevels else 3000.0))
+    ca_h = c[0].number_input("CA X up to height [mm] (0 = none)", 0.0, Hmax,
+                             float(cfg0.ca_x_height or 0.0), 50.0)
+    pl_on = c[1].checkbox("Plan bracing (in spine modules)",
+                          bool(cfg0.plan_bracing))
+    pl_sec = c[2].selectbox("Plan section", br_opts,
+                            index=_idx(br_opts, cfg0.plan_bracing_section
+                                       or "(frame brace)"))
+    pl_levels = st.multiselect(
+        "Plan bracing at beam levels (≤ alternate)", blevels,
+        default=(cfg0.plan_bracing_levels or blevels[::2]),
+        format_func=lambda z: f"{z:.0f} mm")
+    if pl_on and len(pl_levels) > len(blevels[::2]):
+        st.warning("Plan bracing should not exceed alternate beam levels.")
+
+    cfg = dataclasses.replace(
+        cfg0, seismic=True, seismic_zone=zone, seismic_soil=soil,
+        seismic_importance=s_I, seismic_response_reduction=s_R,
+        spine_bracing=da_on,
+        spine_bracing_section=None if da_sec == "(frame brace)" else da_sec,
+        spine_bracing_modules=da_mod, ca_x_height=(ca_h or None),
+        plan_bracing=pl_on,
+        plan_bracing_section=None if pl_sec == "(frame brace)" else pl_sec,
+        plan_bracing_levels=(pl_levels or None), plan_bracing_modules=da_mod)
+    cfg.master = master
+
+    ui.section("🧊", "Model preview (before running)")
+    try:
+        model = build_rack(cfg)
+    except (ValueError, KeyError) as e:
+        st.error(f"Could not build the model: {e}")
         return
 
-    from rack15512.seismic import SPINE_CANDIDATES
-    from rack15512.seismic_study import autodesign_seismic
-    lib, master, _ = resolve_master(conf.master_id, conf.master_path)
-    cfg = rackconfig_from_dict(conf.config, master=master)
-    spine_secs = ([s for s in SPINE_CANDIDATES if s in lib.sections]
-                  if sweep_sec else None)
+    def _n(s):
+        return sum(1 for x in model.members.values() if x.member_set == s)
+    cc = st.columns(2)
+    cc[0].pyplot(plot_model(model))
+    cc[1].pyplot(plot_front_elevation(model))
+    st.pyplot(plot_plan(model))
+    st.caption(f"{len(model.nodes)} nodes · {len(model.members)} members · "
+               f"spine {_n('spine bracing')} · frame spacers "
+               f"{_n('frame spacer')} · plan {_n('plan bracing')} (all truss)")
 
-    def _run(progress):
-        out = {}
-        for i, zone in enumerate(zones):
-            out[zone] = autodesign_seismic(
-                cfg, zone=zone, spine_modules=spine_mod,
-                spine_sections=spine_secs,
-                progress=lambda s, f, i=i: progress(
-                    s, (i + f) / len(zones)))
-        return out
-
-    study = ui.run_with_status(
-        _run, label="Seismic auto-design — escalating bracing per zone")
-
-    for zone in zones:
-        z = study[zone]
-        rec = z["recommended"]
-        with st.container(border=True):
-            ok = z["passed"]
-            st.markdown(
-                f"#### Zone {zone} (Z={z['Z']})  ·  "
-                + (f"✅ **{rec['label']}** — {rec['weight_kg']} kg"
-                   if ok else
-                   f"⚠️ no passing arrangement; best **{rec['label']}** "
-                   f"(util {rec['max_util']})"))
-            st.dataframe([{"step": o["label"], "verdict": o["verdict"],
-                           "governing": o["governing"],
-                           "weight [kg]": o["weight_kg"]} for o in z["steps"]],
-                         use_container_width=True)
-            if not ok:
-                st.warning("Increase spine module density, enable the heavier "
-                           "C-section sweep, or raise R / sections.")
+    run_c = st.columns([2, 1])
+    if run_c[0].button("▶ Run seismic analysis (this specification)",
+                       type="primary", use_container_width=True):
+        cfg_save = RackConfig(**{k: v for k, v in cfg.__dict__.items()
+                                 if k not in ("library", "master")})
+        cfg_save.levels = cfg.levels
+        PSTORE.update_configuration(proj.id, sysm.id, conf.id, conf.name,
+                                    cfg_save, master_id=master_id,
+                                    notes=conf.notes or "")
+        ui.log(f"Seismic run invoked (zone {zone}): {conf.name}")
+        try:
+            summary, _ = ui.run_with_status(
+                lambda progress: run_configuration(
+                    PSTORE, proj.id, sysm.id, conf.id, progress=progress),
+                label="Seismic + EN 15512 analysis")
+            ui.toast_verdict(summary["verdict"])
+            goto("view_config", project_id=proj.id, system_id=sysm.id,
+                 config_id=conf.id)
+        except Exception as exc:
+            st.error(f"Analysis failed: {exc}")
+            st.exception(exc)
+    if run_c[1].button("⚙ Auto-design bracing", use_container_width=True,
+                       help="Apply the default escalation rules to find a "
+                            "passing arrangement for this zone."):
+        res = ui.run_with_status(
+            lambda progress: autodesign_seismic(
+                cfg0, zone=zone, spine_modules=da_mod, progress=progress),
+            label=f"Auto-design (zone {zone})")
+        rec = res["recommended"]
+        st.success(f"Recommended: {rec['label']} — {rec['verdict']} "
+                   f"({rec['weight_kg']} kg)" if res["passed"]
+                   else f"No passing arrangement; best {rec['label']} "
+                        f"(util {rec['max_util']})")
+        st.dataframe([{"step": o["label"], "verdict": o["verdict"],
+                       "governing": o["governing"],
+                       "weight [kg]": o["weight_kg"]} for o in res["steps"]],
+                     use_container_width=True)
 
 
 # ----------------------------------------------------- create/edit a config
@@ -1127,6 +1199,37 @@ def render_masters():
             if cc[1].button("🗑 Delete master", key=f"dm_{sm.id}"):
                 MSTORE.delete(sm.id)
                 st.rerun()
+
+            if sm.base_tables:
+                with st.expander(f"📈 Base-stiffness curves "
+                                 f"({len(sm.base_tables)} uprights) — "
+                                 "floor connection k_b(N) and M_Rd(N)"):
+                    bu = st.selectbox("Upright", sorted(sm.base_tables),
+                                      key=f"bt_{sm.id}")
+                    rows = sm.base_tables[bu]   # [[N, k_b, M_Rd], ...] N·mm units
+                    data = [{"N [kN]": round(r[0] / 1e3, 1),
+                             "k_b [kNm/rad]": round(r[1] / 1e6, 1),
+                             "M_Rd [kNm]": round(r[2] / 1e6, 2)} for r in rows]
+                    st.dataframe(data, use_container_width=True)
+                    try:
+                        import pandas as pd
+                        df = pd.DataFrame(data).set_index("N [kN]")
+                        gc = st.columns(2)
+                        gc[0].caption("Rotational stiffness k_b vs axial N")
+                        gc[0].line_chart(df[["k_b [kNm/rad]"]])
+                        gc[1].caption("Moment resistance M_Rd vs axial N")
+                        gc[1].line_chart(df[["M_Rd [kNm]"]])
+                    except Exception:
+                        pass
+                    st.caption("Used by the base partial-restraint (BASE_"
+                               "RESTRAINT) check and base springs; set "
+                               "base_stiffness='auto' on the configuration to "
+                               "interpolate this per upright at the design N.")
+            elif "upright" in sm.roles():
+                st.caption("No BASE_STIFFNESS table in this master — add a "
+                           "BASE_STIFFNESS sheet (per upright: N vs k_b vs "
+                           "M_Rd) to use load-dependent base springs.")
+
             role = st.selectbox("Role", ["upright", "beam", "bracing"],
                                 key=f"r_{sm.id}")
             names = sm.names(role)
