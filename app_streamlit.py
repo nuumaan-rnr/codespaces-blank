@@ -29,8 +29,9 @@ from rack15512.model import BasePlate, CrossSection
 from rack15512.project import ProjectStore, rackconfig_from_dict
 from rack15512.project_run import run_configuration
 from rack15512.report import write_report
-from rack15512.viewer import (plot_deformed, plot_frame_elevation,
-                              plot_front_elevation, plot_model, plot_plan)
+from rack15512.viewer import (plot_deformed, plot_footplate,
+                              plot_frame_elevation, plot_front_elevation,
+                              plot_model, plot_plan)
 
 st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
                    initial_sidebar_state="expanded")
@@ -1191,6 +1192,14 @@ def render_anchor_designer():
         anchor_pullout_rk=(a_np * 1e3) or None,
         anchor_shear_rk=(a_vc * 1e3) or None)
     model.base_plate = bp
+
+    ui.section("📐", "Footplate / anchor layout (check the input dimensions)")
+    up_sec = next((model.section_of(m) for m in model.members.values()
+                   if m.member_set == "uprights"), None)
+    try:
+        st.pyplot(plot_footplate(bp, up_sec))
+    except Exception as e:
+        st.caption(f"(diagram unavailable: {e})")
 
     # evaluate the base-plate + anchorage checks against ULS + seismic cases
     bp_res, an_res = [], []

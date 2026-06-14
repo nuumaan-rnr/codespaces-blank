@@ -326,3 +326,95 @@ def plot_plan(model: RackModel, path: Optional[str] = None):
                       "PLAN (top, X-Y) [mm]",
                       "X down-aisle [mm]", "Y cross-aisle [mm]",
                       _consecutive_dims(xs), _consecutive_dims(ys), path)
+
+
+def anchor_layout(bp):
+    """Anchor (x, y) positions [mm] in the plate plane for the diagram, plus
+    the dimensioning spacings (sy along depth, sx across width, edge e)."""
+    b = bp.b or 150.0
+    d = bp.d or 150.0
+    e = bp.anchor_edge or 25.0
+    n = max(int(bp.n_anchors), 1)
+    cols = 1 if n <= 2 else 2
+    rows = -(-n // cols)
+    sx = (b - 2 * e) if cols > 1 else 0.0
+    sy = bp.anchor_spacing or max(d - 2 * e, 0.5 * d)
+    xs = [-sx / 2.0, sx / 2.0] if cols > 1 else [0.0]
+    ys = ([-sy / 2.0 + i * sy / (rows - 1) for i in range(rows)]
+          if rows > 1 else [0.0])
+    pts = [(x, y) for y in ys for x in xs][:n]
+    return pts, sx, sy, e
+
+
+def plot_footplate(bp, sec=None, path: Optional[str] = None):
+    """Profis-style footplate / anchor layout: dimensioned plan + section with
+    the input values, so the geometry can be checked at a glance."""
+    b = bp.b or 150.0
+    d = bp.d or 150.0
+    t = bp.t or 4.0
+    hef = bp.anchor_hef
+    pts, sx, sy, e = anchor_layout(bp)
+    r = max(bp.anchor_d / 2.0, 4.0)
+
+    fig, (axp, axs) = plt.subplots(1, 2, figsize=(10, 4.6),
+                                   gridspec_kw={"width_ratios": [1.3, 1]})
+
+    # ---- plan view ----
+    axp.add_patch(plt.Rectangle((-b / 2, -d / 2), b, d, fill=False,
+                                edgecolor="#0C8490", lw=2))
+    if sec is not None:                       # upright footprint
+        uw = (sec.width_b or 80.0)
+        uh = (sec.depth_h or 80.0)
+        axp.add_patch(plt.Rectangle((-uw / 2, -uh / 2), uw, uh, fill=True,
+                                    facecolor="#0C849022", edgecolor="#545454",
+                                    hatch="///", lw=1))
+    for (x, y) in pts:
+        axp.add_patch(plt.Circle((x, y), r, color="#d62728", zorder=5))
+        axp.add_patch(plt.Circle((x, y), r * 0.45, color="white", zorder=6))
+    m = max(b, d) * 0.62
+    axp.set_xlim(-m, m)
+    axp.set_ylim(-m, m)
+    axp.set_aspect("equal")
+    axp.set_title("Footplate plan (mm)", fontsize=10, color="#0C8490")
+    # dimension labels
+    axp.annotate(f"b = {b:.0f}", (0, -d / 2 - m * 0.12), ha="center",
+                 fontsize=9)
+    axp.annotate(f"d = {d:.0f}", (-b / 2 - m * 0.14, 0), va="center",
+                 rotation=90, fontsize=9)
+    if sy:
+        axp.annotate("", (pts[0][0], -sy / 2), (pts[0][0], sy / 2),
+                     arrowprops=dict(arrowstyle="<->", color="#545454"))
+        axp.text(pts[0][0] + m * 0.04, 0, f"s = {sy:.0f}", fontsize=8,
+                 color="#545454")
+    if sx:
+        axp.annotate("", (-sx / 2, pts[0][1]), (sx / 2, pts[0][1]),
+                     arrowprops=dict(arrowstyle="<->", color="#545454"))
+        axp.text(0, pts[0][1] + m * 0.04, f"{sx:.0f}", fontsize=8,
+                 ha="center", color="#545454")
+    axp.axis("off")
+
+    # ---- section view ----
+    axs.add_patch(plt.Rectangle((-b / 2, 0), b, t, facecolor="#545454",
+                                edgecolor="black"))         # plate
+    axs.add_patch(plt.Rectangle((-b / 2, -hef), b, hef, facecolor="#EAEAEA",
+                                edgecolor="#999", hatch="..."))  # concrete
+    for (x, _y) in pts:
+        axs.plot([x, x], [t, -hef], color="#d62728", lw=2)
+        axs.plot([x - 6, x + 6], [-hef, -hef], color="#d62728", lw=2)
+    axs.annotate(f"t = {t:.0f}", (b / 2 + 8, t / 2), fontsize=8, va="center")
+    axs.annotate(f"hef = {hef:.0f}", (b / 2 + 8, -hef / 2), fontsize=8,
+                 va="center")
+    axs.set_xlim(-b / 2 - 30, b / 2 + 60)
+    axs.set_ylim(-hef - 20, t + 30)
+    axs.set_aspect("equal")
+    axs.set_title("Section (mm)", fontsize=10, color="#0C8490")
+    axs.axis("off")
+
+    txt = (f"{bp.n_anchors} x M{bp.anchor_d:.0f} grade {bp.anchor_grade}\n"
+           f"hef = {hef:.0f} mm,  edge e = {e:.0f} mm\n"
+           f"plate {b:.0f} x {d:.0f} x {t:.0f},  f_ck = {bp.f_ck:.0f} MPa")
+    fig.text(0.5, -0.02, txt, ha="center", fontsize=8.5, color="#333")
+    fig.tight_layout()
+    if path:
+        fig.savefig(path, dpi=130, bbox_inches="tight")
+    return fig

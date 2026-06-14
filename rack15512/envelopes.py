@@ -123,17 +123,10 @@ def build_envelopes(model, cases: List[CaseResult],
         e.governing = max(rel, key=lambda c: c.utilization) if rel else None
         return e
 
-    uls = [c for c in cases if c.kind == "ULS"]
-    sls = [c for c in cases if c.kind == "SLS"]
-    if uls:
-        envs.append(make("ULS (all)", "ULS", uls))
-    if sls:
-        envs.append(make("SLS (all)", "SLS", sls))
-    # per-combination envelopes (over imperfection directions)
-    combos: Dict[str, List[CaseResult]] = {}
-    for c in cases:
-        combos.setdefault(c.combo, []).append(c)
-    for combo, cs in combos.items():
-        if len(cs) > 1 or combo not in [e.name for e in envs]:
-            envs.append(make(combo, cs[0].kind, cs))
+    # exactly three envelopes: ULS, SLS and ULS-seismic (when present)
+    for name, kind in (("ULS (all)", "ULS"), ("SLS (all)", "SLS"),
+                       ("ULS-seismic", "SEISMIC")):
+        sel = [c for c in cases if c.kind == kind]
+        if sel:
+            envs.append(make(name, kind, sel))
     return envs
