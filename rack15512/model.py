@@ -332,7 +332,7 @@ class SeismicSettings:
     structure_type: str = "Storage rack - cross-aisle braced"  # informs R
     soil_type: str = "II"          # 'I' rock | 'II' medium | 'III' soft
     damping: float = 0.05          # for CQC
-    imposed_factor: float = 0.5    # kappa: share of pallet load in seismic mass
+    imposed_factor: float = 0.8    # kappa: pallet (live) load share in W (DL+0.8LL)
     n_modes: int = 6               # initial/min eigen request
     max_modes: int = 12            # cap when auto-increasing for 90% mass
     combination: str = "SRSS"      # 'SRSS' | 'CQC'

@@ -405,8 +405,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             help="1.0 normal, 1.5 important / high-occupancy (Table 8)")
         s_kappa = c[3].number_input(
             "Imposed-load factor κ", 0.0, 1.0,
-            gn("seismic_imposed_factor", 0.5, 0.0, 1.0), 0.05,
-            help="Fraction of pallet load taken as seismic mass (Table 8)")
+            gn("seismic_imposed_factor", 0.8, 0.0, 1.0), 0.05,
+            help="Fraction of pallet (live) load in the seismic weight: "
+                 "W = 1.0·DL + κ·LL. Default 0.8 (80% of service live load).")
         s_damp = st.slider("Damping ratio", 0.01, 0.10,
                            gn("seismic_damping", 0.05, 0.01, 0.10), 0.01,
                            help="5% typical for bolted steel racks")

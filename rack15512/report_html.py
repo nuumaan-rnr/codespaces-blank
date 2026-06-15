@@ -247,7 +247,8 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
           f"R={ss['R']}, damping {ss.get('damping_pct')}%, seismic mass factor "
           f"κ={ss.get('imposed_factor')}; method {_esc(ss['method'])}. Design "
           f"coefficient Ah≈{ss['Ah_design']}. Seismic weight "
-          f"W={ss['seismic_weight_kN']} kN. Base shear "
+          f"W = 1.0·DL + {ss.get('imposed_factor')}·LL (incl. member "
+          f"self-weight) = {ss['seismic_weight_kN']} kN. Base shear "
           f"V_B,x={ss['base_shear_x_kN']} kN, V_B,y={ss['base_shear_y_kN']} kN. "
           f"Modal mass captured (X) {ss.get('captured_mass_x_pct')}%.</p>")
         if ss.get("modes"):

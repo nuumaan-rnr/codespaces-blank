@@ -228,7 +228,9 @@ class RackConfig:
     seismic_response_reduction: float = 4.0  # R
     seismic_structure_type: str = "Storage rack - cross-aisle braced"
     seismic_damping: float = 0.05
-    seismic_imposed_factor: float = 0.5    # kappa (share of pallet load)
+    seismic_imposed_factor: float = 0.8    # kappa: share of pallet (live) load
+    #                                        in the seismic weight (W = DL +
+    #                                        0.8 LL by default)
     seismic_n_modes: int = 6
     # storey-drift limit Δ/h and P-Δ theta cap (rack values per EN 1998-1 /
     # EN 16681; IS 1893 has no rack-specific code)
