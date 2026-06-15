@@ -538,24 +538,24 @@ def build_rack(cfg: RackConfig) -> RackModel:
 
     if cfg.spine_bracing and spine_bays:
         ssec = _register_brace(cfg.spine_bracing_section)
-        spine_z = [0.0] + list(beam_levels) \
-            + ([H] if H - beam_levels[-1] > _TOL else [])
+        # spine X-tower in the flue with NO vertical chords.  The X-diagonals
+        # are pinned (truss); the spine node sits at the CENTRE of each frame
+        # spacer, and that spacer is a beam, so the spacer's flexure ties the
+        # spine in-plane and the uprights act as its chords.  Pinned at the
+        # base; no spine bracing above the top beam level.
+        spine_z = [0.0] + list(beam_levels)
         spine_lines = sorted({i for b in spine_bays for i in (b, b + 1)})
         for i in spine_lines:                # spine node column + base support
             for z in spine_z:
                 m.add_node(nid(i, _SP, j_of(z)), i * cfg.bay_width, y_spine, z)
             spine_base_nodes.append(nid(i, _SP, j_of(0.0)))
-            for za, zb in zip(spine_z, spine_z[1:]):   # vertical chords
-                m.add_member(mid, nid(i, _SP, j_of(za)), nid(i, _SP, j_of(zb)),
-                             ssec, mtype="truss", member_set="spine bracing")
-                mid += 1
-            for z in spine_z[1:]:            # frame spacers tie the spine to the
-                j = j_of(z)                  # frame at every level ABOVE ground
-                for s in inner_sides:        # (ground is held by the grounding
+            for z in spine_z[1:]:            # frame spacer through the spine node
+                j = j_of(z)                  # (beam, so it holds the spine in
+                for s in inner_sides:        # plane); the spine is its centre
                     m.add_member(mid, nid(i, _SP, j), nid(i, s, j), spsec,
-                                 mtype="truss", member_set="frame spacer")
+                                 mtype="beam", member_set="frame spacer")
                     mid += 1
-        for i in spine_bays:                 # full-height X per beam-level panel
+        for i in spine_bays:                 # X per beam-level panel (no chords)
             for za, zb in zip(spine_z, spine_z[1:]):
                 ja, jb = j_of(za), j_of(zb)
                 m.add_member(mid, nid(i, _SP, ja), nid(i + 1, _SP, jb), ssec,
@@ -675,11 +675,11 @@ def build_rack(cfg: RackConfig) -> RackModel:
             k = k_base if k_base > 0 else False
             m.supports.append(Support(nid(i, s, 0), ux=True, uy=True, uz=True,
                                       rx=k, ry=k, rz=False))
-    # spine tower bases: a grounding angle bolted to the floor (fixed support)
-    # for the spine between back-to-back modules / behind a single module
+    # spine tower bases: a pinned floor connection (translations held, free to
+    # rotate) for the spine between back-to-back modules / behind a single one
     for node in spine_base_nodes:
         m.supports.append(Support(node, ux=True, uy=True, uz=True,
-                                  rx=True, ry=True, rz=True))
+                                  rx=False, ry=False, rz=False))
 
     # ---- load cases ---------------------------------------------------------
     dead = LoadCase("dead", "permanent")
