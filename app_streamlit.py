@@ -1331,6 +1331,16 @@ def render_seismic_study():
     ca_opts = [f"(keep: {cfg0.brace_section})"] + STD_1C + _libbr
 
     ui.section("📋", "Seismic parameters (IS 1893:2016)")
+    seis_on = st.toggle(
+        "Run seismic analysis (IS 1893 modal RSA)",
+        value=bool(cfg0.seismic) if cfg0.seismic else True,
+        help="Off = standard EN 15512 (non-seismic) run — plan / spine bracing "
+             "not required. On = modal RSA; spine and plan bracing are still "
+             "optional (you can run seismic on the bare frame).")
+    if not seis_on:
+        st.info("Seismic is **OFF** — this runs a standard EN 15512 "
+                "(non-seismic) analysis. Plan / spine bracing are not required; "
+                "any bracing you set below is still built but optional.")
     c = st.columns(5)
     zone = c[0].selectbox("Zone", ["II", "III", "IV", "V"],
                           index=_idx(["II", "III", "IV", "V"],
@@ -1374,24 +1384,25 @@ def render_seismic_study():
              "plateau). Off = use the lower modal-period base shear directly "
              "(realises the long-period saving; departs from the strict "
              "clause — engineer's call).")
-    # rack-suitability validation against EN 16681
+    # rack-suitability validation against EN 16681 (only relevant when seismic)
     notes = []
-    if s_R > 4.0:
+    if seis_on and s_R > 4.0:
         notes.append(f"R = {s_R:g} is high for a rack: EN 16681 behaviour "
                      "factors are typically q ≈ 1.5–2 (down-aisle moment "
                      "frame) and 2–4 (braced). Use a lower R unless justified.")
-    if s_drift <= 0.004:
+    if seis_on and s_drift <= 0.004:
         notes.append("0.004 h is the IS building limit; racks without brittle "
                      "attachments may use up to 0.010 h (EN 16681).")
-    if s_I < 1.0:
+    if seis_on and s_I < 1.0:
         notes.append("Importance I < 1.0 is unusual; use ≥ 1.0.")
     for nt in notes:
         st.warning("⚠ " + nt)
 
-    ui.section("◫", "Bracing specification (truss members) — runs exactly this")
+    ui.section("◫", "Bracing specification (truss members) — optional, "
+                    "runs exactly this")
     c = st.columns(3)
     da_on = c[0].checkbox("Spine X bracing (down-aisle)",
-                          bool(cfg0.spine_bracing) or True)
+                          bool(cfg0.spine_bracing))
     da_sec = c[1].selectbox("Spine section (1C family)", spine_opts,
                             index=_idx(spine_opts, cfg0.spine_bracing_section
                                        or "(frame brace)"))
@@ -1457,7 +1468,7 @@ def render_seismic_study():
 
     ca_brace = cfg0.brace_section if ca_sec.startswith("(keep") else ca_sec
     cfg = dataclasses.replace(
-        cfg0, seismic=True, seismic_zone=zone, seismic_soil=soil,
+        cfg0, seismic=seis_on, seismic_zone=zone, seismic_soil=soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_damping=s_damp, seismic_drift_limit=s_drift,
         seismic_theta_max=s_theta, seismic_scale_base_shear=s_scale,
@@ -1487,11 +1498,12 @@ def render_seismic_study():
     cc2[0].pyplot(plot_side_elevation(model))     # side (cross-aisle) view
     cc2[1].pyplot(plot_plan(model))               # top view
     st.caption(f"{len(model.nodes)} nodes · {len(model.members)} members · "
-               f"spine {_n('spine bracing')} · frame spacers "
-               f"{_n('frame spacer')} · plan {_n('plan bracing')} (all truss)")
+               f"spine {_n('spine bracing')} (truss) · frame spacers "
+               f"{_n('frame spacer')} (beam) · plan {_n('plan bracing')} (truss)")
 
-    if st.button("▶ Run seismic analysis (this specification)",
-                 type="primary", width="stretch"):
+    run_lbl = ("▶ Run seismic analysis (this specification)" if seis_on
+               else "▶ Run standard (non-seismic) analysis")
+    if st.button(run_lbl, type="primary", width="stretch"):
         cfg_save = RackConfig(**{k: v for k, v in cfg.__dict__.items()
                                  if k not in ("library", "master")})
         cfg_save.levels = cfg.levels
