@@ -60,6 +60,7 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
         flag = " ⚠ FAIL" if u > 1.0 else ""
         mtext.append(
             f"<b>member {m.id}</b> ({m.member_set}, {m.mtype})<br>"
+            f"section: {m.section}<br>"
             f"utilisation = {u:.3f}{flag}<br>"
             f"N = {v.get('N', 0)/1e3:.2f} kN<br>"
             f"My = {v.get('My', 0)/1e6:.2f} kNm  "
