@@ -95,8 +95,11 @@ def _deformed_curve(model, case, m, scale):
     member's transverse station deflections (so beams show their true sag,
     not a straight chord)."""
     ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
-    di = case.displacements[m.node_i]
-    dj = case.displacements[m.node_j]
+    # tolerate nodes missing from the case (e.g. stale results vs a rebuilt
+    # model of different geometry): treat a missing node as undisplaced
+    _zero = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    di = case.displacements.get(m.node_i, _zero)
+    dj = case.displacements.get(m.node_j, _zero)
     xh, yh, zh = model.member_axes(m)
     L = model.member_length(m)
     mr = case.members.get(m.id)

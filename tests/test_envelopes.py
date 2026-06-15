@@ -53,6 +53,12 @@ def test_build_envelopes_tolerates_stale_results():
     uls = next(e for e in envs if e.name == "ULS (all)")
     assert set(uls.members) <= set(small.members)
 
+    # rendering the interactive figure against the mismatched geometry must
+    # also not raise (stale case lacks displacements for some current nodes)
+    from rack15512.iviewer import figure_for_case, figure_for_envelope
+    figure_for_envelope(small, uls, scale=30)
+    figure_for_case(small, cases[0], checks, scale=30)
+
 
 def test_frame_spacer_and_bracing_are_truss():
     m = _model(module="back-to-back", depth=1000.0, b2b_gap=250.0)

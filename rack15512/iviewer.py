@@ -38,7 +38,13 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
     for m in model.members.values():
         if show_only is not None and m.id not in show_only:
             continue
-        if deformed_case is not None:
+        # draw the deformed shape only when the case has displacements for
+        # both end nodes; otherwise (e.g. stale results from a different
+        # geometry) fall back to the undeformed chord so we never KeyError
+        has_defl = (deformed_case is not None
+                    and m.node_i in deformed_case.displacements
+                    and m.node_j in deformed_case.displacements)
+        if has_defl:
             xs, ys, zs = _deformed_curve(model, deformed_case, m, scale)
         else:
             ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
@@ -74,7 +80,9 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
     if node_reactions:
         nx, ny, nz, ntext = [], [], [], []
         for node, comps in node_reactions.items():
-            n = model.nodes[node]
+            n = model.nodes.get(node)        # skip stale nodes not in the model
+            if n is None:
+                continue
             nx.append(n.x); ny.append(n.y); nz.append(n.z)
             lines = [f"<b>node {node}</b> reactions"]
             for c in ("Fx", "Fy", "Fz", "Mx", "My", "Mz"):
