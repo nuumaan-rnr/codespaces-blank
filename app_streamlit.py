@@ -358,6 +358,18 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                   bool(g("include_placement", True)))
         inc_acc = c[1].checkbox("Include accidental loads",
                                 bool(g("include_accidental", True)))
+        inc_patt = c[2].checkbox(
+            "Include pattern (checkerboard) pallet load",
+            bool(g("include_pattern", True)),
+            help="Alternate bays AND levels loaded — the unfavourable partial "
+                 "loading that maximises differential column moments and sway.")
+        c = st.columns(3)
+        load_frame = c[0].number_input(
+            "Load frame (upright line 0..n_bays)", 0, int(n_bays),
+            int(min(max(g("load_frame", 0), 0), n_bays)),
+            help="Upright line carrying the placement & accidental loads. "
+                 "0 = end (starter) frame; for multi-bay runs pick a frame "
+                 "with an add-on connection.")
         c = st.columns(3)
         gG = c[0].number_input("gamma_G", 1.0, 2.0, gn("gamma_G", 1.3, 1.0, 2.0))
         gQ = c[1].number_input("gamma_Q", 1.0, 2.0, gn("gamma_Q", 1.4, 1.0, 2.0))
@@ -461,7 +473,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         dead_load_beam=dead, placement_load=place * 1e3,
         accidental_load_x=ax * 1e3, accidental_load_y=ay * 1e3,
         accidental_height=ah, include_placement=inc_place,
-        include_accidental=inc_acc,
+        include_accidental=inc_acc, include_pattern=inc_patt,
+        load_frame=int(load_frame),
         gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,

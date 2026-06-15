@@ -206,9 +206,14 @@ class RackConfig:
     accidental_load_x: float = 1250.0       # N down-aisle
     accidental_load_y: float = 2500.0       # N cross-aisle
     accidental_height: float = 400.0        # mm above floor
+    # upright line (frame) index 0..n_bays that carries the placement &
+    # accidental loads; for multi-bay runs pick a frame with an add-on
+    # connection.  0 = the end (starter) frame.
+    load_frame: int = 0
     # switches to drop whole action types from the model + combinations
     include_placement: bool = True          # horizontal placement loads
     include_accidental: bool = True         # accidental impact loads
+    include_pattern: bool = True            # checkerboard (pattern) pallet load
     # design
     gamma_G: float = 1.3
     gamma_Q: float = 1.4
@@ -683,6 +688,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             dead.member_loads.append(MemberLoad(b, qz=-cfg.dead_load_beam))
     m.load_cases["dead"] = dead
 
+    n_sides = len(sides)
     pallets = LoadCase("pallets", "variable")
     for z, _, load in specs:
         w_line = (load / 2.0) / cfg.bay_width      # UDL per beam line
@@ -690,30 +696,50 @@ def build_rack(cfg: RackConfig) -> RackModel:
             pallets.member_loads.append(MemberLoad(b, qz=-w_line))
     m.load_cases["pallets"] = pallets
 
+    # checkerboard (pattern) pallet load: alternate bays AND levels are loaded,
+    # the unfavourable arrangement that maximises differential column moments
+    # and sway.  Same beam order as beam_pairs (bay outer, side inner).
+    pattern = cfg.include_pattern and (cfg.n_bays >= 2 or len(specs) >= 2)
+    if pattern:
+        patt = LoadCase("pallets_pattern", "variable")
+        for lvl_idx, (z, _, load) in enumerate(specs):
+            w_line = (load / 2.0) / cfg.bay_width
+            for k, b in enumerate(beam_pairs[z]):
+                bay = k // n_sides
+                if (bay + lvl_idx) % 2 == 0:
+                    patt.member_loads.append(MemberLoad(b, qz=-w_line))
+        if patt.member_loads:
+            m.load_cases["pallets_pattern"] = patt
+        else:
+            pattern = False
+
+    # the frame (upright line) carrying the placement & accidental loads
+    li = max(0, min(int(cfg.load_frame), cfg.n_bays))
+
     top_j = j_of(beam_levels[-1])
     placement = cfg.include_placement and cfg.placement_load > 0
     if placement:
         place = LoadCase("placement", "variable")
-        place.nodal_loads.append(NodalLoad(nid(0, 0, top_j),
+        place.nodal_loads.append(NodalLoad(nid(li, 0, top_j),
                                            fx=cfg.placement_load))
         m.load_cases["placement"] = place
         place_y = LoadCase("placement_y", "variable")
-        place_y.nodal_loads.append(NodalLoad(nid(0, 0, top_j),
+        place_y.nodal_loads.append(NodalLoad(nid(li, 0, top_j),
                                              fy=cfg.placement_load))
         m.load_cases["placement_y"] = place_y
 
-    # accidental impact loads on the corner upright (EN 15512)
+    # accidental impact loads on the chosen frame's upright (EN 15512)
     acc = (cfg.include_accidental
            and (cfg.accidental_load_x or cfg.accidental_load_y)
            and 0.0 < acc_h < H)
     if acc:
         j_acc = j_of(acc_h)
         acc_x = LoadCase("accidental_x", "accidental")
-        acc_x.nodal_loads.append(NodalLoad(nid(0, 0, j_acc),
+        acc_x.nodal_loads.append(NodalLoad(nid(li, 0, j_acc),
                                            fx=cfg.accidental_load_x))
         m.load_cases["accidental_x"] = acc_x
         acc_y = LoadCase("accidental_y", "accidental")
-        acc_y.nodal_loads.append(NodalLoad(nid(0, 0, j_acc),
+        acc_y.nodal_loads.append(NodalLoad(nid(li, 0, j_acc),
                                            fy=cfg.accidental_load_y))
         m.load_cases["accidental_y"] = acc_y
 
@@ -745,6 +771,12 @@ def build_rack(cfg: RackConfig) -> RackModel:
             "ULS-accY", "ULS",
             {"dead": 1.0, "pallets": 1.0, "accidental_y": 1.0},
             imp_directions=["+y"]))
+    if pattern:
+        # checkerboard pallet arrangement (unfavourable partial loading)
+        idx = len([c for c in m.combinations if c.kind == "ULS"])
+        m.combinations.insert(idx, Combination(
+            "ULS-pattern", "ULS",
+            {"dead": cfg.gamma_G, "pallets_pattern": cfg.gamma_Q}))
 
     # ---- imperfection --------------------------------------------------------
     # phi_l: per EN 15512 the connector looseness may be omitted from phi

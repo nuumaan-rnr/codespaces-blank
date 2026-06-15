@@ -77,9 +77,10 @@ def test_full_pipeline_and_json_roundtrip(tmp_path):
     assert all(c.converged for c in cases)
     uls = [c for c in cases if c.kind == "ULS"]
     sls = [c for c in cases if c.kind == "SLS"]
-    # 3 ULS combos x 4 imperfection directions + 2 accidental combos with
-    # a single direction each, 2 SLS
-    assert len(uls) == 14 and len(sls) == 2
+    # 3 gravity ULS combos + 1 pattern (checkerboard) combo, each x 4
+    # imperfection directions, + 2 accidental combos with a single direction
+    # each; 2 SLS
+    assert len(uls) == 18 and len(sls) == 2
     assert {c.imp_direction for c in uls} == {"+x", "-x", "+y", "-y"}
     acc = [c for c in uls if "acc" in c.combo]
     assert len(acc) == 2
