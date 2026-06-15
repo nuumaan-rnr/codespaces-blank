@@ -22,7 +22,8 @@ from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
 from rack15512.envelopes import build_envelopes
-from rack15512.iviewer import figure_for_case, figure_for_envelope
+from rack15512.iviewer import (figure_for_case, figure_for_envelope,
+                               figure_for_loads)
 from rack15512.library import SectionLibrary
 from rack15512.master_store import MasterStore
 from rack15512.model import BasePlate, CrossSection
@@ -666,6 +667,29 @@ def render_project():
                         st.rerun()
 
 
+def _load_check_viewer(model, key: str):
+    """Interactive 3D view that overlays the applied loads of a selected load
+    case / combination, so the user can verify the loads were defined right."""
+    cases = list(model.load_cases.keys())
+    combos = [c.name for c in model.combinations]
+    if not cases and not combos:
+        return
+    with st.container(border=True):
+        ui.section("🧭", "Load check — applied loads on the model")
+        opts = ([f"Combination: {c}" for c in combos]
+                + [f"Load case: {c}" for c in cases])
+        cc = st.columns([3, 1])
+        sel = cc[0].selectbox("Load case / combination", opts,
+                              key=f"loadsel_{key}")
+        show = cc[1].toggle("Show loads", value=True, key=f"loadtog_{key}")
+        name = sel.split(": ", 1)[1]
+        st.plotly_chart(figure_for_loads(model, name, show_loads=show),
+                        width="stretch")
+        st.caption("Red arrows are the applied loads (combination factors "
+                   "included); hover an arrow for its magnitude. Toggle them "
+                   "off to inspect the bare geometry.")
+
+
 # ------------------------------------------------------- view a saved config
 def render_view_config():
     proj = PSTORE.load(ss.project_id)
@@ -694,6 +718,7 @@ def render_view_config():
         c[1].pyplot(plot_frame_elevation(model, 0.0))
         st.caption(f"{len(model.nodes)} nodes · {len(model.members)} members "
                    f"· bracing first diagonal: {cfg.bracing_first_side}")
+        _load_check_viewer(model, key="vc")
 
     with t_results:
         rs = conf.run_summary
