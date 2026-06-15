@@ -102,7 +102,9 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
             continue
         if case.kind == "ULS":
             out += _stress_checks(model, case)
+            out += _shear_checks(model, case)
             out += _buckling_checks(model, case)
+            out += _ltb_checks(model, case)
             out += _brace_buckling_checks(model, case)
             out += _connector_checks(model, case)
             out += _brace_bolt_checks(model, case)
@@ -124,7 +126,9 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
                 # / anchor are NOT checked here - designed separately (anchor
                 # designer) so anchorage never blocks the bracing design.
                 out += _stress_checks(model, case)
+                out += _shear_checks(model, case)
                 out += _buckling_checks(model, case)
+                out += _ltb_checks(model, case)
                 out += _brace_buckling_checks(model, case)
                 out += _connector_checks(model, case)
                 out += _brace_bolt_checks(model, case)
@@ -159,6 +163,47 @@ def _stress_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
                   f"Mz_Rd={Mz_rd/1e6:.2f} kNm")
         res.append(CheckResult("STRESS", case.name, f"member {mid}",
                                m.member_set, eta, detail))
+    return res
+
+
+def _shear_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
+    """Cross-section shear resistance and M-V interaction (EN 1993-1-3 6.1.5 /
+    EN 1993-1-1 6.2.6, 6.2.8).  Beam-type members only (trusses are axial)."""
+    res: List[CheckResult] = []
+    g = model.checks.gamma_M0
+    for mid, mr in case.members.items():
+        m = model.members[mid]
+        if m.mtype != "beam":
+            continue                       # axial-only trusses: no shear check
+        sec = model.section_of(m)
+        fy = model.material_of(m).fy
+        t, h = sec.t, sec.depth_h
+        if not (t and h):
+            res.append(CheckResult(
+                "SHEAR", case.name, f"member {mid}", m.member_set, 0.0,
+                "shear area not evaluated - section t / depth not in the master",
+                informative=True))
+            continue
+        a_v = 2.0 * h * t                  # two webs (RHS beam / lipped upright)
+        v_c_rd = a_v * fy / (math.sqrt(3.0) * g)
+        st = max(mr.stations, key=lambda s: math.hypot(s.Vy, s.Vz))
+        v_ed = math.hypot(st.Vy, st.Vz)
+        eta = v_ed / v_c_rd if v_c_rd > 0 else 99.0
+        note = ""
+        # M-V interaction: reduce the moment resistance when V_Ed > 0.5 V_c,Rd
+        # using the concurrent N, My, Mz at the worst-shear station
+        if v_c_rd > 0 and v_ed > 0.5 * v_c_rd:
+            rho = (2.0 * v_ed / v_c_rd - 1.0) ** 2
+            n_rd = sec.area_eff * fy / g
+            my_rd = sec.mod_y_eff * fy / g * max(1.0 - rho, 1e-6)
+            mz_rd = sec.mod_z_eff * fy / g
+            comb = abs(st.N) / n_rd + abs(st.My) / my_rd + abs(st.Mz) / mz_rd
+            note = f"; M-V rho={rho:.2f} -> N+M (reduced) {comb:.3f}"
+            eta = max(eta, comb)
+        res.append(CheckResult(
+            "SHEAR", case.name, f"member {mid}", m.member_set, eta,
+            f"V_Ed={v_ed/1e3:.2f} kN at x={st.x:.0f} mm, A_v={a_v:.0f} mm^2, "
+            f"V_c,Rd={v_c_rd/1e3:.2f} kN{note}"))
     return res
 
 
@@ -220,6 +265,53 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
                   f"Nb_Rd={Nb_rd/1e3:.1f} kN")
         res.append(CheckResult("BUCKLING", case.name, f"member {mid}",
                                m.member_set, eta, detail))
+    return res
+
+
+def _ltb_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
+    """Lateral-torsional buckling of pallet beams (EN 15512 9.4 / EN 1993-1-1
+    6.3.2).  Pallet beams are normally laterally restrained by the unit load;
+    when CheckSettings.beam_laterally_restrained (default), record that
+    assumption (informative) instead of a check."""
+    res: List[CheckResult] = []
+    restrained = getattr(model.checks, "beam_laterally_restrained", True)
+    g = model.checks.gamma_M1
+    for mid, mr in case.members.items():
+        m = model.members[mid]
+        if m.member_set != "pallet beams":
+            continue
+        my_ed = mr.My_absmax
+        if my_ed <= 0.0:
+            continue
+        if restrained:
+            res.append(CheckResult(
+                "LTB", case.name, f"member {mid}", m.member_set, 0.0,
+                "laterally restrained by the unit load (pallets); LTB not "
+                "governing - EN 15512 9.4", informative=True))
+            continue
+        sec = model.section_of(m)
+        mat = model.material_of(m)
+        L = mr.length
+        Iz = sec.Iz_gross or sec.Iz
+        It = sec.It_gross or sec.J
+        Iw = sec.Iw_gross or 0.0
+        Gmod = mat.E / 2.6                  # steel G = E/(2(1+nu)), nu=0.3
+        C1 = 1.13
+        Mcr = (C1 * math.pi ** 2 * mat.E * Iz / L ** 2
+               * math.sqrt(max((Iw / Iz if Iz else 0.0)
+                               + Gmod * It * L ** 2
+                               / (math.pi ** 2 * mat.E * Iz if Iz else 1.0),
+                               0.0)))
+        Wy = sec.mod_y_eff
+        lam_lt = math.sqrt(Wy * mat.fy / Mcr) if Mcr > 0 else 99.0
+        chi_lt = min(buckling.chi(lam_lt, "b"), 1.0)
+        Mb_rd = chi_lt * Wy * mat.fy / g
+        eta = my_ed / Mb_rd if Mb_rd > 0 else 99.0
+        res.append(CheckResult(
+            "LTB", case.name, f"member {mid}", m.member_set, eta,
+            f"My_Ed={my_ed/1e6:.2f} kNm, M_cr={Mcr/1e6:.2f} kNm, "
+            f"lambda_LT={lam_lt:.2f}, chi_LT={chi_lt:.3f}, "
+            f"Mb_Rd={Mb_rd/1e6:.2f} kNm"))
     return res
 
 

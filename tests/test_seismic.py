@@ -78,6 +78,27 @@ def test_seismic_pipeline_produces_cases_and_checks():
         < ss["base_shear_x_kN"]
 
 
+def test_pallet_sliding_caps_base_shear():
+    from rack15512.analysis import run_all
+    cfg = RackConfig(n_bays=1, beam_levels=[1500.0, 3000.0], depth=1000.0)
+
+    def base_shear(sliding, mu):
+        m = build_rack(cfg)
+        m.seismic = SeismicSettings(enabled=True, zone="V", soil_type="II",
+                                    pallet_sliding=sliding, pallet_mu=mu)
+        m.combinations = []
+        run_all(m)
+        return m.seismic_summary
+
+    off = base_shear(False, 0.05)
+    on = base_shear(True, 0.05)            # very low friction -> sliding governs
+    assert on["sliding_scale_x"] < 1.0
+    assert on["base_shear_x_kN"] < off["base_shear_x_kN"]
+    # high friction -> pallet does not slide, no reduction
+    hi = base_shear(True, 0.6)
+    assert hi["sliding_scale_x"] == 1.0
+
+
 def test_spine_bracing_reduces_down_aisle_drift():
     base = dict(module="back-to-back", n_bays=2, b2b_gap=250.0,
                 beam_levels=[1500.0, 3000.0], depth=1000.0,

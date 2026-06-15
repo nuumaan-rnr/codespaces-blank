@@ -34,6 +34,14 @@ CLAUSES = {
                "bending: |N|/(A_eff·f_y/γ_M) + |M_y|/(W_eff,y·f_y/γ_M) + "
                "|M_z|/(W_eff,z·f_y/γ_M) ≤ 1, effective section properties "
                "from tests / EN 1993-1-3."),
+    "SHEAR": ("EN 1993-1-3 §6.1.5 / EN 1993-1-1 §6.2.6, §6.2.8",
+              "Cross-section shear resistance V_Ed/V_c,Rd ≤ 1 with "
+              "V_c,Rd = A_v·f_y/(√3·γ_M0), A_v the web shear area; the moment "
+              "resistance is reduced (M–V interaction) when V_Ed > 0.5·V_c,Rd."),
+    "LTB": ("EN 15512 §9.4 / EN 1993-1-1 §6.3.2",
+            "Lateral-torsional buckling of pallet beams. Beams restrained by "
+            "the unit load are reported as such (informative); otherwise "
+            "M_y,Ed/(χ_LT·W_y,eff·f_y/γ_M1) ≤ 1 with M_cr and χ_LT."),
     "BUCKLING": ("EN 15512 §9.7.4, §9.7.5 / EN 1993-1-1 §6.3.1",
                  "Flexural and flexural-torsional buckling of the uprights: "
                  "N/N_b,Rd,min + M_y/M_Rd,y + M_z/M_Rd,z ≤ 1, with "
@@ -304,7 +312,7 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
     a("<h2>6. EN 15512 design verifications</h2>")
     a(_img(plot_utilization(model, checks),
           "Governing member utilisation (red > 1 fails)"))
-    order = ["STRESS", "BUCKLING", "BRACE_BUCKLING", "CONNECTOR",
+    order = ["STRESS", "SHEAR", "BUCKLING", "LTB", "BRACE_BUCKLING", "CONNECTOR",
              "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT", "ANCHORAGE",
              "SPLICE", "SEISMIC_DRIFT", "SEISMIC_PDELTA", "DEFLECTION",
              "SWAY", "ALPHA_CR", "STABILITY"]

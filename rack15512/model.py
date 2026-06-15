@@ -345,6 +345,13 @@ class SeismicSettings:
     drift_limit_ratio: float = 0.010
     theta_limit: float = 0.10               # P-Δ negligible threshold (EN 4.4.2)
     theta_max: float = 0.30                 # P-Δ not permitted (EN 1998-1 4.4.2.2)
+    # EN 16681 unit-load sliding: the pallet-to-beam friction caps the horizontal
+    # seismic force a pallet can transfer at ~ c_mu_h*mu*W_pallet.  When enabled,
+    # the pallet (live) mass lateral force is reduced accordingly; structure dead
+    # mass is never capped.  pallet_mu is the design friction coefficient.
+    pallet_sliding: bool = False
+    pallet_mu: float = 0.37                  # wood-on-steel typical (verify)
+    c_mu_h: float = 1.5                      # EN 16681 amplification on friction
     # IS 800 LSD seismic combination rows: (label, f_dead, f_imposed, f_seismic)
     combos: Tuple[Tuple[str, float, float, float], ...] = (
         ("1.2(DL+IL+EL)", 1.2, 1.2, 1.2),
@@ -360,6 +367,10 @@ class CheckSettings:
     gamma_M0: float = 1.0          # cross-section resistance
     gamma_M1: float = 1.0          # member buckling resistance
     k_M: float = 1.0               # moment interaction factor (buckling)
+    # pallet beams are normally laterally restrained by the unit load; when True
+    # the LTB check records that assumption (informative) instead of computing
+    # chi_LT (EN 15512 9.4)
+    beam_laterally_restrained: bool = True
     sway_limit_ratio: float = 200.0       # max sway <= H / ratio (SLS)
     beam_defl_limit_ratio: float = 200.0  # beam deflection <= L / ratio (SLS)
     alpha_cr_warn: float = 10.0

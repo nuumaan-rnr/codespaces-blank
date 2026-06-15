@@ -158,4 +158,5 @@ class SeismicEnvelope:
     v_dyn: float = 0.0             # dynamic (RSA) base shear before scaling
     v_static: float = 0.0         # empirical-period static base shear (Cl 7.7.3)
     t_emp: float = 0.0            # empirical period Ta used for scaling [s]
+    sliding_scale: float = 1.0    # EN 16681 pallet-sliding force reduction (<=1)
     method: str = "RSA"            # 'RSA' | 'ELF'

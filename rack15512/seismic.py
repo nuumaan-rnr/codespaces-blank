@@ -253,6 +253,45 @@ def _apply_scale(env: SeismicEnvelope, lam: float) -> None:
                         for n, d in env.displacement.items()}
 
 
+def _pallet_live_weight(model: RackModel, s) -> float:
+    """Seismic weight [N] contributed by the pallet (live) load only."""
+    lc = model.load_cases.get("pallets")
+    if not lc:
+        return 0.0
+    supported = {sup.node for sup in model.supports}
+    f = s.imposed_factor
+    tot = 0.0
+    for nl in lc.nodal_loads:
+        if nl.fz < 0.0 and nl.node not in supported:
+            tot += f * abs(nl.fz)
+    for ml in lc.member_loads:
+        if ml.qz < 0.0:
+            m = model.members[ml.member]
+            tot += f * abs(ml.qz) * model.member_length(m)
+    return tot
+
+
+def _apply_pallet_sliding(env: SeismicEnvelope, model: RackModel, s,
+                          total_W: float) -> None:
+    """EN 16681 unit-load sliding: cap the horizontal force the pallet (live)
+    mass transfers at ~ c_mu_h*mu*W_pallet.  Approximate: scale the envelope by
+    the weight-averaged reduction f_pallet*(cap/Ah)+(1-f_pallet) using the
+    design Ah (structure dead mass is not capped)."""
+    env.sliding_scale = 1.0
+    if not getattr(s, "pallet_sliding", False) or total_W <= 0.0:
+        return
+    cap = s.c_mu_h * s.pallet_mu
+    t = getattr(env, "t_emp", 0.0) or 0.0
+    ah = horizontal_seismic_coefficient(t if t > 0 else 0.30, s)
+    if ah <= 0.0 or cap >= ah:
+        return                              # sliding does not govern
+    f_pallet = _pallet_live_weight(model, s) / total_W
+    scale = f_pallet * (cap / ah) + (1.0 - f_pallet)
+    env.sliding_scale = scale
+    env.base_shear *= scale
+    _apply_scale(env, scale)
+
+
 # ----------------------------------------------------------- directional combine
 def _directional(ex: SeismicEnvelope, ey: SeismicEnvelope
                  ) -> Dict[str, object]:
@@ -449,12 +488,14 @@ def run_seismic(model: RackModel, progress=None) -> List[CaseResult]:
             env = srss_envelope(per_mode, modal.periods, d, s)
             _scale_to_static(env, model, weights, modal.shapes, modal.periods,
                              s, comp, total_W)
+            _apply_pallet_sliding(env, model, s, total_W)
             envs[d] = env
     else:
         method = "ELF"
         step("Seismic: equivalent static (ELF) fallback", 0.55)
         for comp, d in ((0, "X"), (1, "Y")):
             envs[d] = _elf_envelope(engine, model, weights, total_W, s, comp, d)
+            _apply_pallet_sliding(envs[d], model, s, total_W)
         grav_results = engine.run_static_batch(model, grav_jobs)
 
     step("Seismic: directional (100%+30%) + design combinations", 0.66)
@@ -553,4 +594,8 @@ def _summary(model, s, modal, envs, method, total_W) -> dict:
             envs.get("X", SeismicEnvelope("X")).v_static / 1e3, 1),
         "scale_x": round(envs.get("X", SeismicEnvelope("X")).scale, 2),
         "scale_y": round(envs.get("Y", SeismicEnvelope("Y")).scale, 2),
+        "pallet_sliding": bool(getattr(s, "pallet_sliding", False)),
+        "pallet_mu": getattr(s, "pallet_mu", None),
+        "sliding_scale_x": round(
+            getattr(envs.get("X", SeismicEnvelope("X")), "sliding_scale", 1.0), 2),
     }

@@ -181,6 +181,11 @@ class RackConfig:
     bolt_grade: str = "4.6"
     bolts_per_connection: int = 1
     brace_planes: int = 1              # shear planes of the brace bolt
+    # pallet beams laterally restrained by the unit load (LTB check assumption)
+    beam_laterally_restrained: bool = True
+    # EN 16681 pallet/unit-load sliding cap (seismic)
+    pallet_sliding: bool = False
+    pallet_mu: float = 0.37
     # footplate / base plate (BASEPLATE check)
     concrete_fck: float = 25.0              # MPa
     plate_fy: float = 250.0                 # MPa
@@ -631,6 +636,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.checks.bolt_grade = cfg.bolt_grade
     m.checks.bolts_per_connection = cfg.bolts_per_connection
     m.checks.brace_planes = cfg.brace_planes
+    m.checks.beam_laterally_restrained = cfg.beam_laterally_restrained
     pb, pd_, pt = cfg.plate_b, cfg.plate_d, cfg.plate_t
     if pb is None and pd_ is None and pt is None:
         std = standard_footplate(up.depth_h)
@@ -801,6 +807,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             n_modes=cfg.seismic_n_modes,
             drift_limit_ratio=cfg.seismic_drift_limit,
             theta_max=cfg.seismic_theta_max,
-            apply_base_shear_scaling=cfg.seismic_scale_base_shear)
+            apply_base_shear_scaling=cfg.seismic_scale_base_shear,
+            pallet_sliding=cfg.pallet_sliding, pallet_mu=cfg.pallet_mu)
 
     return m

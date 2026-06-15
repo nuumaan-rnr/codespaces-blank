@@ -34,6 +34,34 @@ def test_imperfection_formula():
         Imperfection().value()
 
 
+def test_shear_and_ltb_checks():
+    m = build_rack(RackConfig(n_bays=2, beam_levels=[2000.0, 4000.0],
+                              depth=1000.0, frame_height=4500.0))
+    # give beam-type sections a web so SHEAR can evaluate (default master omits)
+    for s in m.sections.values():
+        if s.t is None:
+            s.t = 2.0
+        if s.depth_h is None:
+            s.depth_h = 100.0
+    checks = run_checks(m, run_all(m))
+    shear = [c for c in checks if c.check == "SHEAR"]
+    # SHEAR on beam-type members only, never on the truss bracing
+    assert shear and "bracing" not in {c.member_set for c in shear}
+    assert any(c.member_set == "pallet beams" for c in shear)
+    numeric = [c for c in shear if not c.informative]
+    assert numeric and all(0.0 <= c.utilization < 1.0 for c in numeric)
+    # LTB: pallet beams, informative when laterally restrained (default)
+    ltb = [c for c in checks if c.check == "LTB"]
+    assert ltb and all(c.informative and c.member_set == "pallet beams"
+                       for c in ltb)
+    # unrestrained beams get a computed LTB utilisation
+    m2 = build_rack(RackConfig(n_bays=1, beam_levels=[2000.0], depth=1000.0,
+                               frame_height=2500.0,
+                               beam_laterally_restrained=False))
+    ltb2 = [c for c in run_checks(m2, run_all(m2)) if c.check == "LTB"]
+    assert ltb2 and any(not c.informative and c.utilization > 0.0 for c in ltb2)
+
+
 def test_section_library():
     lib = SectionLibrary.bundled()
     assert set(lib.roles()) == {"upright", "beam", "bracing"}

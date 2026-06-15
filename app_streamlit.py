@@ -378,6 +378,12 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             help="Upright line carrying the placement & accidental loads. "
                  "0 = end (starter) frame; for multi-bay runs pick a frame "
                  "with an add-on connection.")
+        beam_restrained = c[1].checkbox(
+            "Beams laterally restrained by the unit load",
+            bool(g("beam_laterally_restrained", True)),
+            help="On = pallet beams held against LTB by the stored unit load "
+                 "(EN 15512 §9.4); the LTB check records the assumption. Off = "
+                 "compute χ_LT and verify lateral-torsional buckling.")
         c = st.columns(3)
         gG = c[0].number_input("gamma_G", 1.0, 2.0, gn("gamma_G", 1.3, 1.0, 2.0))
         gQ = c[1].number_input("gamma_Q", 1.0, 2.0, gn("gamma_Q", 1.4, 1.0, 2.0))
@@ -411,6 +417,17 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         s_damp = st.slider("Damping ratio", 0.01, 0.10,
                            gn("seismic_damping", 0.05, 0.01, 0.10), 0.01,
                            help="5% typical for bolted steel racks")
+        c = st.columns(2)
+        pallet_sliding = c[0].checkbox(
+            "EN 16681 unit-load sliding cap", bool(g("pallet_sliding", False)),
+            help="Cap the horizontal seismic force a pallet transfers at "
+                 "~1.5·μ·W_pallet (the pallet slides on the beam rather than "
+                 "transferring full spectral force). Approximate.")
+        pallet_mu = c[1].number_input(
+            "Pallet friction μ", 0.05, 1.0,
+            gn("pallet_mu", 0.37, 0.05, 1.0), 0.01,
+            help="Design pallet-to-beam friction coefficient (wood-on-steel "
+                 "≈0.37; verify per EN 16681 Annex B).")
         s_struct = st.selectbox(
             "Structure type (lateral system → R)", list(STRUCTURE_TYPES),
             index=_idx(list(STRUCTURE_TYPES),
@@ -489,6 +506,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         accidental_height=ah, include_placement=inc_place,
         include_accidental=inc_acc, include_pattern=inc_patt,
         load_frame=int(load_frame),
+        beam_laterally_restrained=bool(beam_restrained),
+        pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),
         gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,

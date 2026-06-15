@@ -22,10 +22,10 @@ from .report_html import CLAUSES        # shared EN clause + basis text
 from .viewer import (plot_front_elevation, plot_model, plot_plan,
                      plot_side_elevation, plot_utilization)
 
-CHECK_ORDER = ["STRESS", "BUCKLING", "BRACE_BUCKLING", "CONNECTOR",
-               "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT", "ANCHORAGE",
-               "SPLICE", "SEISMIC_DRIFT", "SEISMIC_PDELTA", "DEFLECTION",
-               "SWAY", "ALPHA_CR", "STABILITY"]
+CHECK_ORDER = ["STRESS", "SHEAR", "BUCKLING", "LTB", "BRACE_BUCKLING",
+               "CONNECTOR", "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT",
+               "ANCHORAGE", "SPLICE", "SEISMIC_DRIFT", "SEISMIC_PDELTA",
+               "DEFLECTION", "SWAY", "ALPHA_CR", "STABILITY"]
 
 
 def _png(fig) -> bytes:
