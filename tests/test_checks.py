@@ -116,7 +116,7 @@ def test_back_to_back_module_and_buckling_rules():
     spacers = [m for m in model.members.values()
                if m.member_set == "frame spacer"]
     assert len(spacers) == 2 * 2            # 2 levels x 2 frame lines
-    assert all(m.mtype == "truss" for m in spacers)  # simply-supported ties
+    assert all(m.mtype == "beam" for m in spacers)   # beam ties (in-plane)
     # 4 upright lines get supports
     assert len(model.supports) == 2 * 4
     # buckling restricted to the uprights

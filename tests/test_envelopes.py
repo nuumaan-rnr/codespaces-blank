@@ -60,13 +60,14 @@ def test_build_envelopes_tolerates_stale_results():
     figure_for_case(small, cases[0], checks, scale=30)
 
 
-def test_frame_spacer_and_bracing_are_truss():
+def test_frame_spacer_is_beam_and_bracing_is_truss():
     m = _model(module="back-to-back", depth=1000.0, b2b_gap=250.0)
     spacers = [x for x in m.members.values()
                if x.member_set == "frame spacer"]
     braces = [x for x in m.members.values() if x.member_set == "bracing"]
-    # spacers are simply-supported (truss) ties, bracing also truss
-    assert spacers and all(s.mtype == "truss" for s in spacers)
+    # frame spacers are beam elements (they tie the racks/spine in-plane);
+    # the diagonal bracing stays truss (pinned)
+    assert spacers and all(s.mtype == "beam" for s in spacers)
     assert braces and all(b.mtype == "truss" for b in braces)
     assert all(s.area_factor == 1.0 for s in spacers)
     assert all(b.area_factor == pytest.approx(0.15) for b in braces)

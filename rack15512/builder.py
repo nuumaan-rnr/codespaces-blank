@@ -501,7 +501,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             for z in beam_levels:
                 j = j_of(z)
                 m.add_member(mid, nid(i, sa, j), nid(i, sb, j), spsec,
-                             mtype="truss", member_set="frame spacer")
+                             mtype="beam", member_set="frame spacer")
                 mid += 1
 
     # ---- seismic bracing: plan (horizontal) and spine (vertical X) ---------
