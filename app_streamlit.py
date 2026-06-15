@@ -580,6 +580,148 @@ def render_new_project():
                 goto("project", project_id=proj.id, system_id=sysm.id)
 
 
+SYSTEM_TYPES = ["Selective Pallet Racking", "EN 15512 manual check"]
+
+
+def _member_forces_row(mr):
+    """Governing axial (compression-positive convention preserved) plus the
+    abs-max bending and shear of a member result."""
+    n_gov = mr.N_min if abs(mr.N_min) > abs(mr.N_max) else mr.N_max
+    return {"N [kN]": round(n_gov / 1e3, 2),
+            "N_min [kN]": round(mr.N_min / 1e3, 2),
+            "N_max [kN]": round(mr.N_max / 1e3, 2),
+            "My,max [kNm]": round(mr.My_absmax / 1e6, 3),
+            "Mz,max [kNm]": round(mr.Mz_absmax / 1e6, 3),
+            "V,max [kN]": round(mr.V_absmax / 1e3, 2)}
+
+
+def _manual_check_panel(proj, sysm):
+    """EN 15512 manual check: pick a run configuration, a load case and a
+    member; show the recovered N/My/Mz and every EN 15512 check that applies
+    to that member (upright, beam, bracing, connector, splice, …)."""
+    from rack15512.report_html import CLAUSES
+
+    runnable = [c for c in sysm.configurations if c.run_summary]
+    if not runnable:
+        st.info("No analysed configuration in this system yet. Create a "
+                "configuration and run it, then come back to do manual "
+                "EN 15512 member checks.")
+        return
+
+    cc = st.columns([2, 2, 1.4])
+    conf = cc[0].selectbox(
+        "Configuration (run)", runnable, format_func=lambda c: c.name,
+        key=f"mc_conf_{sysm.id}")
+    cdir = PSTORE.config_dir(proj.id, sysm.id, conf.id)
+    results = _load_results(cdir)
+    if not results:
+        st.warning("This configuration's results are missing on disk. "
+                   "Re-run the analysis to refresh them.")
+        return
+
+    lib, master, _ = resolve_master(conf.master_id, conf.master_path)
+    cfg = rackconfig_from_dict(conf.config, master=master)
+    try:
+        model = build_rack(cfg)
+    except (ValueError, KeyError) as e:
+        st.error(f"Could not rebuild the model: {e}")
+        return
+
+    cases, checks = results["cases"], results["checks"]
+    case_names = [c.name for c in cases]
+    case_name = cc[1].selectbox("Load case / combination", case_names,
+                                key=f"mc_case_{sysm.id}")
+    case = next(c for c in cases if c.name == case_name)
+
+    sets = sorted({m.member_set for m in model.members.values()})
+    set_filter = cc[2].selectbox("Member set filter", ["(all)"] + sets,
+                                 key=f"mc_set_{sysm.id}")
+    ids = sorted(mid for mid, m in model.members.items()
+                 if set_filter == "(all)" or m.member_set == set_filter)
+    if not ids:
+        st.info("No members in that set.")
+        return
+    mid = st.selectbox("Member no.", ids, key=f"mc_mid_{sysm.id}")
+
+    m = model.members[mid]
+    sec = model.sections.get(m.section)
+    st.markdown(
+        f"**Member {mid}** · set **{m.member_set}** · type `{m.mtype}` · "
+        f"section **{m.section}** · length {model.member_length(m):.0f} mm · "
+        f"nodes {m.node_i}→{m.node_j}")
+    if sec is not None:
+        st.caption(
+            f"Section: A={sec.A:.0f} mm² "
+            f"(A_eff={ (sec.A_eff or sec.A):.0f}), Iy={sec.Iy:.3e}, "
+            f"Iz={sec.Iz:.3e} mm⁴, Wely={sec.Wely:.0f}, Welz={sec.Welz:.0f} "
+            f"mm³, material {sec.material}, role {sec.role or '-'}")
+
+    mr = case.members.get(mid)
+    if mr is None:
+        st.warning("This member has no recovered result in the selected case.")
+        return
+
+    setl = m.member_set.lower()
+    is_column = ("upright" in setl or "column" in setl or m.mtype == "column")
+    st.markdown("##### Recovered internal forces (N, M_y, M_z)")
+    st.caption("Down-aisle bending is M_z, cross-aisle bending is M_y; "
+               "N is tension-positive." if is_column else
+               "N is tension-positive; M_y/M_z are the local bending moments.")
+    st.dataframe([_member_forces_row(mr)], hide_index=True, width="stretch")
+
+    with st.expander("Station-by-station forces along the member"):
+        rows = [{"x [mm]": round(s.x, 0),
+                 "N [kN]": round(s.N / 1e3, 2),
+                 "Vy [kN]": round(s.Vy / 1e3, 2),
+                 "Vz [kN]": round(s.Vz / 1e3, 2),
+                 "My [kNm]": round(s.My / 1e6, 3),
+                 "Mz [kNm]": round(s.Mz / 1e6, 3),
+                 "defl [mm]": round(s.defl, 2)} for s in mr.stations]
+        st.dataframe(rows, hide_index=True, width="stretch")
+
+    # EN 15512 checks that target this member in this case
+    mchecks = [c for c in checks
+               if c.case == case_name and c.target == f"member {mid}"]
+    st.markdown("##### EN 15512 checks for this member")
+    if not mchecks:
+        st.info("No member-level checks were produced for this member/case "
+                "(e.g. tension-only members skip buckling). Tighten the set "
+                "filter or pick another case.")
+    for c in mchecks:
+        clause, descr = CLAUSES.get(c.check, ("", ""))
+        icon = {"PASS": "🟢", "FAIL": "🔴", "INFO": "🔵"}.get(c.status, "•")
+        with st.container(border=True):
+            hc = st.columns([3, 1.2])
+            hc[0].markdown(f"**{icon} {c.check}** — {clause}")
+            hc[1].markdown(f"utilisation **{c.utilization:.3f}** "
+                           f"({c.status})")
+            if descr:
+                st.caption(descr)
+            if c.detail:
+                st.code(c.detail, language=None)
+
+    # uprights also carry the base-node checks (base plate / anchorage)
+    if is_column:
+        base = next((n for n in (m.node_i, m.node_j)
+                     if any(s.node == n for s in model.supports)), None)
+        if base is not None:
+            ncks = [c for c in checks if c.case == case_name
+                    and c.target == f"node {base}"]
+            if ncks:
+                st.markdown(f"##### Base checks at support node {base}")
+                for c in ncks:
+                    clause, descr = CLAUSES.get(c.check, ("", ""))
+                    icon = {"PASS": "🟢", "FAIL": "🔴",
+                            "INFO": "🔵"}.get(c.status, "•")
+                    with st.container(border=True):
+                        hc = st.columns([3, 1.2])
+                        hc[0].markdown(f"**{icon} {c.check}** — {clause}")
+                        hc[1].markdown(f"utilisation **{c.utilization:.3f}** "
+                                       f"({c.status})")
+                        if c.detail:
+                            st.code(c.detail, language=None)
+
+
 # ----------------------------------------------------------------- project
 def render_project():
     proj = PSTORE.load(ss.project_id)
@@ -625,6 +767,16 @@ def render_project():
                 st.rerun()
         if sysm.description:
             st.caption(sysm.description)
+
+        systype = st.selectbox(
+            "System type", SYSTEM_TYPES, key=f"systype_{sysm.id}",
+            help="Selective Pallet Racking = the parametric design flow. "
+                 "EN 15512 manual check = verify a single member by load case "
+                 "and member number (N, M_y, M_z + all EN 15512 checks).")
+        if systype == "EN 15512 manual check":
+            _manual_check_panel(proj, sysm)
+            continue
+
         if st.button("➕ New configuration", key=f"newcfg_{sysm.id}"):
             goto("configure", project_id=proj.id, system_id=sysm.id,
                  config_id=None, edit_cfg=None)
