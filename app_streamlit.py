@@ -947,8 +947,22 @@ def render_view_config():
                                "the last run). Re-run the analysis to refresh "
                                "the results and report.")
                 envs = build_envelopes(model, cases, checks)
-                opts = ([f"Envelope: {e.name}" for e in envs]
-                        + [f"Case: {c.name}" for c in cases])
+
+                # member-failure counts per envelope / case, for the selector
+                # labels and the "where are the failures" guidance below
+                env_nf = {e.name: len(_failed_member_sets(
+                    checks, {c.name for c in e.cases})[0]) for e in envs}
+                case_nf = {c.name: len(_failed_member_sets(
+                    checks, {c.name})[0]) for c in cases}
+
+                def _opt(prefix, name, nf):
+                    return f"{prefix}: {name}" + (f"  ⚠ {nf} failed" if nf
+                                                  else "")
+
+                opts = ([_opt("Envelope", e.name, env_nf[e.name])
+                         for e in envs]
+                        + [_opt("Case", c.name, case_nf[c.name])
+                           for c in cases])
                 with st.container(border=True):
                     ui.section("🧊", "Interactive model — coloured by "
                                      "utilisation")
@@ -957,30 +971,48 @@ def render_view_config():
                                           label_visibility="collapsed")
                     scale = cc[1].slider("Deformation scale ×", 0, 200, 30, 5)
 
-                    # resolve the selection to a case-name set for filtering
-                    if sel.startswith("Envelope:"):
-                        env = envs[opts.index(sel)]
+                    # resolve the selection (labels are index-aligned to opts)
+                    idx = opts.index(sel)
+                    if idx < len(envs):
+                        env = envs[idx]
                         sel_case_names = {c.name for c in env.cases}
                     else:
                         env = None
-                        case = cases[opts.index(sel) - len(envs)]
+                        case = cases[idx - len(envs)]
                         sel_case_names = {case.name}
                     failed, buckled = _failed_member_sets(checks,
                                                           sel_case_names)
 
-                    fc = st.columns([2, 2, 3])
+                    fc = st.columns(2)
                     only_failed = fc[0].checkbox(
                         f"Show only failed members ({len(failed)})",
-                        key="flt_failed",
-                        disabled=not failed)
+                        key="flt_failed", disabled=not failed)
                     only_buck = fc[1].checkbox(
                         f"Show only buckling failures ({len(buckled)})",
-                        key="flt_buckling",
-                        disabled=not buckled)
+                        key="flt_buckling", disabled=not buckled)
                     show_only = (buckled if only_buck
                                  else failed if only_failed else None)
-                    if show_only is not None and not show_only:
-                        fc[2].info("Nothing to isolate — no such failures.")
+
+                    # if this view has no member failures, point to where they
+                    # are (another envelope) or explain non-member failures
+                    if not failed:
+                        fail_views = [e.name for e in envs if env_nf[e.name]]
+                        if fail_views:
+                            st.info("No member failures in this view — switch "
+                                    "to **" + "** / **".join(fail_views)
+                                    + "** to isolate the failing members.")
+                        else:
+                            nonmem = sorted({c.check for c in checks
+                                             if not c.informative
+                                             and c.utilization > 1.0
+                                             and not c.target.startswith(
+                                                 "member")})
+                            if nonmem:
+                                st.info("No member-level failures. The failing "
+                                        "checks are not on members: "
+                                        + ", ".join(nonmem) + " — see the "
+                                        "Report for storey drift / P-Δ / base "
+                                        "details.")
 
                     if env is not None:
                         st.plotly_chart(
