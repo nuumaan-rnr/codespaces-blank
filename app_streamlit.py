@@ -832,6 +832,20 @@ def render_project():
                         st.rerun()
 
 
+def _failed_member_sets(checks, case_names):
+    """Member ids that fail any check, and that fail BUCKLING, over the given
+    set of analysis-case names (utilisation > 1.0, excluding informative)."""
+    failed, buckling = set(), set()
+    for c in checks:
+        if (c.case in case_names and c.target.startswith("member")
+                and not c.informative and c.utilization > 1.0):
+            mid = int(c.target.split()[1])
+            failed.add(mid)
+            if c.check == "BUCKLING":
+                buckling.add(mid)
+    return failed, buckling
+
+
 def _load_check_viewer(model, key: str):
     """Interactive 3D view that overlays the applied loads of a selected load
     case / combination, so the user can verify the loads were defined right."""
@@ -927,11 +941,37 @@ def render_view_config():
                     sel = cc[0].selectbox("View envelope / case", opts,
                                           label_visibility="collapsed")
                     scale = cc[1].slider("Deformation scale ×", 0, 200, 30, 5)
+
+                    # resolve the selection to a case-name set for filtering
                     if sel.startswith("Envelope:"):
                         env = envs[opts.index(sel)]
-                        st.plotly_chart(figure_for_envelope(model, env,
-                                                            scale=scale),
-                                        width="stretch")
+                        sel_case_names = {c.name for c in env.cases}
+                    else:
+                        env = None
+                        case = cases[opts.index(sel) - len(envs)]
+                        sel_case_names = {case.name}
+                    failed, buckled = _failed_member_sets(checks,
+                                                          sel_case_names)
+
+                    fc = st.columns([2, 2, 3])
+                    only_failed = fc[0].checkbox(
+                        f"Show only failed members ({len(failed)})",
+                        key="flt_failed",
+                        disabled=not failed)
+                    only_buck = fc[1].checkbox(
+                        f"Show only buckling failures ({len(buckled)})",
+                        key="flt_buckling",
+                        disabled=not buckled)
+                    show_only = (buckled if only_buck
+                                 else failed if only_failed else None)
+                    if show_only is not None and not show_only:
+                        fc[2].info("Nothing to isolate — no such failures.")
+
+                    if env is not None:
+                        st.plotly_chart(
+                            figure_for_envelope(model, env, scale=scale,
+                                                show_only=show_only),
+                            width="stretch")
                         if env.governing:
                             st.markdown(
                                 f"<span class='rnr-muted'>Governing: "
@@ -940,14 +980,19 @@ def render_view_config():
                                 f"{env.governing.utilization:.3f}</span>",
                                 unsafe_allow_html=True)
                     else:
-                        case = cases[opts.index(sel) - len(envs)]
-                        st.plotly_chart(figure_for_case(model, case, checks,
-                                                        scale=scale),
-                                        width="stretch")
+                        st.plotly_chart(
+                            figure_for_case(model, case, checks, scale=scale,
+                                            show_only=show_only),
+                            width="stretch")
                         if not case.converged:
                             st.error("This case did NOT converge.")
-                    st.caption("Hover a member for its forces, a ◆ support "
-                               "for its reactions.")
+                    cap = ("Hover a member for its forces, a ◆ support for its "
+                           "reactions. Failed members are isolated against the "
+                           "faint full wireframe."
+                           if show_only is not None else
+                           "Hover a member for its forces, a ◆ support for its "
+                           "reactions.")
+                    st.caption(cap)
             else:
                 st.info("Re-run to enable the interactive viewer / envelopes.")
             with st.container(border=True):
@@ -1074,7 +1119,37 @@ def render_view_config():
                 st.markdown(open(rp, encoding="utf-8").read())
 
     with t_params:
-        st.json(conf.config)
+        ui.section("⚙️", "Configuration — edit the inputs and re-run")
+        st.caption("Change any input below, then *Update & re-run*. Use this "
+                   "to iterate when a check fails (e.g. heavier upright, "
+                   "tighter bracing, lower pallet load).")
+        cfg_edit = configuration_form(lib, master, cfg)
+        notes = st.text_input("Notes", conf.notes or "", key="param_notes")
+        for lvl, msg in _config_warnings(cfg_edit, lib):
+            (st.error if lvl == "error" else st.warning)(msg)
+        pc = st.columns(2)
+        if pc[0].button("💾 Update configuration", width="stretch",
+                        key="param_save"):
+            if _save_config(proj.id, sysm.id, cfg_edit, conf.master_id, notes):
+                st.rerun()
+        if pc[1].button("💾▶ Update & re-run analysis", type="primary",
+                        width="stretch", key="param_run"):
+            if _save_config(proj.id, sysm.id, cfg_edit, conf.master_id, notes,
+                            silent=True):
+                ui.log(f"Re-run invoked: {conf.name}")
+                try:
+                    summary, _ = ui.run_with_status(
+                        lambda progress: run_configuration(
+                            PSTORE, proj.id, sysm.id, conf.id,
+                            progress=progress),
+                        label="OpenSees second-order analysis")
+                    ui.toast_verdict(summary["verdict"])
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Analysis failed: {exc}")
+                    st.exception(exc)
+        with st.expander("Raw configuration JSON"):
+            st.json(conf.config)
 
 
 # --------------------------------------------------- compare configurations

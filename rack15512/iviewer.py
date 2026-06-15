@@ -16,9 +16,9 @@ from .viewer import _deformed_curve
 
 
 def _core_figure(model, deformed_case, member_vals, node_reactions, util,
-                 scale, title):
+                 scale, title, show_only=None):
     fig = go.Figure()
-    # undeformed wireframe (one trace, None-separated)
+    # undeformed wireframe (one trace, None-separated) - always full, for context
     ux, uy, uz = [], [], []
     for m in model.members.values():
         ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
@@ -30,10 +30,14 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
                                hoverinfo="skip", name="undeformed"))
 
     # deformed members + per-member hover markers at midpoint, coloured by
-    # EN 15512 utilisation (numeric -> RdYlGn reversed, with a colour bar)
+    # EN 15512 utilisation (numeric -> RdYlGn reversed, with a colour bar).
+    # When show_only is a set of member ids, only those are drawn coloured
+    # (the rest stay as the faint wireframe), e.g. to isolate failed members.
     dx, dy, dz = [], [], []
     mxs, mys, mzs, mtext, muval = [], [], [], [], []
     for m in model.members.values():
+        if show_only is not None and m.id not in show_only:
+            continue
         if deformed_case is not None:
             xs, ys, zs = _deformed_curve(model, deformed_case, m, scale)
         else:
@@ -240,7 +244,7 @@ def figure_for_loads(model, selection, show_loads=True):
     return fig
 
 
-def figure_for_case(model, case, checks, scale=1.0):
+def figure_for_case(model, case, checks, scale=1.0, show_only=None):
     member_vals, util = {}, {}
     for mid, mr in case.members.items():
         member_vals[mid] = {"N": -mr.N_min if abs(mr.N_min) > abs(mr.N_max)
@@ -256,10 +260,10 @@ def figure_for_case(model, case, checks, scale=1.0):
     reactions = {node: {c: (r[i], None) for i, c in enumerate(comps)}
                  for node, r in case.reactions.items()}
     return _core_figure(model, case, member_vals, reactions, util,
-                        scale, f"{case.name} (×{scale:g})")
+                        scale, f"{case.name} (×{scale:g})", show_only=show_only)
 
 
-def figure_for_envelope(model, env, scale=1.0):
+def figure_for_envelope(model, env, scale=1.0, show_only=None):
     member_vals = {}
     for mid, e in env.members.items():
         member_vals[mid] = {"N": e.N_min if abs(e.N_min) > abs(e.N_max)
@@ -270,4 +274,5 @@ def figure_for_envelope(model, env, scale=1.0):
     rep = env.representative_case()
     return _core_figure(model, rep, member_vals, env.reactions,
                         env.member_util,
-                        scale, f"{env.name} envelope (×{scale:g})")
+                        scale, f"{env.name} envelope (×{scale:g})",
+                        show_only=show_only)
