@@ -437,7 +437,12 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "modal RSA, SRSS, base-shear scaling, directions 100%+30%.")
         st.markdown("**Seismic bracing** (truss members)")
         c = st.columns(4)
-        brace_opts = ["(frame brace)"] + list(br_names)
+        # include the standard 1C lipped-channel family (generated on the fly by
+        # the builder) so the spine / plan dropdowns aren't limited to the
+        # master-library bracing sections
+        from rack15512.cf_sections import STD_1C
+        _libbr = [n for n in br_names if n not in STD_1C]
+        brace_opts = ["(frame brace)"] + STD_1C + _libbr
         sp_on = c[0].checkbox("Spine bracing (down-aisle X)",
                               bool(g("spine_bracing", False)))
         sp_sec = c[1].selectbox("Spine section", brace_opts,
