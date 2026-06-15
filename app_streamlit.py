@@ -32,7 +32,7 @@ from rack15512.project_run import run_configuration
 from rack15512.report import write_report
 from rack15512.viewer import (plot_deformed, plot_footplate,
                               plot_frame_elevation, plot_front_elevation,
-                              plot_model, plot_plan)
+                              plot_model, plot_plan, plot_side_elevation)
 
 st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
                    initial_sidebar_state="expanded")
@@ -1483,7 +1483,9 @@ def render_seismic_study():
     cc = st.columns(2)
     cc[0].pyplot(plot_model(model))
     cc[1].pyplot(plot_front_elevation(model))
-    st.pyplot(plot_plan(model))
+    cc2 = st.columns(2)
+    cc2[0].pyplot(plot_side_elevation(model))     # side (cross-aisle) view
+    cc2[1].pyplot(plot_plan(model))               # top view
     st.caption(f"{len(model.nodes)} nodes · {len(model.members)} members · "
                f"spine {_n('spine bracing')} · frame spacers "
                f"{_n('frame spacer')} · plan {_n('plan bracing')} (all truss)")
