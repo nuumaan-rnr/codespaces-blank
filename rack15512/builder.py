@@ -246,6 +246,35 @@ class RackConfig:
     # strict clause; sometimes used for flexible long-period racks).
     seismic_scale_base_shear: bool = True
 
+    # ---- multi-deep (drive-in / drive-through / radio-shuttle) --------------
+    # system_type "selective" keeps the SPR builder; anything else dispatches to
+    # build_drive_in (rack15512/drive_in.py).  All fields backward-compatible.
+    system_type: str = "selective"          # "selective" | "drive_in"
+    di_variant: str = "drive_in"            # drive_in|drive_through|
+    #                                         shuttle_lifo|shuttle_fifo
+    n_lanes: int = 3                        # lanes across the width (X)
+    lane_width: float = 1350.0              # width per lane (X) [mm]
+    n_deep: int = 6                         # pallets deep (Y)
+    pallet_depth: float = 1200.0            # pallet depth (Y) [mm]
+    deep_clearance: float = 50.0            # clearance per deep position [mm]
+    weight_per_pallet: float = 10000.0      # N per pallet
+    rail_section: Optional[str] = None      # depth rail / support arm
+    level_beam_section: Optional[str] = None  # shuttle: X beam carrying rails
+    portal_section: Optional[str] = None    # top-tie / portal beam (X)
+    top_beam_section: Optional[str] = None  # access-frame top beam
+    end_frame_3upright: bool = True         # reinforced 3-upright end frames
+    end_frame_section: Optional[str] = None  # heavier end-frame upright
+    frame_brace_extent: str = "full"        # "full" | "top"
+    plan_every_level: bool = False          # shuttle: plan bracing every level
+    spine_position: str = "auto"            # "auto"|"rear"|"centre"|"none"
+    tall_frame_threshold: float = 6000.0    # >this → front stability beam
+    internal_frame_mode: str = "truncated"  # "truncated" | "full"
+    internal_frame_extra: float = 300.0     # truncated uprights above top load
+    top_depth_tie: bool = False             # drive-in: depth tie at frame tops
+    rail_eccentricity: float = 0.0          # rail-to-upright offset (Y) [mm]
+    impact_load: float = 2500.0             # forklift impact (N); 0 disables
+    impact_height: float = 400.0            # impact application height [mm]
+
 
 def bracing_elevations(cfg: RackConfig, frame_height: float) -> List[float]:
     """Elevations of the bracing points: start, start+pitch, ... up to the
@@ -270,6 +299,9 @@ def _pick(lib: SectionLibrary, name: str, role: str) -> str:
 
 
 def build_rack(cfg: RackConfig) -> RackModel:
+    if getattr(cfg, "system_type", "selective") != "selective":
+        from .drive_in import build_drive_in
+        return build_drive_in(cfg)
     lib = cfg.master.library if cfg.master else (cfg.library
                                                  or SectionLibrary.bundled())
     m = RackModel(name=cfg.name)

@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-15 · consolidate SHEAR/LTB info + coverage tests"
+BUILD = "2026-06-15 · multi-deep drive-in/through/shuttle (core)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

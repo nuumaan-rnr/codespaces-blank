@@ -231,6 +231,64 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Bracing", br_names,
             index=_idx(br_names, g("brace_section", "C 36X21X1.2")))
 
+    di_fam = st.radio(
+        "Rack family",
+        ["Selective pallet racking", "Drive-in / Drive-through / Radio shuttle"],
+        index=0 if g("system_type", "selective") == "selective" else 1,
+        horizontal=True)
+    is_di = di_fam.startswith("Drive")
+    di_kw: dict = {}
+    if is_di:
+        with st.container(border=True):
+            ui.section("🏗", "Multi-deep geometry (drive-in / shuttle)")
+            _VARS = ["drive_in", "drive_through", "shuttle_lifo", "shuttle_fifo"]
+            c = st.columns(4)
+            di_variant = c[0].selectbox(
+                "Variant", _VARS, index=_idx(_VARS, g("di_variant", "drive_in")))
+            n_lanes = c[1].number_input("Lanes", 1, 20,
+                                        int(gn("n_lanes", 3, 1, 20)))
+            lane_width = c[2].number_input("Lane width [mm]", 800.0, 2000.0,
+                                           gn("lane_width", 1350.0, 800.0, 2000.0),
+                                           10.0)
+            n_deep = c[3].number_input("Pallets deep", 1, 30,
+                                       int(gn("n_deep", 6, 1, 30)))
+            c = st.columns(4)
+            pallet_depth = c[0].number_input("Pallet depth [mm]", 600.0, 1600.0,
+                                             gn("pallet_depth", 1200.0, 600.0,
+                                                1600.0), 10.0)
+            deep_clear = c[1].number_input("Deep clearance [mm]", 0.0, 200.0,
+                                           gn("deep_clearance", 50.0, 0.0, 200.0),
+                                           5.0)
+            wt_pallet = c[2].number_input(
+                "Weight / pallet [kN]", 1.0, 30.0,
+                gn("weight_per_pallet", 10000.0, 1000.0, 30000.0) / 1e3, 0.5)
+            spine_pos = c[3].selectbox(
+                "Spine", ["auto", "rear", "centre", "none"],
+                index=_idx(["auto", "rear", "centre", "none"],
+                           g("spine_position", "auto")))
+            c = st.columns(4)
+            rail_sec = c[0].selectbox("Rail section", ["(beam)"] + list(beam_names),
+                                      index=0)
+            impact = c[1].number_input(
+                "Forklift impact [kN]", 0.0, 20.0,
+                gn("impact_load", 2500.0, 0.0, 20000.0) / 1e3, 0.5)
+            impact_h = c[2].number_input("Impact height [mm]", 100.0, 1500.0,
+                                         gn("impact_height", 400.0, 100.0, 1500.0),
+                                         50.0)
+            plan_every = c[3].checkbox("Plan bracing every level (shuttle)",
+                                       bool(g("plan_every_level", False)))
+            depth_total = n_deep * (pallet_depth + deep_clear) + deep_clear
+            st.caption(f"Deep dimension ≈ {depth_total:.0f} mm · load/level/lane "
+                       f"= {n_deep * wt_pallet:.1f} kN · rails run in the depth.")
+            di_kw = dict(
+                di_variant=di_variant, n_lanes=int(n_lanes), lane_width=lane_width,
+                n_deep=int(n_deep), pallet_depth=pallet_depth,
+                deep_clearance=deep_clear, weight_per_pallet=wt_pallet * 1e3,
+                spine_position=spine_pos,
+                rail_section=None if rail_sec == "(beam)" else rail_sec,
+                impact_load=impact * 1e3, impact_height=impact_h,
+                plan_every_level=bool(plan_every))
+
     with st.container(border=True):
         ui.section("🪜", "Beam levels  ·  gap · section · load, per level")
         levels0 = g("levels", None)
@@ -485,6 +543,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                            g("plan_bracing_modules", "all")))
 
     cfg = RackConfig(
+        system_type="drive_in" if is_di else "selective", **di_kw,
         name=name, module=module, n_bays=int(n_bays), bay_width=bay_width,
         depth=depth, b2b_gap=b2b_gap, levels=levels, frame_height=frame_h,
         bracing_first_side=first_side, bracing_type=btype,
@@ -626,7 +685,9 @@ def render_new_project():
                 goto("project", project_id=proj.id, system_id=sysm.id)
 
 
-SYSTEM_TYPES = ["Selective Pallet Racking", "EN 15512 manual check"]
+SYSTEM_TYPES = ["Selective Pallet Racking",
+                "Drive-In / Drive-Through / Radio Shuttle",
+                "EN 15512 manual check"]
 
 
 def _member_forces_row(mr):
@@ -822,10 +883,12 @@ def render_project():
         if systype == "EN 15512 manual check":
             _manual_check_panel(proj, sysm)
             continue
+        seed = (RackConfig(system_type="drive_in")
+                if systype.startswith("Drive-In") else None)
 
         if st.button("➕ New configuration", key=f"newcfg_{sysm.id}"):
             goto("configure", project_id=proj.id, system_id=sysm.id,
-                 config_id=None, edit_cfg=None)
+                 config_id=None, edit_cfg=seed)
         if not sysm.configurations:
             st.caption("_No configurations yet._")
             continue
