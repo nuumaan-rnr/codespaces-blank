@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 from .checks.en15512 import CheckResult, all_ok, governing
 from .model import RackModel
 from .results import CaseResult
+from .viewer import _member_color
 from .viewer import (plot_front_elevation, plot_model, plot_plan,
                      plot_side_elevation, plot_utilization)
 
@@ -177,6 +178,33 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
         a(f"<tr><td>{_esc(s.name)}</td><td>{_esc(s.role)}</td>"
           f"<td>{fy:.0f}</td><td>{s.A:.0f}</td><td>{s.area_eff:.0f}</td>"
           f"<td>{s.Iy:.3e}</td><td>{s.Iz:.3e}</td><td>{s.J:.3e}</td></tr>")
+    a("</tbody></table>")
+
+    # ---- 1.2 member-group legend (which section is used where) -----------
+    a("<h3>1.2 Member-group legend</h3>")
+    a("<p>Which section each member group uses, with the element type and the "
+      "colour used in the model views (Section 4) and the interactive 3D "
+      "viewer.</p>")
+    colors = _member_color(model)
+    groups: Dict[str, dict] = {}
+    for m in model.members.values():
+        g = groups.setdefault(m.member_set,
+                              {"mtype": set(), "sec": set(), "n": 0})
+        g["mtype"].add(m.mtype)
+        g["sec"].add(m.section)
+        g["n"] += 1
+    a("<table><thead><tr><th>Group</th><th>Colour</th><th>Element</th>"
+      "<th>Section(s)</th><th>Members</th></tr></thead><tbody>")
+    for name in sorted(groups):
+        g = groups[name]
+        col = colors.get(name, "#888888")
+        swatch = (f"<span style='display:inline-block;width:14px;height:14px;"
+                  f"background:{col};border:1px solid rgba(0,0,0,.25);"
+                  f"vertical-align:middle'></span> {_esc(col)}")
+        elem = ", ".join(sorted(g["mtype"]))
+        secs = ", ".join(sorted(g["sec"]))
+        a(f"<tr><td>{_esc(name)}</td><td>{swatch}</td><td>{_esc(elem)}</td>"
+          f"<td>{_esc(secs)}</td><td>{g['n']}</td></tr>")
     a("</tbody></table>")
 
     # ---- 2 supports & stiffness -----------------------------------------
