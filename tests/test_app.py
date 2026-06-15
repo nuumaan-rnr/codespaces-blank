@@ -82,13 +82,22 @@ def test_view_saved_config_shows_results(tmp_path, monkeypatch):
         "max_utilization_by_check": {"STRESS": 0.77}})
     at = AppTest.from_file(APP, default_timeout=90)
     _setss(at, view="view_config", project_id=proj.id, system_id=sysm.id,
-           config_id=conf.id)
+           config_id=conf.id, vc_tab="📊 Results")
     at.run()
     assert not at.exception
     # results shown as branded tiles + verdict pill
     md = " ".join(m.value or "" for m in at.markdown)
     assert "rnr-pill" in md and "PASS" in md
     assert "Governing" in md and "STRESS" in md
+
+    # a pending tab jump (set by the run dialog) lands on that tab without the
+    # "modify a live widget" error, and the radio reflects it
+    _setss(at, view="view_config", project_id=proj.id, system_id=sysm.id,
+           config_id=conf.id, vc_jump="⚙️ Parameters")
+    at.run()
+    assert not at.exception
+    assert at.session_state["vc_tab"] == "⚙️ Parameters"
+    assert "vc_jump" not in at.session_state
 
 
 def test_compare_view_shows_two_configs(tmp_path, monkeypatch):

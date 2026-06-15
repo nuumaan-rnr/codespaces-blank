@@ -70,6 +70,10 @@ def _load_results(cdir):
         return None
 
 
+# view_config section selector (state-driven so we can jump to a tab)
+_VC_TABS = ["🧱 Model", "📊 Results", "📄 Report", "⚙️ Parameters"]
+
+
 @st.dialog("Analysis run summary", width="large")
 def _run_summary_dialog(rs, target=None):
     v = rs.get("verdict", "?")
@@ -81,10 +85,14 @@ def _run_summary_dialog(rs, target=None):
                     f"{gov.get('target')} = **{gov.get('utilization')}** "
                     f"({gov.get('case')})")
     if target is not None:
-        if st.button("📊 View results (model coloured by utilisation, "
-                     "hover for forces/reactions) →", type="primary",
-                     width="stretch"):
+        bc = st.columns(2)
+        if bc[0].button("📊 Check Results →", type="primary", width="stretch"):
             ss.project_id, ss.system_id, ss.config_id = target
+            ss["vc_jump"] = _VC_TABS[1]           # Results (applied pre-widget)
+            goto("view_config")
+        if bc[1].button("↩ Back to parameters", width="stretch"):
+            ss.project_id, ss.system_id, ss.config_id = target
+            ss["vc_jump"] = _VC_TABS[3]           # Parameters
             goto("view_config")
     st.markdown(f"**{rs.get('n_cases', 0)} analysis cases** from "
                 f"{len(rs.get('combinations', []))} load combinations on "
@@ -888,10 +896,17 @@ def render_view_config():
         return
 
     cdir = PSTORE.config_dir(proj.id, sysm.id, conf.id)
-    t_model, t_results, t_report, t_params = st.tabs(
-        ["Model", "Results", "Report", "Parameters"])
+    # a pending jump (set by the run-summary dialog) is applied BEFORE the
+    # radio is instantiated, so we never modify a live widget's state
+    jump = ss.pop("vc_jump", None)
+    if jump in _VC_TABS:
+        ss["vc_tab"] = jump
+    if ss.get("vc_tab") not in _VC_TABS:
+        ss["vc_tab"] = _VC_TABS[0]
+    active = st.radio("Section", _VC_TABS, key="vc_tab", horizontal=True,
+                      label_visibility="collapsed")
 
-    with t_model:
+    if active == _VC_TABS[0]:
         c = st.columns(2)
         c[0].pyplot(plot_model(model))
         c[1].pyplot(plot_frame_elevation(model, 0.0))
@@ -899,7 +914,7 @@ def render_view_config():
                    f"· bracing first diagonal: {cfg.bracing_first_side}")
         _load_check_viewer(model, key="vc")
 
-    with t_results:
+    if active == _VC_TABS[1]:
         rs = conf.run_summary
         if not rs:
             st.info("This configuration has not been run yet.")
@@ -1030,7 +1045,8 @@ def render_view_config():
                         PSTORE, proj.id, sysm.id, conf.id, progress=progress),
                     label="OpenSees second-order analysis")
                 ui.toast_verdict(summary["verdict"])
-                st.rerun()
+                _run_summary_dialog(summary,
+                                    target=(proj.id, sysm.id, conf.id))
             except Exception as exc:
                 st.error(f"Analysis failed: {exc}")
                 st.exception(exc)
@@ -1047,7 +1063,7 @@ def render_view_config():
             goto("anchor_designer", project_id=proj.id, system_id=sysm.id,
                  config_id=conf.id)
 
-    with t_report:
+    if active == _VC_TABS[2]:
         st.markdown("#### Design Validation Report (EN 15512)")
         st.caption("Engineering calc-sheet: model summary, supports & "
                    "stiffness, load combinations, front / side / plan / 3D "
@@ -1118,7 +1134,7 @@ def render_view_config():
             with st.expander("Preview check report (text)"):
                 st.markdown(open(rp, encoding="utf-8").read())
 
-    with t_params:
+    if active == _VC_TABS[3]:
         ui.section("⚙️", "Configuration — edit the inputs and re-run")
         st.caption("Change any input below, then *Update & re-run*. Use this "
                    "to iterate when a check fails (e.g. heavier upright, "
@@ -1144,7 +1160,8 @@ def render_view_config():
                             progress=progress),
                         label="OpenSees second-order analysis")
                     ui.toast_verdict(summary["verdict"])
-                    st.rerun()
+                    _run_summary_dialog(summary,
+                                        target=(proj.id, sysm.id, conf.id))
                 except Exception as exc:
                     st.error(f"Analysis failed: {exc}")
                     st.exception(exc)
