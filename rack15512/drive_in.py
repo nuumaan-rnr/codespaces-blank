@@ -187,6 +187,22 @@ def build_drive_in(cfg) -> RackModel:
                          portal.name, mtype="beam", member_set="portal beams")
             mid += 1
 
+    # ---- tall-frame stability beam at the access face(s) -------------------
+    # frame height > threshold: a beam across the access-face uprights just
+    # below the 2nd (or 3rd, taller) level stiffens the entry frame. LIFO =
+    # front only; FIFO = front + rear.
+    if H > cfg.tall_frame_threshold and len(rail_levels) >= 2:
+        z_stab = rail_levels[2] if (len(rail_levels) >= 3
+                                    and H > 1.5 * cfg.tall_frame_threshold) \
+            else rail_levels[1]
+        faces = [0] + ([cfg.n_deep] if rear_open else [])
+        for d in faces:
+            for k in range(cfg.n_lanes):
+                m.add_member(mid, _nid(k, d, jz(z_stab)),
+                             _nid(k + 1, d, jz(z_stab)), topbeam.name,
+                             mtype="beam", member_set="portal beams")
+                mid += 1
+
     # ---- top plan bracing (X-Y horizontal) ---------------------------------
     plan_levels = list(rail_levels) if (shuttle and cfg.plan_every_level) \
         else [H]
@@ -277,6 +293,22 @@ def _drive_in_loads(m, cfg, rail_levels, rail_len, n_w, jz, front_open,
             pallets.member_loads.append(MemberLoad(rid, qz=-w))
     m.load_cases["dead"] = dead
     m.load_cases["pallets"] = pallets
+
+    # pallet-to-rail eccentricity (FEM 10.2.07): the pallet bears on the rail
+    # top offset from the upright centroid → an eccentric moment on the upright
+    # at each rail-bearing node (= tributary vertical load × eccentricity).
+    if cfg.rail_eccentricity:
+        from collections import defaultdict
+        mom: Dict[int, float] = defaultdict(float)
+        for ml in pallets.member_loads:
+            mm = m.members[ml.member]
+            if mm.member_set != "rail beams":
+                continue
+            half = abs(ml.qz) * m.member_length(mm) / 2.0
+            mom[mm.node_i] += half * cfg.rail_eccentricity
+            mom[mm.node_j] += half * cfg.rail_eccentricity
+        for nid, mx in mom.items():
+            pallets.nodal_loads.append(NodalLoad(nid, mx=mx))
 
     # placement load (FEM 10.2.07: 0.5 kN both directions at top rail level)
     top_j = jz(rail_levels[-1])
