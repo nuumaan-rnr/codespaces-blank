@@ -62,6 +62,24 @@ def test_shear_and_ltb_checks():
     assert ltb2 and any(not c.informative and c.utilization > 0.0 for c in ltb2)
 
 
+def test_shear_ltb_info_is_consolidated():
+    # default master has no t/depth on uprights/beams, and beams are restrained:
+    # the "not evaluated" / "restrained" notes must be consolidated (one per
+    # case) rather than one per member, to avoid flooding the report
+    m = build_rack(RackConfig(n_bays=3, beam_levels=[2000.0, 4000.0],
+                              depth=1000.0))
+    checks = run_checks(m, run_all(m))
+    # no per-member informative SHEAR/LTB rows
+    assert not any(c.check in ("SHEAR", "LTB") and c.informative
+                   and c.target.startswith("member") for c in checks)
+    shear_info = [c for c in checks if c.check == "SHEAR" and c.informative]
+    ltb_info = [c for c in checks if c.check == "LTB" and c.informative]
+    assert shear_info and all(c.target == "sections" for c in shear_info)
+    assert ltb_info and all(c.target == "pallet beams" for c in ltb_info)
+    # one consolidated note per case (≪ member count)
+    assert len(shear_info) == len({c.case for c in shear_info})
+
+
 def test_section_library():
     lib = SectionLibrary.bundled()
     assert set(lib.roles()) == {"upright", "beam", "bracing"}

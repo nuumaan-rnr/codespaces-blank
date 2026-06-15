@@ -171,6 +171,7 @@ def _shear_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     EN 1993-1-1 6.2.6, 6.2.8).  Beam-type members only (trusses are axial)."""
     res: List[CheckResult] = []
     g = model.checks.gamma_M0
+    missing: set = set()                    # sections without web geometry
     for mid, mr in case.members.items():
         m = model.members[mid]
         if m.mtype != "beam":
@@ -179,10 +180,7 @@ def _shear_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         fy = model.material_of(m).fy
         t, h = sec.t, sec.depth_h
         if not (t and h):
-            res.append(CheckResult(
-                "SHEAR", case.name, f"member {mid}", m.member_set, 0.0,
-                "shear area not evaluated - section t / depth not in the master",
-                informative=True))
+            missing.add(sec.name)          # consolidated into one note below
             continue
         a_v = 2.0 * h * t                  # two webs (RHS beam / lipped upright)
         v_c_rd = a_v * fy / (math.sqrt(3.0) * g)
@@ -204,6 +202,11 @@ def _shear_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             "SHEAR", case.name, f"member {mid}", m.member_set, eta,
             f"V_Ed={v_ed/1e3:.2f} kN at x={st.x:.0f} mm, A_v={a_v:.0f} mm^2, "
             f"V_c,Rd={v_c_rd/1e3:.2f} kN{note}"))
+    if missing:                            # one consolidated note, not per member
+        res.append(CheckResult(
+            "SHEAR", case.name, "sections", "-", 0.0,
+            "shear not evaluated - no web geometry (t / depth) in the master "
+            "for: " + ", ".join(sorted(missing)), informative=True))
     return res
 
 
@@ -276,6 +279,7 @@ def _ltb_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     res: List[CheckResult] = []
     restrained = getattr(model.checks, "beam_laterally_restrained", True)
     g = model.checks.gamma_M1
+    n_restrained = 0
     for mid, mr in case.members.items():
         m = model.members[mid]
         if m.member_set != "pallet beams":
@@ -284,10 +288,7 @@ def _ltb_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         if my_ed <= 0.0:
             continue
         if restrained:
-            res.append(CheckResult(
-                "LTB", case.name, f"member {mid}", m.member_set, 0.0,
-                "laterally restrained by the unit load (pallets); LTB not "
-                "governing - EN 15512 9.4", informative=True))
+            n_restrained += 1              # consolidated into one note below
             continue
         sec = model.section_of(m)
         mat = model.material_of(m)
@@ -312,6 +313,11 @@ def _ltb_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             f"My_Ed={my_ed/1e6:.2f} kNm, M_cr={Mcr/1e6:.2f} kNm, "
             f"lambda_LT={lam_lt:.2f}, chi_LT={chi_lt:.3f}, "
             f"Mb_Rd={Mb_rd/1e6:.2f} kNm"))
+    if restrained and n_restrained:        # one consolidated note, not per beam
+        res.append(CheckResult(
+            "LTB", case.name, "pallet beams", "pallet beams", 0.0,
+            f"{n_restrained} pallet beams laterally restrained by the unit load "
+            "- LTB not governing (EN 15512 9.4)", informative=True))
     return res
 
 
