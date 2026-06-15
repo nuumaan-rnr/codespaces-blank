@@ -262,7 +262,7 @@ class RackConfig:
     level_beam_section: Optional[str] = None  # shuttle: X beam carrying rails
     portal_section: Optional[str] = None    # top-tie / portal beam (X)
     top_beam_section: Optional[str] = None  # access-frame top beam
-    end_frame_3upright: bool = True         # reinforced 3-upright end frames
+    end_frame_3upright: bool = False        # opt-in 3-upright reinforced end
     end_frame_section: Optional[str] = None  # heavier end-frame upright
     frame_brace_extent: str = "full"        # "full" | "top"
     plan_every_level: bool = False          # shuttle: plan bracing every level

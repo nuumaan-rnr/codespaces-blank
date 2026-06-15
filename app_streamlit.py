@@ -280,11 +280,16 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             depth_total = n_deep * (pallet_depth + deep_clear) + deep_clear
             st.caption(f"Deep dimension ≈ {depth_total:.0f} mm · load/level/lane "
                        f"= {n_deep * wt_pallet:.1f} kN · rails run in the depth.")
+            end3 = st.checkbox(
+                "3-upright end frame (only when the deep length can't be met "
+                "with the frame + gaps)", bool(g("end_frame_3upright", False)),
+                help="Optional optimisation: an extra reinforcing upright at the "
+                     "end frame to make up a leftover gap in the deep length.")
             di_kw = dict(
                 di_variant=di_variant, n_lanes=int(n_lanes), lane_width=lane_width,
                 n_deep=int(n_deep), pallet_depth=pallet_depth,
                 deep_clearance=deep_clear, weight_per_pallet=wt_pallet * 1e3,
-                spine_position=spine_pos,
+                spine_position=spine_pos, end_frame_3upright=bool(end3),
                 rail_section=None if rail_sec == "(beam)" else rail_sec,
                 impact_load=impact * 1e3, impact_height=impact_h,
                 plan_every_level=bool(plan_every))
