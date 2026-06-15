@@ -336,6 +336,13 @@ def build_rack(cfg: RackConfig) -> RackModel:
         raise ValueError("frame_height is below the top beam level")
     brace_zs = bracing_elevations(cfg, H)
 
+    # EN 15512 accidental impact is applied 400 mm above the floor; a stale or
+    # corrupt stored value (e.g. 0.05 from an earlier bug) would otherwise drop
+    # the load onto the base node, so fall back to 400 mm when out of range.
+    acc_h = cfg.accidental_height
+    if not (100.0 <= acc_h < H):
+        acc_h = min(400.0, 0.5 * H)
+
     # upright splice: explicit elevation or automatic at H/2 when the
     # upright exceeds the maximum manufacturable length
     splice_z = cfg.splice_z
@@ -345,8 +352,8 @@ def build_rack(cfg: RackConfig) -> RackModel:
     zs: List[float] = [0.0]
     extra = {splice_z} if splice_z else set()
     if (cfg.accidental_load_x or cfg.accidental_load_y) \
-            and 0.0 < cfg.accidental_height < H:
-        extra.add(cfg.accidental_height)
+            and 0.0 < acc_h < H:
+        extra.add(acc_h)
     for z in sorted(set(beam_levels) | set(brace_zs) | {H} | extra):
         if z - zs[-1] > _TOL:
             zs.append(z)
@@ -698,9 +705,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # accidental impact loads on the corner upright (EN 15512)
     acc = (cfg.include_accidental
            and (cfg.accidental_load_x or cfg.accidental_load_y)
-           and 0.0 < cfg.accidental_height < H)
+           and 0.0 < acc_h < H)
     if acc:
-        j_acc = j_of(cfg.accidental_height)
+        j_acc = j_of(acc_h)
         acc_x = LoadCase("accidental_x", "accidental")
         acc_x.nodal_loads.append(NodalLoad(nid(0, 0, j_acc),
                                            fx=cfg.accidental_load_x))
