@@ -115,15 +115,21 @@ def static_upright_demand(cfg) -> Dict:
             gaps.append(z - prev)
             prev = z
         n_levels = len(bl)
-    # down-aisle (K=1.0) buckling length = the largest unbraced upright segment
-    # between vertical restraints (base->L1, level gaps, and last level->top)
-    top_seg = max(float(getattr(cfg, "frame_height", 0.0) or 0.0)
-                  - sum(gaps), 0.0)
-    Lcr_da = max(gaps + [top_seg]) if (gaps or top_seg) else 2000.0
-    # cross-aisle = the frame-bracing pitch (braced ladder)
-    pitch = float(getattr(cfg, "bracing_pitch", 600.0) or 600.0)
-
+    H = float(getattr(cfg, "frame_height", 0.0) or 0.0) or (sum(gaps) + 1000.0)
+    # cross-aisle (local y) is braced by the frame ladder at the bracing pitch
+    Lcr_ca = float(getattr(cfg, "bracing_pitch", 600.0) or 600.0)
     system = getattr(cfg, "system_type", "selective")
+    # down-aisle (local z, K=1.0):
+    #  * drive-in / shuttle: the upright is unbraced down-aisle between the base
+    #    and the top (rails restrain cross-aisle only) -> full frame height;
+    #  * selective: restrained at every beam level by the moment frame -> the
+    #    largest beam-level gap.
+    if system != "selective":
+        Lcr_da = H
+    else:
+        top_seg = max(H - sum(gaps), 0.0)
+        Lcr_da = max(gaps + [top_seg]) if (gaps or top_seg) else 2000.0
+
     if system != "selective":                    # drive-in / shuttle
         nL = int(getattr(cfg, "n_lanes", 3))
         n_deep = int(getattr(cfg, "n_deep", 6))
@@ -141,7 +147,8 @@ def static_upright_demand(cfg) -> Dict:
         n_up = (n_bays + 1) * sides
 
     n_avg = P / n_up if n_up else 0.0
+    # Lcr_y pairs with Iy = cross-aisle; Lcr_z pairs with Iz = down-aisle
     return {"N_design": k_dist * n_avg, "N_avg": n_avg, "k_dist": k_dist,
-            "Lcr_y": Lcr_da, "Lcr_z": pitch, "fy": float(getattr(cfg,
-            "steel_fy", 355.0)), "n_uprights": n_up, "P_total": P,
-            "n_levels": n_levels}
+            "Lcr_y": Lcr_ca, "Lcr_z": Lcr_da, "Lcr_ca": Lcr_ca, "Lcr_da": Lcr_da,
+            "fy": float(getattr(cfg, "steel_fy", 355.0)), "n_uprights": n_up,
+            "P_total": P, "n_levels": n_levels}

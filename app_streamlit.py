@@ -852,19 +852,22 @@ def _upright_suggester(cfg, lib, master, up_names):
         # all four inputs are computed directly from the configuration so they
         # always track the current inputs (no stale manual values)
         est = presize.static_upright_demand(cfg)
-        N, lcy, lcz = est["N_design"], est["Lcr_y"], est["Lcr_z"]
+        N = est["N_design"]
+        lcy, lcz = est["Lcr_y"], est["Lcr_z"]   # Iy=cross-aisle, Iz=down-aisle
         fy = est["fy"]
+        di = getattr(cfg, "system_type", "selective") != "selective"
         st.caption(
             f"Computed from the configuration: factored pallet load "
             f"≈ {est['P_total']/1e3:.0f} kN over {est['n_uprights']} uprights "
             f"→ ~{est['N_avg']/1e3:.1f} kN average · design load "
-            f"= ×{est['k_dist']:g} worst/avg. Buckling lengths are pinned-pinned "
-            "(K = 1.0): down-aisle = largest level gap, cross-aisle = bracing "
-            "pitch. fy is per section from the master.")
+            f"= ×{est['k_dist']:g} worst/avg. Buckling lengths (K = 1.0, "
+            "pinned-pinned): cross-aisle = bracing pitch; down-aisle = "
+            + ("full frame height (uprights unbraced down-aisle)" if di
+               else "largest beam-level gap") + ". fy per section from master.")
         c = st.columns(4)
         c[0].metric("Axial load N", f"{N/1e3:.1f} kN")
-        c[1].metric("Lcr down-aisle", f"{lcy:.0f} mm")
-        c[2].metric("Lcr cross-aisle", f"{lcz:.0f} mm")
+        c[1].metric("Lcr down-aisle", f"{est['Lcr_da']:.0f} mm")
+        c[2].metric("Lcr cross-aisle", f"{est['Lcr_ca']:.0f} mm")
         c[3].metric("fy (default)", f"{fy:.0f} MPa")
 
         def _fy_of(name):

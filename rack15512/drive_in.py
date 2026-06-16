@@ -31,11 +31,33 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from .library import SectionLibrary
-from .model import (BuiltUpColumn, Combination, Hinge, Imperfection, LoadCase,
-                    MemberLoad, NodalLoad, RackModel, SeismicSettings, Steel,
-                    Support)
+from .model import (BuiltUpColumn, Combination, CrossSection, Hinge,
+                    Imperfection, LoadCase, MemberLoad, NodalLoad, RackModel,
+                    SeismicSettings, Steel, Support)
 
 _TOL = 1.0
+
+
+def _rstab_arm() -> CrossSection:
+    """Cantilever-arm section from the client RSTAB model (cs3
+    'UU 30/30/3/3/3/190', 'Arm -200'); inertias cm^4 -> mm^4, area cm^2 -> mm^2."""
+    return CrossSection(
+        name="UU30x190x3 arm", material="steel",
+        A=732.0, Iy=3.1311e6, Iz=38650.0, J=2179.0,
+        Wely=3.1311e6 / 95.0, Welz=38650.0 / 15.0,
+        role="beam", width_b=30.0, depth_h=190.0, t=3.0,
+        description="RSTAB cs3 cantilever arm")
+
+
+def _rstab_rail() -> CrossSection:
+    """Depth rail section from the client RSTAB model (cs4
+    'DRIVE-IN RAIL 2.5 MM'); inertias cm^4 -> mm^4, area cm^2 -> mm^2."""
+    return CrossSection(
+        name="DRIVE-IN RAIL 2.5", material="steel",
+        A=709.8, Iy=1.8056e6, Iz=457718.0, J=1462.0,
+        Wely=1.8056e6 / 79.68, Welz=457718.0 / 64.22,
+        role="beam", width_b=128.44, depth_h=159.37, t=2.5,
+        description="RSTAB cs4 drive-in rail")
 
 
 def _select_bays(n: int, modules: str, bay_list) -> List[int]:
@@ -77,8 +99,10 @@ def build_drive_in(cfg) -> RackModel:
 
     up = pick(cfg.upright_section, "upright")
     brace = pick(cfg.brace_section, "bracing")
-    arm = pick(cfg.arm_section or cfg.beam_section, "beam")
-    rail = pick(cfg.rail_section or cfg.beam_section, "beam")
+    # cantilever arm + depth rail default to the RSTAB drive-in profiles unless a
+    # specific section is named (so the deflection / forces use real properties)
+    arm = pick(cfg.arm_section, "beam") if cfg.arm_section else _rstab_arm()
+    rail = pick(cfg.rail_section, "beam") if cfg.rail_section else _rstab_rail()
     top = pick(cfg.portal_section or cfg.top_beam_section or cfg.beam_section,
                "beam")
     # rear (back) down-aisle beams: a separate section so the top beams and the
@@ -166,13 +190,20 @@ def build_drive_in(cfg) -> RackModel:
     # EN 1993-1-1 §6.4 BUILT_UP check governs them instead of the single-section
     # STRESS/BUCKLING checks.
     end_k = {0, nL} if getattr(cfg, "built_up_end_columns", False) else set()
+    # EN 15512 buckling lengths (drive-in is pinned-pinned, K=1.0): cross-aisle
+    # (local y) is braced by the frame ladder at the bracing pitch; down-aisle
+    # (local z) the upright is unbraced between the base and the top (the rails
+    # restrain cross-aisle only), so it buckles over the full frame height.
+    lcr_ca = float(cfg.bracing_pitch or 600.0)
+    lcr_da = H
     for k in range(nL + 1):
         ms = "end columns" if k in end_k else "uprights"
         for di in range(nDpos):
             for a, b in zip(zz, zz[1:]):
                 m.add_member(mid, node_of[(k, di, rz(a))],
                              node_of[(k, di, rz(b))], up.name,
-                             member_set=ms, mesh=cfg.mesh_upright)
+                             member_set=ms, mesh=cfg.mesh_upright,
+                             L_buckling_y=lcr_ca, L_buckling_z=lcr_da)
                 mid += 1
 
     # ---- frame bracing — same as the SPR frame (bottom + top horizontal

@@ -70,7 +70,10 @@ def test_static_demand_selective_and_drive_in():
     di = presize.static_upright_demand(RackConfig(
         system_type="drive_in", di_variant="drive_in", n_lanes=3, n_deep=4,
         weight_per_pallet=10000.0, beam_levels=[1600.0, 3200.0, 4800.0],
-        bracing_pitch=600.0))
+        frame_height=6200.0, bracing_pitch=600.0))
     assert di["N_design"] > 0
-    assert di["Lcr_z"] == 600.0                   # cross-aisle = bracing pitch
+    assert di["Lcr_ca"] == 600.0                   # cross-aisle = bracing pitch
+    assert di["Lcr_da"] == 6200.0                  # down-aisle = full frame height
+    # down-aisle (Iz) buckling is much longer than cross-aisle (Iy)
+    assert di["Lcr_z"] > di["Lcr_y"]
     assert di["n_levels"] == 3
