@@ -79,6 +79,30 @@ def test_deep_dimension():
     assert max(ys) == 3 * (1100.0 + 1100.0) + 1100.0      # 7700, the RSTAB depth
 
 
+def test_built_up_end_columns():
+    # opt-in boxed end columns: tagged "end columns", verified by BUILT_UP
+    # (EN 1993-1-1 6.4) and excluded from the single-section STRESS/BUCKLING
+    m = build_rack(_cfg("drive_in", built_up_end_columns=True,
+                        built_up_arrangement="battened", built_up_h0=120.0,
+                        built_up_panel=600.0))
+    assert _sets(m)["end columns"] > 0
+    assert m.built_up is not None and m.built_up.target_set == "end columns"
+    cases = run_all(m)
+    checks = run_checks(m, cases)
+    kinds = {c.check for c in checks}
+    assert "BUILT_UP" in kinds
+    # end columns must not appear under the single-section checks
+    for c in checks:
+        if c.member_set == "end columns":
+            assert c.check not in ("STRESS", "BUCKLING")
+
+
+def test_no_built_up_by_default():
+    m = build_rack(_cfg("drive_in"))
+    assert m.built_up is None
+    assert _sets(m)["end columns"] == 0
+
+
 def test_frames_have_gaps():
     # frame bracing only within the 2-leg frames, not in the pallet gaps
     m = build_rack(_cfg("drive_in", n_deep=3, frame_depth=1100.0,

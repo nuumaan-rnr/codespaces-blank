@@ -79,6 +79,11 @@ CLAUSES = {
     "SPLICE": ("EN 1993-1-8 §3 (bolt group)",
                "Upright splice connection: elastic bolt-group check for the "
                "concurrent N, V and M; per-bolt min(shear, bearing)."),
+    "BUILT_UP": ("EN 1993-1-1 §6.4",
+                 "Built-up (battened / laced) end column: amplified mid-length "
+                 "moment M_Ed = (N_Ed·e0 + M_Ed^I)/(1 − N_Ed/N_cr − N_Ed/S_v), "
+                 "chord force N_ch,Ed = 0.5·N_Ed + M_Ed·h0·A_ch/(2·I_eff) ≤ "
+                 "the chord flexural-buckling resistance over a panel."),
     "DEFLECTION": ("EN 15512 §9.4.5",
                    "Beam deflection at SLS ≤ span/200 (or the configured "
                    "limit)."),
@@ -314,8 +319,8 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
           "Governing member utilisation (red > 1 fails)"))
     order = ["STRESS", "SHEAR", "BUCKLING", "LTB", "BRACE_BUCKLING", "CONNECTOR",
              "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT", "ANCHORAGE",
-             "SPLICE", "SEISMIC_DRIFT", "SEISMIC_PDELTA", "DEFLECTION",
-             "SWAY", "ALPHA_CR", "STABILITY"]
+             "SPLICE", "BUILT_UP", "SEISMIC_DRIFT", "SEISMIC_PDELTA",
+             "DEFLECTION", "SWAY", "ALPHA_CR", "STABILITY"]
     n = 1
     for kind in order:
         rows = [c for c in checks if c.check == kind]

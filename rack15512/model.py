@@ -483,6 +483,44 @@ class Splice:
 
 
 @dataclass
+class BuiltUpColumn:
+    """Built-up (battened or laced) end / anchor column per EN 1993-1-1 6.4.
+
+    Two parallel chords (the standard upright section, unless `chord_section`
+    names another) at centroid spacing `h0`, connected by battens (plates) or
+    lacing (diagonals).  The BUILT_UP check amplifies the column's first-order
+    moment for the built-up bow + reduced shear stiffness and verifies the most
+    loaded chord over a panel length.
+
+    Geometry that is product-specific (chord spacing, panel/batten spacing,
+    lacing diagonal) is exposed here with conservative defaults flagged
+    "confirm" — set them from the actual boxed-frame detail.
+
+    target_set : member set whose members are treated as built-up columns
+                 (the drive-in builder tags the reinforced end uprights).
+    """
+
+    target_set: str = "end columns"
+    arrangement: str = "battened"      # "battened" | "laced"
+    n_chords: int = 2
+    chord_section: Optional[str] = None  # None -> use each member's own section
+    h0: float = 100.0                  # chord centroid spacing [mm] (confirm)
+    panel_a: float = 500.0             # batten / lacing panel spacing a [mm]
+    L: Optional[float] = None          # column length [mm]; None -> member length
+    e0_ratio: float = 500.0            # initial bow imperfection e0 = L / ratio
+    gamma_M1: float = 1.0
+    # battened: stiffness of one batten about the column axis (I_b) [mm^4];
+    # large value -> the chord term governs S_v (EN 1993-1-1 eq 6.73)
+    batten_I: Optional[float] = None
+    n_planes: int = 2                  # batten / lacing planes (faces)
+    # laced: single diagonal area A_d [mm^2] and diagonal length d [mm]; when
+    # d is None it is taken as sqrt(h0^2 + panel_a^2)
+    lacing_area: Optional[float] = None
+    lacing_d: Optional[float] = None
+    lacing_n_per_panel: int = 2        # diagonals per panel per plane
+
+
+@dataclass
 class RackModel:
     name: str = "rack"
     materials: Dict[str, Steel] = field(default_factory=dict)
@@ -499,6 +537,7 @@ class RackModel:
     seismic_summary: Optional[dict] = None     # filled by run_seismic for reports
     base_plate: Optional[BasePlate] = None
     splices: List[Splice] = field(default_factory=list)
+    built_up: Optional[BuiltUpColumn] = None
 
     # ---- convenience builders -------------------------------------------
     def add_node(self, nid: int, x: float, y: float, z: float) -> Node:

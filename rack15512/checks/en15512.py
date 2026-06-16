@@ -28,6 +28,10 @@ partial factors and limits are configurable in CheckSettings):
              governing base reaction (axial + moment).  Required plate
              thickness and minimum plate size are reported; the actual
              plate is verified when given.  Enabled by RackModel.base_plate.
+  BUILT_UP   built-up (battened / laced) end column per EN 1993-1-1 6.4:
+             amplified mid-length moment for the built-up bow + reduced shear
+             stiffness, with the most loaded chord verified over a panel.
+             Enabled by RackModel.built_up (BuiltUpColumn).
   DEFLECTION (SLS) beam transverse deflection (resultant relative to the
              chord) <= L / limit_ratio.
   SWAY       (SLS) max horizontal displacement in X and in Y <= H / ratio.
@@ -112,6 +116,7 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
             out += _base_restraint_checks(model, case)
             out += _anchorage_checks(model, case)
             out += _splice_checks(model, case)
+            out += _built_up_checks(model, case)
             a = _alpha_cr_check(model, case)
             if a:
                 out.append(a)
@@ -133,6 +138,7 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
                 out += _connector_checks(model, case)
                 out += _brace_bolt_checks(model, case)
                 out += _splice_checks(model, case)
+                out += _built_up_checks(model, case)
         else:
             out += _deflection_checks(model, case)
             out += _sway_checks(model, case)
@@ -143,8 +149,11 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
 def _stress_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     res = []
     g = model.checks.gamma_M0
+    bu_set = model.built_up.target_set if model.built_up else None
     for mid, mr in case.members.items():
         m = model.members[mid]
+        if bu_set is not None and m.member_set == bu_set:
+            continue                       # verified by the BUILT_UP procedure
         sec = model.section_of(m)
         fy = model.material_of(m).fy
         N_rd = sec.area_eff * fy / g
@@ -794,6 +803,103 @@ def _splice_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             res.append(CheckResult(
                 "SPLICE", case.name, f"member {worst[2]} (z={sp.z:.0f})",
                 "uprights", worst[0], worst[1]))
+    return res
+
+
+def _built_up_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
+    """Built-up (battened / laced) end-column check per EN 1993-1-1 6.4.
+
+    For each member of the configured target set, take the worst compression
+    N_Ed and the concurrent first-order moment M_Ed^I, then:
+
+      - effective inertia I_eff = 0.5*h0^2*A_ch (+ 2*mu*I_ch for battened),
+        mu = 1 (lam<=75), 2-lam/75 (75<lam<150), 0 (lam>=150);
+      - N_cr = pi^2*E*I_eff/L^2, shear stiffness S_v (eq 6.73 battened /
+        6.70-6.71 laced);
+      - amplified mid-length moment (eq 6.69)
+        M_Ed = (N_Ed*e0 + M_Ed^I) / (1 - N_Ed/N_cr - N_Ed/S_v), e0 = L/500;
+      - chord design force (eq 6.72)
+        N_ch,Ed = 0.5*N_Ed + M_Ed*h0*A_ch/(2*I_eff);
+      - chord flexural-buckling resistance over the panel length `a`.
+
+    Utilisation = N_ch,Ed / N_b,Rd(chord over a).  The shear V_Ed = pi*M_Ed/L
+    (eq 6.78) on the lacing / batten is reported in the detail.
+    """
+    bu = model.built_up
+    if bu is None:
+        return []
+    res: List[CheckResult] = []
+    g = bu.gamma_M1
+    for mid, mr in case.members.items():
+        m = model.members[mid]
+        if m.member_set != bu.target_set:
+            continue
+        if mr.N_min >= 0.0:
+            continue                       # no compression -> no built-up check
+        mat = model.material_of(m)
+        E, fy = mat.E, mat.fy
+        chord = (model.sections[bu.chord_section] if bu.chord_section
+                 else model.section_of(m))
+        A_ch = chord.area_eff
+        I_ch = min(chord.Iy, chord.Iz)     # chord inertia about its weak axis
+        L = bu.L if bu.L else mr.length
+        h0, a = bu.h0, bu.panel_a
+        # worst compression station and its concurrent first-order moment
+        st = min(mr.stations, key=lambda s: s.N)
+        N_ed = abs(st.N)
+        M_i = math.hypot(st.My, st.Mz)
+        # effective inertia + mu (battened only)
+        I1 = 0.5 * h0 ** 2 * A_ch
+        i0 = math.sqrt(I1 / (2.0 * A_ch)) if A_ch > 0 else 0.0
+        lam = L / i0 if i0 > 0 else 0.0
+        if bu.arrangement == "laced":
+            mu = 1.0
+        elif lam <= 75.0:
+            mu = 1.0
+        elif lam < 150.0:
+            mu = 2.0 - lam / 75.0
+        else:
+            mu = 0.0
+        I_eff = I1 + (2.0 * mu * I_ch if bu.arrangement == "battened" else 0.0)
+        n_cr_bu = math.pi ** 2 * E * I_eff / L ** 2 if L > 0 else 0.0
+        # shear stiffness S_v
+        if bu.arrangement == "laced":
+            A_d = bu.lacing_area or (2.0 * A_ch)   # conservative default
+            d = bu.lacing_d or math.sqrt(h0 ** 2 + a ** 2)
+            n_d = bu.lacing_n_per_panel
+            s_v = bu.n_planes * n_d * E * A_d * a * h0 ** 2 / d ** 3
+        else:
+            i_b = bu.batten_I if bu.batten_I is not None else 1e30
+            s_v = 24.0 * E * I_ch / (a ** 2 * (1.0 + 2.0 * I_ch * a
+                                               / (i_b * h0)))
+            s_v = min(s_v, 2.0 * math.pi ** 2 * E * I_ch / a ** 2)
+        e0 = L / bu.e0_ratio
+        denom = 1.0 - (N_ed / n_cr_bu if n_cr_bu > 0 else 0.0) \
+            - (N_ed / s_v if s_v > 0 else 0.0)
+        if denom <= 0.0:
+            res.append(CheckResult(
+                "BUILT_UP", case.name, f"member {mid}", m.member_set, 99.0,
+                f"N_Ed={N_ed/1e3:.1f} kN >= built-up capacity "
+                f"(N_cr={n_cr_bu/1e3:.0f} kN, S_v={s_v/1e3:.0f} kN): "
+                f"amplification singular"))
+            continue
+        m_ed = (N_ed * e0 + M_i) / denom
+        n_ch = 0.5 * N_ed + m_ed * h0 * A_ch / (2.0 * I_eff)
+        # chord flexural buckling over the panel length a (weak axis)
+        ncr_ch = buckling.n_cr(E, I_ch, a)
+        lam_ch = buckling.lambda_bar(A_ch, fy, ncr_ch)
+        chi_ch = buckling.chi(lam_ch, chord.buckling_curve_z)
+        n_b_rd = chi_ch * A_ch * fy / g
+        v_ed = math.pi * m_ed / L if L > 0 else 0.0
+        eta = n_ch / n_b_rd if n_b_rd > 0 else 99.0
+        res.append(CheckResult(
+            "BUILT_UP", case.name, f"member {mid}", m.member_set, eta,
+            f"{bu.arrangement} 2-chord: N_Ed={N_ed/1e3:.1f} kN, "
+            f"M_Ed={m_ed/1e6:.2f} kNm (M_I={M_i/1e6:.2f}, e0={e0:.1f} mm), "
+            f"N_ch,Ed={n_ch/1e3:.1f} kN, N_b,Rd(chord/a={a:.0f})="
+            f"{n_b_rd/1e3:.1f} kN; I_eff={I_eff:.3e} mm^4, mu={mu:.2f}, "
+            f"N_cr={n_cr_bu/1e3:.0f} kN, S_v={s_v/1e3:.0f} kN, "
+            f"V_Ed(lacing)={v_ed/1e3:.2f} kN"))
     return res
 
 

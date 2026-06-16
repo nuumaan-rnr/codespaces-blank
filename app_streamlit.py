@@ -299,12 +299,34 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 "with the frame + gaps)", bool(g("end_frame_3upright", False)),
                 help="Optional optimisation: an extra reinforcing upright at the "
                      "end frame to make up a leftover gap in the deep length.")
+            boxed = st.checkbox(
+                "Boxed / built-up end columns (EN 1993-1-1 §6.4)",
+                bool(g("built_up_end_columns", False)),
+                help="Treat the two end frames as battened/laced two-chord "
+                     "columns and verify them with the BUILT_UP check instead "
+                     "of the single-section stress/buckling checks.")
+            if boxed:
+                bc = st.columns(3)
+                bu_arr = bc[0].selectbox(
+                    "Built-up arrangement", ["battened", "laced"],
+                    index=_idx(["battened", "laced"],
+                               g("built_up_arrangement", "battened")))
+                bu_h0 = bc[1].number_input(
+                    "Chord spacing h0 [mm]", 40.0, 600.0,
+                    gn("built_up_h0", 120.0, 40.0, 600.0), 10.0)
+                bu_panel = bc[2].number_input(
+                    "Batten / lacing panel [mm]", 100.0, 2000.0,
+                    gn("built_up_panel", 600.0, 100.0, 2000.0), 50.0)
+            else:
+                bu_arr, bu_h0, bu_panel = "battened", 120.0, 600.0
             di_kw = dict(
                 di_variant=di_variant, n_lanes=int(n_lanes), lane_width=lane_width,
                 n_deep=int(n_deep), pallet_depth=pallet_depth,
                 deep_clearance=deep_clear, frame_depth=frame_depth,
                 arm_length=arm_len, weight_per_pallet=wt_pallet * 1e3,
                 spine_position=spine_pos, end_frame_3upright=bool(end3),
+                built_up_end_columns=bool(boxed), built_up_arrangement=bu_arr,
+                built_up_h0=bu_h0, built_up_panel=bu_panel,
                 rail_section=None if rail_sec == "(beam)" else rail_sec,
                 impact_load=impact * 1e3, impact_height=impact_h,
                 plan_every_level=bool(plan_every))

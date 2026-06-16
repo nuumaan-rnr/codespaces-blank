@@ -31,8 +31,9 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from .library import SectionLibrary
-from .model import (Combination, Hinge, Imperfection, LoadCase, MemberLoad,
-                    NodalLoad, RackModel, SeismicSettings, Steel, Support)
+from .model import (BuiltUpColumn, Combination, Hinge, Imperfection, LoadCase,
+                    MemberLoad, NodalLoad, RackModel, SeismicSettings, Steel,
+                    Support)
 
 _TOL = 1.0
 
@@ -138,12 +139,17 @@ def build_drive_in(cfg) -> RackModel:
     zz = sorted(zs)
 
     # ---- uprights (legs of each depth frame, at every width line) ----------
+    # boxed/built-up end columns (opt-in): tag the two end frames so the
+    # EN 1993-1-1 §6.4 BUILT_UP check governs them instead of the single-section
+    # STRESS/BUCKLING checks.
+    end_k = {0, nL} if getattr(cfg, "built_up_end_columns", False) else set()
     for k in range(nL + 1):
+        ms = "end columns" if k in end_k else "uprights"
         for di in range(nDpos):
             for a, b in zip(zz, zz[1:]):
                 m.add_member(mid, node_of[(k, di, rz(a))],
                              node_of[(k, di, rz(b))], up.name,
-                             member_set="uprights", mesh=cfg.mesh_upright)
+                             member_set=ms, mesh=cfg.mesh_upright)
                 mid += 1
 
     # ---- frame bracing — same as the SPR frame (bottom + top horizontal
@@ -323,6 +329,13 @@ def _checks(m, cfg, nL) -> None:
     m.checks.bolts_per_connection = cfg.bolts_per_connection
     m.checks.brace_planes = cfg.brace_planes
     m.checks.beam_laterally_restrained = cfg.beam_laterally_restrained
+    if getattr(cfg, "built_up_end_columns", False):
+        m.built_up = BuiltUpColumn(
+            target_set="end columns",
+            arrangement=cfg.built_up_arrangement,
+            h0=cfg.built_up_h0, panel_a=cfg.built_up_panel,
+            L=cfg.frame_height)            # full column buckling length
+
     if cfg.seismic:
         m.seismic = SeismicSettings(
             enabled=True, zone=cfg.seismic_zone, soil_type=cfg.seismic_soil,

@@ -278,6 +278,11 @@ class RackConfig:
     rail_eccentricity: float = 0.0          # rail-to-upright offset (Y) [mm]
     impact_load: float = 2500.0             # forklift impact (N); 0 disables
     impact_height: float = 400.0            # impact application height [mm]
+    # built-up (battened/laced) boxed end columns — EN 1993-1-1 §6.4 check
+    built_up_end_columns: bool = False      # opt-in: boxed end-frame uprights
+    built_up_arrangement: str = "battened"  # "battened" | "laced"
+    built_up_h0: float = 100.0              # chord centroid spacing [mm]
+    built_up_panel: float = 500.0           # batten / lacing panel spacing [mm]
 
 
 def bracing_elevations(cfg: RackConfig, frame_height: float) -> List[float]:
