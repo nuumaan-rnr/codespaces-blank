@@ -129,7 +129,10 @@ class RackConfig:
     plan_bracing: bool = False
     plan_bracing_section: Optional[str] = "1C36x21x6x1.2"
     plan_bracing_levels: Optional[List[float]] = None     # None = all beam levels
-    plan_bracing_modules: str = "alternate"   # 'alternate'|'every_3rd'
+    plan_bracing_modules: str = "alternate"   # 'all'|'alternate'|'every_3rd'
+    plan_bracing_type: str = "D"              # 'D' single diagonal | 'X' crossed
+    # specific modules (lane indices) to plan-brace; overrides the mode above
+    plan_bracing_module_list: Optional[List[int]] = None
     # spine bracing: full-height X tower at the back-to-back centre (or 150 mm
     # behind a single rack), tied to the frame(s) by horizontal frame spacers;
     # X panel per beam level; modules at most alternate

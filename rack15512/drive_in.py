@@ -260,15 +260,28 @@ def build_drive_in(cfg) -> RackModel:
                              hinge_i=_portal_hinge(), hinge_j=_portal_hinge())
                 mid += 1
 
-    # ---- plan bracing (X-Y at the top) — selective (alternate lanes) -------
-    plan_lanes = (range(nL) if cfg.plan_bracing_modules == "all"
-                  else range(0, nL, 3) if cfg.plan_bracing_modules == "every_3rd"
-                  else range(0, nL, 2))          # default: alternate lanes
+    # ---- plan bracing (X-Y at the top of the frames) ----------------------
+    # type: 'D' single diagonal or 'X' crossed per cell; modules: an explicit
+    # lane list (plan_bracing_module_list) or all / every_3rd / alternate lanes.
+    plan_x = (getattr(cfg, "plan_bracing_type", "D") or "D").upper() == "X"
+    mod_list = getattr(cfg, "plan_bracing_module_list", None)
+    if mod_list:
+        plan_lanes = [k for k in mod_list if 0 <= k < nL]
+    elif cfg.plan_bracing_modules == "all":
+        plan_lanes = list(range(nL))
+    elif cfg.plan_bracing_modules == "every_3rd":
+        plan_lanes = list(range(0, nL, 3))
+    else:                                        # default: alternate lanes
+        plan_lanes = list(range(0, nL, 2))
     for k in plan_lanes:
-        for di in range(nDpos - 1):              # single diagonal per cell
+        for di in range(nDpos - 1):
             m.add_member(mid, node_of[(k, di, rz(H))],
                          node_of[(k + 1, di + 1, rz(H))], plan_sec.name,
                          mtype="truss", member_set="plan bracing"); mid += 1
+            if plan_x:                           # second crossed diagonal
+                m.add_member(mid, node_of[(k + 1, di, rz(H))],
+                             node_of[(k, di + 1, rz(H))], plan_sec.name,
+                             mtype="truss", member_set="plan bracing"); mid += 1
 
     # ---- supports (pinned bases) ------------------------------------------
     for k in range(nL + 1):

@@ -585,6 +585,19 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                                  "every_3rd"],
                                 index=_idx(["all", "alternate", "every_3rd"],
                                            g("plan_bracing_modules", "all")))
+        pl_type = c[2].selectbox(
+            "Plan bracing type", ["D", "X"],
+            index=_idx(["D", "X"], g("plan_bracing_type", "D")),
+            help="D = single diagonal per cell; X = crossed. Drive-in top "
+                 "plan bracing.")
+        pl_specific = c[3].text_input(
+            "Specific plan modules (lanes, e.g. 0,2)",
+            value=",".join(str(i) for i in (g("plan_bracing_module_list",
+                                              None) or [])),
+            help="Comma-separated lane indices to plan-brace; overrides the "
+                 "plan-modules mode above. Leave blank to use the mode.")
+        pl_list = [int(s) for s in pl_specific.replace(" ", "").split(",")
+                   if s.lstrip("-").isdigit()] or None
 
     cfg = RackConfig(
         system_type="drive_in" if is_di else "selective", **di_kw,
@@ -623,7 +636,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         spine_bracing_modules=sp_mod,
         plan_bracing=pl_on,
         plan_bracing_section=None if pl_sec == "(frame brace)" else pl_sec,
-        plan_bracing_modules=pl_mod)
+        plan_bracing_modules=pl_mod, plan_bracing_type=pl_type,
+        plan_bracing_module_list=pl_list)
     cfg.master = master
     return cfg
 

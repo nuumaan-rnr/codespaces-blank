@@ -321,10 +321,16 @@ class Combination:
 @dataclass
 class AnalysisSettings:
     order: int = 2                 # 1 = linear, 2 = geometrically nonlinear
-    n_steps: int = 10              # load increments for second order
+    n_steps: int = 5               # load increments for second order; the engine
+    #                                auto-retries at 5x on non-convergence, so a
+    #                                low value is fast yet robust (same equilibrium)
     tolerance: float = 1.0e-5      # NormDispIncr [mm]; tighter values can
     #                                stall on penalty-spring round-off
     max_iter: int = 50
+    # run the extra first-order companion solve per case for the ALPHA_CR
+    # sway-sensitivity report; set False to skip it and roughly halve the
+    # number of solves (the ALPHA_CR informative check is then omitted)
+    compute_alpha_cr: bool = True
 
 
 @dataclass

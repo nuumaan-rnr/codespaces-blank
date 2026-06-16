@@ -5,6 +5,8 @@ cases."""
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import List
 
 from .combos import apply_ehf, assemble
@@ -14,7 +16,14 @@ from .results import CaseResult
 
 
 def run_all(model: RackModel, progress=None) -> List[CaseResult]:
+    # set RACK_VERBOSE=1 to echo per-combination run remarks to the terminal
+    # (otherwise remarks go only to the progress callback, e.g. the app UI)
+    verbose = bool(os.environ.get("RACK_VERBOSE"))
+
     def step(stage, frac):
+        if verbose:
+            print(f"[rack] {frac * 100:4.0f}%  {stage}", file=sys.stderr,
+                  flush=True)
         if progress:
             progress(stage, frac)
 
@@ -55,9 +64,9 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
                                    kind=combo.kind, order=order,
                                    imp_direction=direction,
                                    geom_sway=geom_sway)
-            if order == 2 and case.converged:
+            if order == 2 and case.converged and model.analysis.compute_alpha_cr:
                 # first-order companion for the alpha_cr / sway-amplification
-                # estimate
+                # estimate (skipped when compute_alpha_cr is off, to save a solve)
                 lin = engine.run_case(model, loads, name=name + " [1st]",
                                       combo=combo.name, kind=combo.kind,
                                       order=1, imp_direction=direction,

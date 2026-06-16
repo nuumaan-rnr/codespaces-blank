@@ -384,7 +384,12 @@ class OpenSeesEngine:
         st = model.analysis
         ops.constraints("Transformation")
         ops.numberer("RCM")
-        ops.system("BandGeneral")
+        # sparse direct solver (much faster than the dense banded solver on the
+        # larger 3D drive-in models); fall back to BandGeneral if unavailable
+        try:
+            ops.system("UmfPack")
+        except Exception:
+            ops.system("BandGeneral")
         ops.test("NormDispIncr", st.tolerance, st.max_iter)
         ops.algorithm("Newton")
         ops.integrator("LoadControl", 1.0 / n_steps)
