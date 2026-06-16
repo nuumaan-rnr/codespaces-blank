@@ -59,6 +59,38 @@ def test_new_project_and_configure_shows_first_side(tmp_path, monkeypatch):
                                                                   "inner"]
 
 
+def test_drive_in_form_hides_selective_inputs(tmp_path, monkeypatch):
+    """Selecting the drive-in family shows only drive-in / shuttle inputs and
+    hides the selective-rack-only inputs (bays, beam span, footplate, anchors)."""
+    if not os.path.exists(MASTER):
+        pytest.skip("Master.xlsx not present")
+    monkeypatch.chdir(tmp_path)
+    from rack15512.master_store import MasterStore
+    from rack15512.project import ProjectStore
+    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    ps = ProjectStore("projects")
+    proj = ps.create_project("Job")
+    sysm = ps.add_system(proj.id, "Aisle 1")
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    _setss(at, view="configure", project_id=proj.id, system_id=sysm.id,
+           config_id=None, edit_cfg=None)
+    at.run()
+    assert not at.exception
+    fam = next(r for r in at.radio if r.label == "Rack family")
+    fam.set_value("Drive-in / Drive-through / Radio shuttle").run()
+    assert not at.exception
+    labels = {w.label for w in (list(at.number_input) + list(at.selectbox)
+                                + list(at.radio) + list(at.checkbox)
+                                + list(at.text_input))}
+    # drive-in / shuttle inputs present
+    assert {"Lanes", "Pallets deep", "Plan bracing type"} <= labels
+    # selective-only inputs hidden
+    for sel_only in ("Bays", "Beam span [mm]", "Plate b [mm] (0=std)",
+                     "Anchors / plate", "Floor stiffness [kNm/rad] (if not auto)"):
+        assert sel_only not in labels, f"{sel_only!r} should be hidden for drive-in"
+
+
 def test_view_saved_config_shows_results(tmp_path, monkeypatch):
     if not os.path.exists(MASTER):
         pytest.skip("Master.xlsx not present")

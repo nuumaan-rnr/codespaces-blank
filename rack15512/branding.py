@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · drive-in plan bracing D/X + module select; sparse solver + fewer steps (much faster)"
+BUILD = "2026-06-16 · drive-in form shows only drive-in/shuttle inputs (selective inputs hidden)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

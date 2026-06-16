@@ -208,29 +208,6 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     br_names = lib.names("bracing") or lib.names()
     beam_names = lib.names("beam") or lib.names()
 
-    with st.container(border=True):
-        ui.section("📐", "Geometry")
-        c = st.columns(4)
-        name = c[0].text_input("Configuration name", g("name", "Config 1"))
-        module = c[1].radio(
-            "Module", ["single", "back-to-back"],
-            index=0 if g("module", "back-to-back") == "single" else 1)
-        n_bays = c[2].number_input("Bays", 1, 20, int(gn("n_bays", 5, 1, 20)))
-        bay_width = c[3].number_input("Beam span [mm]", 1000.0, 4500.0,
-                                      gn("bay_width", 2700.0, 1000.0, 4500.0), 50.0)
-        c = st.columns(4)
-        depth = c[0].number_input("Frame depth [mm]", 600.0, 2000.0,
-                                  gn("depth", 1000.0, 600.0, 2000.0), 50.0)
-        b2b_gap = c[1].number_input("Back-to-back gap [mm]", 50.0, 600.0,
-                                    gn("b2b_gap", 250.0, 50.0, 600.0), 10.0,
-                                    disabled=module == "single")
-        up_sec = c[2].selectbox(
-            "Upright", up_names,
-            index=_idx(up_names, g("upright_section", "UP0010")))
-        br_sec = c[3].selectbox(
-            "Bracing", br_names,
-            index=_idx(br_names, g("brace_section", "C 36X21X1.2")))
-
     di_fam = st.radio(
         "Rack family",
         ["Selective pallet racking", "Drive-in / Drive-through / Radio shuttle"],
@@ -238,6 +215,41 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         horizontal=True)
     is_di = di_fam.startswith("Drive")
     di_kw: dict = {}
+
+    with st.container(border=True):
+        ui.section("📐", "Geometry")
+        c = st.columns(4)
+        name = c[0].text_input("Configuration name", g("name", "Config 1"))
+        up_sec = c[1].selectbox(
+            "Upright", up_names,
+            index=_idx(up_names, g("upright_section", "UP0010")))
+        br_sec = c[2].selectbox(
+            "Bracing", br_names,
+            index=_idx(br_names, g("brace_section", "C 36X21X1.2")))
+        if is_di:
+            # drive-in plan geometry (lanes / depth) is set in the Multi-deep
+            # section below; these selective-rack fields are not used.
+            module = g("module", "single")
+            n_bays = int(gn("n_bays", 1, 1, 20))
+            bay_width = gn("bay_width", 2700.0, 1000.0, 4500.0)
+            depth = gn("depth", 1000.0, 600.0, 2000.0)
+            b2b_gap = gn("b2b_gap", 250.0, 50.0, 600.0)
+        else:
+            module = c[3].radio(
+                "Module", ["single", "back-to-back"],
+                index=0 if g("module", "back-to-back") == "single" else 1)
+            c = st.columns(4)
+            n_bays = c[0].number_input("Bays", 1, 20,
+                                       int(gn("n_bays", 5, 1, 20)))
+            bay_width = c[1].number_input("Beam span [mm]", 1000.0, 4500.0,
+                                          gn("bay_width", 2700.0, 1000.0, 4500.0),
+                                          50.0)
+            depth = c[2].number_input("Frame depth [mm]", 600.0, 2000.0,
+                                      gn("depth", 1000.0, 600.0, 2000.0), 50.0)
+            b2b_gap = c[3].number_input("Back-to-back gap [mm]", 50.0, 600.0,
+                                        gn("b2b_gap", 250.0, 50.0, 600.0), 10.0,
+                                        disabled=module == "single")
+
     if is_di:
         with st.container(border=True):
             ui.section("🏗", "Multi-deep geometry (drive-in / shuttle)")
@@ -327,29 +339,84 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 rail_section=None if rail_sec == "(beam)" else rail_sec,
                 plan_every_level=bool(plan_every))
 
+            # ---- top plan bracing + spine sections (drive-in) ----------------
+            from rack15512.cf_sections import STD_1C
+            _libbr = [n for n in br_names if n not in STD_1C]
+            brace_opts = ["(frame brace)"] + STD_1C + _libbr
+            st.markdown("**Top plan bracing & spine** — the spine is placed "
+                        "automatically per the variant (Spine setting above).")
+            bc = st.columns(4)
+            sp_sec = bc[0].selectbox(
+                "Spine section", brace_opts,
+                index=_idx(brace_opts,
+                           g("spine_bracing_section", None) or "(frame brace)"))
+            pl_default = g("plan_bracing_section", "1C36x21x6x1.2")
+            pl_sec = bc[1].selectbox(
+                "Plan section", brace_opts,
+                index=_idx(brace_opts,
+                           pl_default if pl_default in brace_opts
+                           else "(frame brace)"))
+            pl_mod = bc[2].selectbox(
+                "Plan modules", ["all", "alternate", "every_3rd"],
+                index=_idx(["all", "alternate", "every_3rd"],
+                           g("plan_bracing_modules", "all")))
+            pl_type = bc[3].selectbox(
+                "Plan bracing type", ["D", "X"],
+                index=_idx(["D", "X"], g("plan_bracing_type", "D")),
+                help="D = single diagonal per cell; X = crossed.")
+            pl_specific = st.text_input(
+                "Specific plan modules (lane indices, e.g. 0,2 — overrides modes)",
+                value=",".join(str(i) for i in (g("plan_bracing_module_list",
+                                                  None) or [])))
+            pl_list = [int(s) for s in pl_specific.replace(" ", "").split(",")
+                       if s.lstrip("-").isdigit()] or None
+            # spine is auto from the variant; these selective-only flags default
+            sp_on = False
+            sp_mod = g("spine_bracing_modules", "all")
+            pl_on = True
+
     with st.container(border=True):
-        ui.section("🪜", "Beam levels  ·  gap · section · load, per level")
         levels0 = g("levels", None)
-        n_levels = st.number_input("Number of beam levels", 1, 20,
-                                   len(levels0) if levels0 else 3)
-        levels, elev = [], 0.0
-        for k in range(int(n_levels)):
-            l0 = levels0[k] if levels0 and k < len(levels0) else None
-            cc = st.columns([1, 1.6, 1])
-            gap = cc[0].number_input(f"L{k+1} gap [mm]", 300.0, 4000.0,
-                                     float(l0.gap if l0 else 1500.0), 50.0,
-                                     key=f"g{k}")
-            bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
-                                 index=_idx(beam_names,
-                                            l0.beam_section if l0 else None),
-                                 key=f"b{k}")
-            ld = cc[2].number_input(
-                f"L{k+1} load [kN]", 0.0, 100.0,
-                float((l0.pallet_load if l0 else 20000.0) / 1e3), 1.0,
-                key=f"l{k}")
-            levels.append(LevelSpec(gap=gap, beam_section=bs,
-                                    pallet_load=ld * 1e3))
-            elev += gap
+        _beam0 = beam_names[0] if beam_names else None
+        if is_di:
+            # drive-in: only the rail-level HEIGHTS matter (the rail section is
+            # set above and the load comes from pallets-deep x weight/pallet);
+            # the per-level beam section / load are not used.
+            ui.section("🪜", "Storage / rail levels  ·  height gap per level")
+            n_levels = st.number_input("Number of rail levels", 1, 20,
+                                       len(levels0) if levels0 else 3)
+            levels, elev = [], 0.0
+            for k in range(int(n_levels)):
+                l0 = levels0[k] if levels0 and k < len(levels0) else None
+                gap = st.number_input(
+                    f"L{k+1} height gap [mm]", 300.0, 4000.0,
+                    float(l0.gap if l0 else 1500.0), 50.0, key=f"g{k}")
+                bs = (l0.beam_section if l0 and l0.beam_section else _beam0)
+                ld = float(l0.pallet_load if l0 else 20000.0)
+                levels.append(LevelSpec(gap=gap, beam_section=bs, pallet_load=ld))
+                elev += gap
+        else:
+            ui.section("🪜", "Beam levels  ·  gap · section · load, per level")
+            n_levels = st.number_input("Number of beam levels", 1, 20,
+                                       len(levels0) if levels0 else 3)
+            levels, elev = [], 0.0
+            for k in range(int(n_levels)):
+                l0 = levels0[k] if levels0 and k < len(levels0) else None
+                cc = st.columns([1, 1.6, 1])
+                gap = cc[0].number_input(f"L{k+1} gap [mm]", 300.0, 4000.0,
+                                         float(l0.gap if l0 else 1500.0), 50.0,
+                                         key=f"g{k}")
+                bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
+                                     index=_idx(beam_names,
+                                                l0.beam_section if l0 else None),
+                                     key=f"b{k}")
+                ld = cc[2].number_input(
+                    f"L{k+1} load [kN]", 0.0, 100.0,
+                    float((l0.pallet_load if l0 else 20000.0) / 1e3), 1.0,
+                    key=f"l{k}")
+                levels.append(LevelSpec(gap=gap, beam_section=bs,
+                                        pallet_load=ld * 1e3))
+                elev += gap
         frame_h = st.number_input(
             "Frame height [mm] (>= top level)", min_value=elev,
             value=float(g("frame_height", None) or elev + 500), step=50.0)
@@ -370,78 +437,114 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                    float(g("bracing_start", 150.0)), 10.0)
         bpitch = c[3].number_input("Diagonal pitch [mm]", 200.0, 2000.0,
                                    float(g("bracing_pitch", 600.0)), 50.0)
-        z1 = g("bracing_type_zone1", None)
-        zone1 = st.selectbox("Different pattern below level 1",
-                             ["same", "X", "D"],
-                             index={None: 0, "X": 1, "D": 2}.get(z1, 0))
+        if is_di:
+            zone1 = "same"          # drive-in uses one frame-bracing pattern
+        else:
+            z1 = g("bracing_type_zone1", None)
+            zone1 = st.selectbox("Different pattern below level 1",
+                                 ["same", "X", "D"],
+                                 index={None: 0, "X": 1, "D": 2}.get(z1, 0))
 
-    with st.expander("🔩  Connections, base & checks"):
-        c = st.columns(3)
-        fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
-                               gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
-        base_auto = c[1].checkbox("Base stiffness from master table",
-                                  isinstance(g("base_stiffness", "auto"), str))
-        kbase = c[2].number_input("Floor stiffness [kNm/rad] (if not auto)",
-                                  0.0, 5000.0,
-                                  float(g("base_stiffness", 5e8) / 1e6
-                                        if not isinstance(
-                                            g("base_stiffness", "auto"), str)
-                                        else 500.0), disabled=base_auto)
-        c = st.columns(3)
-        brace_factor = c[0].number_input("Bracing area factor", 0.05, 1.0,
-                                         gn("brace_area_factor", 0.15, 0.05, 1.0),
-                                         0.05)
-        bolt = c[1].selectbox("Brace bolt", ["M8", "M10", "M12", "M14", "M16"],
-                              index=_idx(["8", "10", "12", "14", "16"],
-                                         str(int(g("bolt_d", 8.0)))))
-        grade = c[2].selectbox("Bolt grade",
-                               ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
-                               index=_idx(["4.6", "4.8", "5.6", "5.8", "8.8",
-                                           "10.9"], g("bolt_grade", "8.8")))
-        brace_planes = st.number_input(
-            "Brace shear planes (1 single C, 2 double / back-to-back C)",
-            1, 2, int(g("brace_planes", 1)))
-        c = st.columns(3)
-        fck = c[0].number_input("Concrete f_ck [MPa]", 15.0, 60.0,
-                                gn("concrete_fck", 25.0, 15.0, 60.0), 5.0)
-        plate_fy = c[1].number_input("Plate fy [MPa]", 200.0, 460.0,
-                                     gn("plate_fy", 310.0, 200.0, 460.0), 5.0)
-        c[2].caption("Footplate auto: 90→100×145×4, 120→100×176×4 "
-                     "(blank fields below)")
-        c = st.columns(3)
-        pb = c[0].number_input("Plate b [mm] (0=std)", 0.0, 500.0,
-                               float(g("plate_b", None) or 0.0))
-        pd_ = c[1].number_input("Plate d [mm] (0=std)", 0.0, 500.0,
-                                float(g("plate_d", None) or 0.0))
-        pt = c[2].number_input("Plate t [mm] (0=std)", 0.0, 40.0,
-                               float(g("plate_t", None) or 0.0))
-        st.markdown("**Footplate anchors** — wedge anchor, EN 1992-4 "
-                    "(non-seismic); defaults from code, adjust to pass.")
-        c = st.columns(4)
-        n_anch = c[0].number_input("Anchors / plate", 1, 6,
-                                   int(g("n_anchors", 2)))
-        anch_d = c[1].selectbox("Anchor", ["M8", "M10", "M12", "M16", "M20"],
-                                index=_idx(["8", "10", "12", "16", "20"],
-                                           str(int(g("anchor_d", 12.0)))))
-        anch_grade = c[2].selectbox("Anchor grade",
-                                    ["4.6", "5.6", "5.8", "8.8", "10.9"],
-                                    index=_idx(["4.6", "5.6", "5.8", "8.8",
-                                                "10.9"],
-                                               g("anchor_grade", "5.6")))
-        anch_hef = c[3].number_input("Embedment hef [mm]", 30.0, 250.0,
-                                     gn("anchor_hef", 70.0, 30.0, 250.0), 5.0)
-        c = st.columns(4)
-        anch_s = c[0].number_input("Anchor spacing [mm] (0=auto)", 0.0, 500.0,
-                                   float(g("anchor_spacing", None) or 0.0))
-        anch_c = c[1].number_input("Edge distance [mm] (0=none)", 0.0, 500.0,
-                                   float(g("anchor_edge", None) or 0.0))
-        anch_np = c[2].number_input("Pull-out N_Rk,p [kN] (0=default)", 0.0,
-                                    200.0,
-                                    float((g("anchor_pullout_rk", None) or 0.0)
-                                          / 1e3))
-        anch_vc = c[3].number_input("Shear V_Rk,c [kN] (0=default)", 0.0, 200.0,
-                                    float((g("anchor_shear_rk", None) or 0.0)
-                                          / 1e3))
+    with st.expander("🔩  Material & brace connections" if is_di
+                     else "🔩  Connections, base & checks"):
+        if is_di:
+            # drive-in has pinned bases (no rotational base spring) and no
+            # footplate / anchor check, so only the steel grade and the brace
+            # bolt connection are relevant here.
+            c = st.columns(3)
+            fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
+                                   gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
+            bolt = c[1].selectbox("Brace bolt",
+                                  ["M8", "M10", "M12", "M14", "M16"],
+                                  index=_idx(["8", "10", "12", "14", "16"],
+                                             str(int(g("bolt_d", 8.0)))))
+            grade = c[2].selectbox(
+                "Bolt grade", ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
+                index=_idx(["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
+                           g("bolt_grade", "8.8")))
+            brace_planes = st.number_input(
+                "Brace shear planes (1 single C, 2 double / back-to-back C)",
+                1, 2, int(g("brace_planes", 1)))
+            # selective-only inputs default (unused by the drive-in model)
+            base_auto = True
+            kbase = 500.0
+            brace_factor = gn("brace_area_factor", 0.15, 0.05, 1.0)
+            fck = gn("concrete_fck", 25.0, 15.0, 60.0)
+            plate_fy = gn("plate_fy", 310.0, 200.0, 460.0)
+            pb = pd_ = pt = 0.0
+            n_anch = int(g("n_anchors", 2))
+            anch_d = "M" + str(int(g("anchor_d", 12.0)))
+            anch_grade = g("anchor_grade", "5.6")
+            anch_hef = gn("anchor_hef", 70.0, 30.0, 250.0)
+            anch_s = anch_c = anch_np = anch_vc = 0.0
+        else:
+            c = st.columns(3)
+            fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
+                                   gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
+            base_auto = c[1].checkbox(
+                "Base stiffness from master table",
+                isinstance(g("base_stiffness", "auto"), str))
+            kbase = c[2].number_input("Floor stiffness [kNm/rad] (if not auto)",
+                                      0.0, 5000.0,
+                                      float(g("base_stiffness", 5e8) / 1e6
+                                            if not isinstance(
+                                                g("base_stiffness", "auto"), str)
+                                            else 500.0), disabled=base_auto)
+            c = st.columns(3)
+            brace_factor = c[0].number_input(
+                "Bracing area factor", 0.05, 1.0,
+                gn("brace_area_factor", 0.15, 0.05, 1.0), 0.05)
+            bolt = c[1].selectbox("Brace bolt",
+                                  ["M8", "M10", "M12", "M14", "M16"],
+                                  index=_idx(["8", "10", "12", "14", "16"],
+                                             str(int(g("bolt_d", 8.0)))))
+            grade = c[2].selectbox(
+                "Bolt grade", ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
+                index=_idx(["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
+                           g("bolt_grade", "8.8")))
+            brace_planes = st.number_input(
+                "Brace shear planes (1 single C, 2 double / back-to-back C)",
+                1, 2, int(g("brace_planes", 1)))
+            c = st.columns(3)
+            fck = c[0].number_input("Concrete f_ck [MPa]", 15.0, 60.0,
+                                    gn("concrete_fck", 25.0, 15.0, 60.0), 5.0)
+            plate_fy = c[1].number_input("Plate fy [MPa]", 200.0, 460.0,
+                                         gn("plate_fy", 310.0, 200.0, 460.0), 5.0)
+            c[2].caption("Footplate auto: 90→100×145×4, 120→100×176×4 "
+                         "(blank fields below)")
+            c = st.columns(3)
+            pb = c[0].number_input("Plate b [mm] (0=std)", 0.0, 500.0,
+                                   float(g("plate_b", None) or 0.0))
+            pd_ = c[1].number_input("Plate d [mm] (0=std)", 0.0, 500.0,
+                                    float(g("plate_d", None) or 0.0))
+            pt = c[2].number_input("Plate t [mm] (0=std)", 0.0, 40.0,
+                                   float(g("plate_t", None) or 0.0))
+            st.markdown("**Footplate anchors** — wedge anchor, EN 1992-4 "
+                        "(non-seismic); defaults from code, adjust to pass.")
+            c = st.columns(4)
+            n_anch = c[0].number_input("Anchors / plate", 1, 6,
+                                       int(g("n_anchors", 2)))
+            anch_d = c[1].selectbox("Anchor", ["M8", "M10", "M12", "M16", "M20"],
+                                    index=_idx(["8", "10", "12", "16", "20"],
+                                               str(int(g("anchor_d", 12.0)))))
+            anch_grade = c[2].selectbox(
+                "Anchor grade", ["4.6", "5.6", "5.8", "8.8", "10.9"],
+                index=_idx(["4.6", "5.6", "5.8", "8.8", "10.9"],
+                           g("anchor_grade", "5.6")))
+            anch_hef = c[3].number_input("Embedment hef [mm]", 30.0, 250.0,
+                                         gn("anchor_hef", 70.0, 30.0, 250.0), 5.0)
+            c = st.columns(4)
+            anch_s = c[0].number_input("Anchor spacing [mm] (0=auto)", 0.0,
+                                       500.0,
+                                       float(g("anchor_spacing", None) or 0.0))
+            anch_c = c[1].number_input("Edge distance [mm] (0=none)", 0.0, 500.0,
+                                       float(g("anchor_edge", None) or 0.0))
+            anch_np = c[2].number_input(
+                "Pull-out N_Rk,p [kN] (0=default)", 0.0, 200.0,
+                float((g("anchor_pullout_rk", None) or 0.0) / 1e3))
+            anch_vc = c[3].number_input(
+                "Shear V_Rk,c [kN] (0=default)", 0.0, 200.0,
+                float((g("anchor_shear_rk", None) or 0.0) / 1e3))
 
     with st.expander("⬇  Loads, imperfection & factors"):
         c = st.columns(3)
@@ -474,20 +577,25 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             help="Alternate bays AND levels loaded — the unfavourable partial "
                  "loading that maximises differential column moments and sway.")
         c = st.columns(3)
+        lf_max = int(n_lanes) if is_di else int(n_bays)
         load_frame = c[0].number_input(
-            "Load frame (upright line 0..n_bays)", 0, int(n_bays),
-            int(min(max(g("load_frame", 0), 0), n_bays)),
-            help="Upright line carrying the placement & accidental loads. "
-                 "0 = end (starter) frame; for multi-bay runs pick a frame "
-                 "with an add-on connection.")
+            f"Load frame (upright line 0..{'n_lanes' if is_di else 'n_bays'})",
+            0, lf_max, int(min(max(g("load_frame", 0), 0), lf_max)),
+            help="Upright line (front face for drive-in) carrying the placement "
+                 "& accidental loads. 0 = end frame.")
         beam_restrained = c[1].checkbox(
-            "Beams laterally restrained by the unit load",
+            "Rails/beams laterally restrained by the unit load" if is_di
+            else "Beams laterally restrained by the unit load",
             bool(g("beam_laterally_restrained", True)),
-            help="On = pallet beams held against LTB by the stored unit load "
+            help="On = beams/rails held against LTB by the stored unit load "
                  "(EN 15512 §9.4); the LTB check records the assumption. Off = "
                  "compute χ_LT and verify lateral-torsional buckling.")
         c = st.columns(3)
-        gG = c[0].number_input("gamma_G", 1.0, 2.0, gn("gamma_G", 1.3, 1.0, 2.0))
+        # drive-in ULS uses gamma_G = 1.35 (RSTAB); selective uses 1.3
+        gG = c[0].number_input(
+            "gamma_G (ULS)", 1.0, 2.0,
+            gn("gamma_G_uls" if is_di else "gamma_G",
+               1.35 if is_di else 1.3, 1.0, 2.0))
         gQ = c[1].number_input("gamma_Q", 1.0, 2.0, gn("gamma_Q", 1.4, 1.0, 2.0))
 
     with st.expander("🌐  Seismic (IS 1893:2016) & seismic bracing"):
@@ -549,55 +657,56 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             help="Auto-increased until ≥90% mass per direction (Cl 7.7.5.2)")
         Z = ZONE_FACTORS[s_zone]
         sa_plateau = design_spectrum_sa_g(0.3, s_soil)
-        ah = (Z / 2.0) * (s_I / s_R) * sa_plateau
+        ah_coeff = (Z / 2.0) * (s_I / s_R) * sa_plateau   # don't clobber `ah`
         st.caption(
             f"**Z = {Z}**, Sa/g(plateau) = {sa_plateau:.2f}, "
-            f"**Ah = (Z/2)(I/R)(Sa/g) = {ah:.4f}** (R = {s_R:g}). "
+            f"**Ah = (Z/2)(I/R)(Sa/g) = {ah_coeff:.4f}** (R = {s_R:g}). "
             "Combinations 1.2(DL+IL±EL), 1.5(DL±EL), 0.9DL±1.5EL (IS 800 LSD); "
             "modal RSA, SRSS, base-shear scaling, directions 100%+30%.")
-        st.markdown("**Seismic bracing** (truss members)")
-        c = st.columns(4)
-        # include the standard 1C lipped-channel family (generated on the fly by
-        # the builder) so the spine / plan dropdowns aren't limited to the
-        # master-library bracing sections
-        from rack15512.cf_sections import STD_1C
-        _libbr = [n for n in br_names if n not in STD_1C]
-        brace_opts = ["(frame brace)"] + STD_1C + _libbr
-        sp_on = c[0].checkbox("Spine bracing (down-aisle X)",
-                              bool(g("spine_bracing", False)))
-        sp_sec = c[1].selectbox("Spine section", brace_opts,
-                                index=_idx(brace_opts,
-                                           g("spine_bracing_section", None)
-                                           or "(frame brace)"))
-        sp_mod = c[2].selectbox("Spine modules", ["all", "alternate",
-                                                  "every_3rd"],
-                                index=_idx(["all", "alternate", "every_3rd"],
-                                           g("spine_bracing_modules", "all")))
-        pl_on = c[3].checkbox("Plan bracing (horizontal X)",
-                              bool(g("plan_bracing", False)))
-        c = st.columns(4)
-        pl_default = g("plan_bracing_section", "1C36x21x6x1.2")
-        pl_sec = c[0].selectbox("Plan section", brace_opts,
-                                index=_idx(brace_opts,
-                                           pl_default if pl_default in brace_opts
-                                           else "(frame brace)"))
-        pl_mod = c[1].selectbox("Plan modules", ["all", "alternate",
-                                                 "every_3rd"],
-                                index=_idx(["all", "alternate", "every_3rd"],
-                                           g("plan_bracing_modules", "all")))
-        pl_type = c[2].selectbox(
-            "Plan bracing type", ["D", "X"],
-            index=_idx(["D", "X"], g("plan_bracing_type", "D")),
-            help="D = single diagonal per cell; X = crossed. Drive-in top "
-                 "plan bracing.")
-        pl_specific = c[3].text_input(
-            "Specific plan modules (lanes, e.g. 0,2)",
-            value=",".join(str(i) for i in (g("plan_bracing_module_list",
-                                              None) or [])),
-            help="Comma-separated lane indices to plan-brace; overrides the "
-                 "plan-modules mode above. Leave blank to use the mode.")
-        pl_list = [int(s) for s in pl_specific.replace(" ", "").split(",")
-                   if s.lstrip("-").isdigit()] or None
+        if not is_di:
+            # selective-rack seismic bracing (spine / plan). Drive-in sets its
+            # spine (auto from variant) and top plan bracing in the Multi-deep
+            # section above, so this selective block is hidden for drive-in.
+            st.markdown("**Seismic bracing** (truss members)")
+            c = st.columns(4)
+            # include the standard 1C lipped-channel family (generated on the
+            # fly by the builder) so the spine / plan dropdowns aren't limited
+            # to the master-library bracing sections
+            from rack15512.cf_sections import STD_1C
+            _libbr = [n for n in br_names if n not in STD_1C]
+            brace_opts = ["(frame brace)"] + STD_1C + _libbr
+            sp_on = c[0].checkbox("Spine bracing (down-aisle X)",
+                                  bool(g("spine_bracing", False)))
+            sp_sec = c[1].selectbox("Spine section", brace_opts,
+                                    index=_idx(brace_opts,
+                                               g("spine_bracing_section", None)
+                                               or "(frame brace)"))
+            sp_mod = c[2].selectbox("Spine modules", ["all", "alternate",
+                                                      "every_3rd"],
+                                    index=_idx(["all", "alternate", "every_3rd"],
+                                               g("spine_bracing_modules", "all")))
+            pl_on = c[3].checkbox("Plan bracing (horizontal X)",
+                                  bool(g("plan_bracing", False)))
+            c = st.columns(4)
+            pl_default = g("plan_bracing_section", "1C36x21x6x1.2")
+            pl_sec = c[0].selectbox(
+                "Plan section", brace_opts,
+                index=_idx(brace_opts,
+                           pl_default if pl_default in brace_opts
+                           else "(frame brace)"))
+            pl_mod = c[1].selectbox("Plan modules", ["all", "alternate",
+                                                     "every_3rd"],
+                                    index=_idx(["all", "alternate", "every_3rd"],
+                                               g("plan_bracing_modules", "all")))
+            pl_type = c[2].selectbox(
+                "Plan bracing type", ["D", "X"],
+                index=_idx(["D", "X"], g("plan_bracing_type", "D")))
+            pl_specific = c[3].text_input(
+                "Specific plan modules (e.g. 0,2)",
+                value=",".join(str(i) for i in (g("plan_bracing_module_list",
+                                                  None) or [])))
+            pl_list = [int(s) for s in pl_specific.replace(" ", "").split(",")
+                       if s.lstrip("-").isdigit()] or None
 
     cfg = RackConfig(
         system_type="drive_in" if is_di else "selective", **di_kw,
@@ -624,7 +733,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         load_frame=int(load_frame),
         beam_laterally_restrained=bool(beam_restrained),
         pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),
-        gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
+        gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
