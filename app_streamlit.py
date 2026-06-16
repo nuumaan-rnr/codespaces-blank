@@ -21,7 +21,7 @@ from rack15512.analysis import UnstableModelError, run_all
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
-from rack15512.envelopes import build_envelopes
+from rack15512.envelopes import build_envelopes, member_envelope_summary_md
 from rack15512.iviewer import (figure_for_case, figure_for_envelope,
                                figure_for_loads)
 from rack15512.library import SectionLibrary
@@ -1335,6 +1335,51 @@ def render_view_config():
                            "Hover a member for its forces, a ◆ support for its "
                            "reactions.")
                     st.caption(cap)
+
+                # ---- per-member ULS & SLS envelope summary -------------------
+                with st.container(border=True):
+                    ui.section("🔎", "Member envelope summary — ULS & SLS")
+                    sets = sorted({mm.member_set
+                                   for mm in model.members.values()})
+                    fcol = st.columns([1.2, 2.4])
+                    mset = fcol[0].selectbox("Member set", ["(all)"] + sets,
+                                             key="mes_set")
+                    mids = [mid for mid, mm in sorted(model.members.items())
+                            if mset == "(all)" or mm.member_set == mset]
+                    if mids:
+                        msec = {mid: model.members[mid].section for mid in mids}
+
+                        def _mlbl(mid):
+                            mm = model.members[mid]
+                            u = max((e.member_util.get(mid, 0.0) for e in envs),
+                                    default=0.0)
+                            flag = "  ⚠" if u > 1.0 else ""
+                            return (f"member {mid} · {mm.member_set} · "
+                                    f"{msec[mid]} · util {u:.2f}{flag}")
+
+                        mid_sel = fcol[1].selectbox("Member", mids,
+                                                    format_func=_mlbl,
+                                                    key="mes_member")
+                        uls_env = next((e for e in envs if e.kind == "ULS"),
+                                       None)
+                        sls_env = next((e for e in envs if e.kind == "SLS"),
+                                       None)
+                        sec = model.sections.get(model.members[mid_sel].section)
+                        if sec is not None:
+                            st.caption(
+                                f"Section **{sec.name}** (role "
+                                f"{sec.role or '—'}): A_eff = "
+                                f"{sec.area_eff:.0f} mm² · I_y = {sec.Iy:.3e} "
+                                f"mm⁴ · I_z = {sec.Iz:.3e} mm⁴ · W_y,eff = "
+                                f"{sec.mod_y_eff:.0f} mm³ · W_z,eff = "
+                                f"{sec.mod_z_eff:.0f} mm³")
+                        ec = st.columns(2)
+                        ec[0].markdown("**ULS envelope**")
+                        ec[0].markdown(member_envelope_summary_md(
+                            uls_env, checks, mid_sel))
+                        ec[1].markdown("**SLS envelope**")
+                        ec[1].markdown(member_envelope_summary_md(
+                            sls_env, checks, mid_sel))
             else:
                 st.info("Re-run to enable the interactive viewer / envelopes.")
             with st.container(border=True):

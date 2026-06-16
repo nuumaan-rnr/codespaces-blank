@@ -99,6 +99,37 @@ def _build_reaction_envelope(cases):
     return out
 
 
+def member_envelope_summary_md(env: Optional[Envelope],
+                               checks: List[CheckResult], mid: int) -> str:
+    """Markdown table of one member's enveloped forces / deflection and its
+    per-check utilisations over an envelope (e.g. the ULS or SLS set)."""
+    if env is None:
+        return "_no cases in this envelope_"
+    e = env.members.get(mid)
+    cn = {c.name for c in env.cases}
+    tgt = f"member {mid}"
+    utils: Dict[str, float] = {}
+    for c in checks:
+        if c.target == tgt and c.case in cn and not c.informative:
+            utils[c.check] = max(utils.get(c.check, 0.0), c.utilization)
+    rows = ["| Result | Value | Governing case |", "|---|---|---|"]
+    if e is not None:
+        rows += [
+            f"| N — max compression | {e.N_min/1e3:.2f} kN | {e.N_min_case or '—'} |",
+            f"| N — max tension | {e.N_max/1e3:.2f} kN | — |",
+            f"| M_y — max | {e.My_absmax/1e6:.2f} kNm | {e.My_case or '—'} |",
+            f"| M_z — max | {e.Mz_absmax/1e6:.2f} kNm | {e.Mz_case or '—'} |",
+            f"| V — max | {e.V_absmax/1e3:.2f} kN | — |",
+            f"| Deflection — max | {e.defl_absmax:.2f} mm | — |",
+        ]
+    for k in sorted(utils):
+        flag = " ⚠" if utils[k] > 1.0 else ""
+        rows.append(f"| utilisation · {k} | {utils[k]:.3f}{flag} | |")
+    if e is None and not utils:
+        rows.append("| — | not in this envelope | |")
+    return "\n".join(rows)
+
+
 def build_envelopes(model, cases: List[CaseResult],
                     checks: List[CheckResult]) -> List[Envelope]:
     """Build the ULS and SLS envelopes (plus a per-combination envelope for

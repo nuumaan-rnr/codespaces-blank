@@ -134,6 +134,28 @@ def test_interactive_figures_build():
     assert any(t.name in band_names for t in f2.data)
 
 
+def test_member_envelope_summary_md():
+    from rack15512.envelopes import member_envelope_summary_md
+    m = _model()
+    cases = run_all(m)
+    checks = run_checks(m, cases)
+    envs = build_envelopes(m, cases, checks)
+    uls = next(e for e in envs if e.kind == "ULS")
+    sls = next(e for e in envs if e.kind == "SLS")
+    mid = next(mid for mid, mm in m.members.items()
+               if mm.member_set == "pallet beams")
+    uls_md = member_envelope_summary_md(uls, checks, mid)
+    sls_md = member_envelope_summary_md(sls, checks, mid)
+    # ULS summary carries the enveloped forces + a utilisation row
+    assert "max compression" in uls_md and "M_z" in uls_md
+    assert "utilisation ·" in uls_md
+    # SLS summary carries the deflection extreme
+    assert "Deflection" in sls_md
+    # a missing envelope degrades gracefully
+    assert member_envelope_summary_md(None, checks, mid) \
+        == "_no cases in this envelope_"
+
+
 def test_beam_moment_and_load_direction():
     """Gravity loads act downward toward the supports: midspan beam moment
     is sagging (+Mz), midspan deflects down, base reaction is upward."""
