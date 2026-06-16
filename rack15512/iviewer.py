@@ -15,6 +15,33 @@ import plotly.graph_objects as go
 from .viewer import _deformed_curve
 
 
+# Orthographic directional cameras (no perspective).  Axes: X = down-aisle,
+# Y = cross-aisle, Z = up.  CA elevation looks along X (shows the Y-Z frame
+# plane); DA elevation looks along Y (shows the X-Z down-aisle plane); Top
+# looks down Z (shows the X-Y plan).
+VIEW_OPTIONS = ["3D", "DA elevation (X-Z)", "CA elevation (Y-Z)", "Top (plan)"]
+_VIEW_CAMERA = {
+    "DA elevation (X-Z)": dict(eye=dict(x=0.0, y=-2.5, z=0.0),
+                               up=dict(x=0.0, y=0.0, z=1.0)),
+    "CA elevation (Y-Z)": dict(eye=dict(x=-2.5, y=0.0, z=0.0),
+                               up=dict(x=0.0, y=0.0, z=1.0)),
+    "Top (plan)": dict(eye=dict(x=0.0, y=0.0, z=2.5),
+                       up=dict(x=0.0, y=1.0, z=0.0)),
+}
+
+
+def apply_view(fig, view: str):
+    """Set an orthographic directional camera on a 3D figure.  ``view`` is one
+    of VIEW_OPTIONS; '3D' keeps the default perspective camera."""
+    cam = _VIEW_CAMERA.get(view)
+    if cam is None:
+        return fig
+    fig.update_layout(scene_camera=dict(
+        projection=dict(type="orthographic"),
+        center=dict(x=0.0, y=0.0, z=0.0), **cam))
+    return fig
+
+
 def _core_figure(model, deformed_case, member_vals, node_reactions, util,
                  scale, title, show_only=None):
     fig = go.Figure()

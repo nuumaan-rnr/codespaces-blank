@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · per-member ULS & SLS envelope summary (select member -> forces/deflection/util by section)"
+BUILD = "2026-06-16 · orthographic DA / CA / Top directional views in the Results interactive model"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

@@ -134,6 +134,21 @@ def test_interactive_figures_build():
     assert any(t.name in band_names for t in f2.data)
 
 
+def test_orthographic_directional_views():
+    from rack15512.iviewer import VIEW_OPTIONS, apply_view, figure_for_case
+    m = _model()
+    cases = run_all(m)
+    checks = run_checks(m, cases)
+    assert VIEW_OPTIONS[0] == "3D"
+    # the three directional views are orthographic (no perspective)
+    for v in ("DA elevation (X-Z)", "CA elevation (Y-Z)", "Top (plan)"):
+        f = apply_view(figure_for_case(m, cases[0], checks, scale=10), v)
+        assert f.layout.scene.camera.projection.type == "orthographic"
+    # '3D' keeps the default perspective camera
+    f3 = apply_view(figure_for_case(m, cases[0], checks, scale=10), "3D")
+    assert f3.layout.scene.camera.projection.type is None
+
+
 def test_member_envelope_summary_md():
     from rack15512.envelopes import member_envelope_summary_md
     m = _model()

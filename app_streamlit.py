@@ -22,8 +22,8 @@ from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
 from rack15512.envelopes import build_envelopes, member_envelope_summary_md
-from rack15512.iviewer import (figure_for_case, figure_for_envelope,
-                               figure_for_loads)
+from rack15512.iviewer import (VIEW_OPTIONS, apply_view, figure_for_case,
+                               figure_for_envelope, figure_for_loads)
 from rack15512.library import SectionLibrary
 from rack15512.master_store import MasterStore
 from rack15512.model import BasePlate, CrossSection
@@ -1265,6 +1265,11 @@ def render_view_config():
                     sel = cc[0].selectbox("View envelope / case", opts,
                                           label_visibility="collapsed")
                     scale = cc[1].slider("Deformation scale ×", 0, 200, 30, 5)
+                    # orthographic directional views (no perspective)
+                    view = st.radio("Projection", VIEW_OPTIONS, horizontal=True,
+                                    key="iview_proj",
+                                    help="3D perspective, or an orthographic "
+                                         "DA / CA elevation or top (plan) view.")
 
                     # resolve the selection (labels are index-aligned to opts)
                     idx = opts.index(sel)
@@ -1311,8 +1316,9 @@ def render_view_config():
 
                     if env is not None:
                         st.plotly_chart(
-                            figure_for_envelope(model, env, scale=scale,
-                                                show_only=show_only),
+                            apply_view(figure_for_envelope(
+                                model, env, scale=scale, show_only=show_only),
+                                view),
                             width="stretch")
                         if env.governing:
                             st.markdown(
@@ -1323,8 +1329,9 @@ def render_view_config():
                                 unsafe_allow_html=True)
                     else:
                         st.plotly_chart(
-                            figure_for_case(model, case, checks, scale=scale,
-                                            show_only=show_only),
+                            apply_view(figure_for_case(
+                                model, case, checks, scale=scale,
+                                show_only=show_only), view),
                             width="stretch")
                         if not case.converged:
                             st.error("This case did NOT converge.")
