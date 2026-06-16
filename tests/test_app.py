@@ -85,6 +85,9 @@ def test_drive_in_form_hides_selective_inputs(tmp_path, monkeypatch):
                                 + list(at.text_input))}
     # drive-in / shuttle inputs present
     assert {"Lanes", "Pallets deep", "Plan bracing type"} <= labels
+    # pallet-driven vertical levels: pallet height + top-beam gap inputs
+    assert {"Pallet height [mm]", "Top beam gap above last bay level [mm]"} \
+        <= labels
     # drive-in base is semi-rigid (stiffness shown), and top/back beams +
     # cantilever connector are configurable
     assert {"Top beam section", "Back beam section",

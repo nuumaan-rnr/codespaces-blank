@@ -410,22 +410,45 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         levels0 = g("levels", None)
         _beam0 = beam_names[0] if beam_names else None
         if is_di:
-            # drive-in: only the rail-level HEIGHTS matter (the rail section is
-            # set above and the load comes from pallets-deep x weight/pallet);
-            # the per-level beam section / load are not used.
-            ui.section("🪜", "Storage / rail levels  ·  height gap per level")
-            n_levels = st.number_input("Number of rail levels", 1, 20,
+            # drive-in: vertical spacing is pallet-driven. Each bay (rail) level
+            # gap defaults to pallet height + clearance (200 mm for the beam);
+            # the top beam / plan-bracing level sits a user-set gap above the
+            # last bay level (so the top is not mis-placed). The per-level beam
+            # section / load are not used (load = pallets-deep x weight/pallet).
+            ui.section("🪜", "Storage levels — bay (rail) levels & top beam")
+            pc = st.columns(2)
+            pallet_h = pc[0].number_input(
+                "Pallet height [mm]", 300.0, 3000.0,
+                gn("pallet_height", 1200.0, 300.0, 3000.0), 50.0)
+            lvl_clear = pc[1].number_input(
+                "Level clearance per beam [mm]", 50.0, 600.0,
+                gn("level_clearance", 200.0, 50.0, 600.0), 10.0,
+                help="Added to the pallet height for each bay-level gap "
+                     "(pallet height + clearance).")
+            dflt_gap = pallet_h + lvl_clear
+            n_levels = st.number_input("Number of bay (rail) levels", 1, 20,
                                        len(levels0) if levels0 else 3)
             levels, elev = [], 0.0
             for k in range(int(n_levels)):
                 l0 = levels0[k] if levels0 and k < len(levels0) else None
                 gap = st.number_input(
-                    f"L{k+1} height gap [mm]", 300.0, 4000.0,
-                    float(l0.gap if l0 else 1500.0), 50.0, key=f"g{k}")
+                    f"L{k+1} bay gap [mm] (pallet + clearance)", 300.0, 4000.0,
+                    float(l0.gap if l0 else dflt_gap), 50.0, key=f"g{k}")
                 bs = (l0.beam_section if l0 and l0.beam_section else _beam0)
                 ld = float(l0.pallet_load if l0 else 20000.0)
                 levels.append(LevelSpec(gap=gap, beam_section=bs, pallet_load=ld))
                 elev += gap
+            top_gap = st.number_input(
+                "Top beam gap above last bay level [mm]", 100.0, 3000.0,
+                gn("top_beam_gap", dflt_gap, 100.0, 3000.0), 50.0,
+                help="The final top beam / plan-bracing / top-tie level sits "
+                     "this gap above the last bay level.")
+            frame_h = elev + top_gap
+            st.caption(f"Last bay level = {elev:.0f} mm · **top beam level "
+                       f"(frame height) = {frame_h:.0f} mm** "
+                       f"= {elev:.0f} + {top_gap:.0f} (top gap).")
+            di_kw.update(pallet_height=pallet_h, level_clearance=lvl_clear,
+                         top_beam_gap=top_gap)
         else:
             ui.section("🪜", "Beam levels  ·  gap · section · load, per level")
             n_levels = st.number_input("Number of beam levels", 1, 20,
@@ -448,9 +471,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 levels.append(LevelSpec(gap=gap, beam_section=bs,
                                         pallet_load=ld * 1e3))
                 elev += gap
-        frame_h = st.number_input(
-            "Frame height [mm] (>= top level)", min_value=elev,
-            value=float(g("frame_height", None) or elev + 500), step=50.0)
+            frame_h = st.number_input(
+                "Frame height [mm] (>= top level)", min_value=elev,
+                value=float(g("frame_height", None) or elev + 500), step=50.0)
 
     with st.container(border=True):
         ui.section("◣", "Cross-aisle bracing")

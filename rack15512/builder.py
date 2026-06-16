@@ -274,6 +274,12 @@ class RackConfig:
     pallet_depth: float = 1200.0            # pallet depth (Y) [mm]
     deep_clearance: float = 50.0            # clearance per deep position [mm]
     weight_per_pallet: float = 10000.0      # N per pallet
+    # vertical level spacing is pallet-driven: each bay (rail) level gap =
+    # pallet_height + level_clearance; the top beam sits top_beam_gap above the
+    # last bay level (these populate cfg.levels / frame_height from the form)
+    pallet_height: float = 1200.0           # pallet height (Z) [mm]
+    level_clearance: float = 200.0          # added per level for the beam [mm]
+    top_beam_gap: float = 1400.0            # top beam level above the last bay [mm]
     rail_section: Optional[str] = None      # depth rail / support arm
     arm_section: Optional[str] = None        # cantilever arm (upright -> rail)
     arm_length: float = 200.0                # rail offset into the lane [mm]
