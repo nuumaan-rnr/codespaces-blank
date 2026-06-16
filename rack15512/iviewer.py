@@ -27,14 +27,30 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
         uz += [ni.z, nj.z, None]
     fig.add_trace(go.Scatter3d(x=ux, y=uy, z=uz, mode="lines",
                                line=dict(color="lightgray", width=2),
-                               hoverinfo="skip", name="undeformed"))
+                               hoverinfo="skip", name="undeformed",
+                               showlegend=False))
 
-    # deformed members + per-member hover markers at midpoint, coloured by
-    # EN 15512 utilisation (numeric -> RdYlGn reversed, with a colour bar).
-    # When show_only is a set of member ids, only those are drawn coloured
-    # (the rest stay as the faint wireframe), e.g. to isolate failed members.
-    dx, dy, dz = [], [], []
-    mxs, mys, mzs, mtext, muval = [], [], [], [], []
+    # deformed members coloured by EN 15512 utilisation, in DISCRETE bands so
+    # the colour reflects the per-MEMBER value (not a node):
+    #   util < 0.9      -> green
+    #   0.9 <= util <=1 -> orange
+    #   util > 1        -> red (solid, no gradient = a real overstress)
+    # Each band is one line trace (the member lines carry the colour); a marker
+    # at each member midpoint carries the per-member hover (forces + util).
+    # When show_only is a set of member ids, only those are drawn coloured.
+    GREEN, ORANGE, RED = "#2ca02c", "#ff7f0e", "#d62728"
+
+    def _band(u):
+        if u > 1.0:
+            return "red", RED, "util > 1.0 (fail)"
+        if u >= 0.9:
+            return "orange", ORANGE, "util 0.9–1.0"
+        return "green", GREEN, "util < 0.9"
+
+    bands = {"green": [GREEN, "util < 0.9", [], [], []],
+             "orange": [ORANGE, "util 0.9–1.0", [], [], []],
+             "red": [RED, "util > 1.0 (fail)", [], [], []]}
+    mxs, mys, mzs, mtext, mcol = [], [], [], [], []
     for m in model.members.values():
         if show_only is not None and m.id not in show_only:
             continue
@@ -49,14 +65,16 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
         else:
             ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
             xs, ys, zs = [ni.x, nj.x], [ni.y, nj.y], [ni.z, nj.z]
-        dx += xs + [None]
-        dy += ys + [None]
-        dz += zs + [None]
+        u = util.get(m.id, 0.0)
+        key, col, _ = _band(u)
+        bx, by, bz = bands[key][2], bands[key][3], bands[key][4]
+        bx += xs + [None]
+        by += ys + [None]
+        bz += zs + [None]
         mid = len(xs) // 2
         mxs.append(xs[mid]); mys.append(ys[mid]); mzs.append(zs[mid])
+        mcol.append(col)
         v = member_vals.get(m.id, {})
-        u = util.get(m.id, 0.0)
-        muval.append(u)
         flag = " ⚠ FAIL" if u > 1.0 else ""
         mtext.append(
             f"<b>member {m.id}</b> ({m.member_set}, {m.mtype})<br>"
@@ -66,16 +84,18 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
             f"My = {v.get('My', 0)/1e6:.2f} kNm  "
             f"Mz = {v.get('Mz', 0)/1e6:.2f} kNm<br>"
             f"V = {v.get('V', 0)/1e3:.2f} kN")
-    fig.add_trace(go.Scatter3d(x=dx, y=dy, z=dz, mode="lines",
-                               line=dict(color="#1f77b4", width=4),
-                               hoverinfo="skip", name="deformed"))
+    # one coloured line trace per band (legend doubles as the colour key)
+    for col, label, bx, by, bz in bands.values():
+        if bx:
+            fig.add_trace(go.Scatter3d(
+                x=bx, y=by, z=bz, mode="lines",
+                line=dict(color=col, width=5), hoverinfo="skip",
+                name=label, showlegend=True))
+    # per-member hover markers at midspan (the member values live here)
     fig.add_trace(go.Scatter3d(
         x=mxs, y=mys, z=mzs, mode="markers",
-        marker=dict(size=5, color=muval, colorscale="RdYlGn",
-                    reversescale=True, cmin=0.0, cmax=1.2,
-                    colorbar=dict(title="utilisation", thickness=14,
-                                  len=0.6)),
-        text=mtext, hoverinfo="text", name="members"))
+        marker=dict(size=4, color=mcol),
+        text=mtext, hoverinfo="text", name="members", showlegend=False))
 
     # support nodes with reaction hover
     if node_reactions:
@@ -99,10 +119,12 @@ def _core_figure(model, deformed_case, member_vals, node_reactions, util,
         fig.add_trace(go.Scatter3d(
             x=nx, y=ny, z=nz, mode="markers",
             marker=dict(size=6, color="black", symbol="diamond"),
-            text=ntext, hoverinfo="text", name="supports"))
+            text=ntext, hoverinfo="text", name="supports", showlegend=True))
 
     fig.update_layout(
-        title=title, showlegend=False, height=650,
+        title=title, showlegend=True, height=650,
+        legend=dict(orientation="h", yanchor="bottom", y=0.0,
+                    xanchor="left", x=0.0, title_text="utilisation band"),
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(xaxis_title="X down-aisle [mm]",
                    yaxis_title="Y cross-aisle [mm]",

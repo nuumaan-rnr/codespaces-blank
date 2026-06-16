@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · stop run + 'model not stable' when no ULS converges (SPR & drive-in)"
+BUILD = "2026-06-16 · interactive view: members coloured by utilisation band (green<0.9, orange .9-1, red>1)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

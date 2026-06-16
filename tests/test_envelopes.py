@@ -119,14 +119,19 @@ def test_interactive_figures_build():
     from rack15512.iviewer import figure_for_case, figure_for_envelope
     f1 = figure_for_case(m, cases[0], checks, scale=25)
     f2 = figure_for_envelope(m, envs[0], scale=25)
-    # undeformed + deformed + member-markers + supports
-    assert len(f1.data) == 4 and len(f2.data) == 4
-    # member hover text carries utilisation + forces; supports carry reactions
-    assert any("utilisation" in t and "kN" in t for t in f1.data[2].text)
-    assert any("reactions" in t for t in f1.data[3].text)
-    # members coloured by numeric utilisation with a colour bar
-    assert f2.data[2].marker.colorbar.title.text == "utilisation"
-    assert len(f2.data[2].marker.color) == len(m.members)
+    # per-member hover markers carry utilisation + forces; supports carry reactions
+    markers1 = next(t for t in f1.data if t.name == "members")
+    assert any("utilisation" in t and "kN" in t for t in markers1.text)
+    sup1 = next(t for t in f1.data if t.name == "supports")
+    assert any("reactions" in t for t in sup1.text)
+    # members coloured by DISCRETE utilisation band (green/orange/red), one
+    # colour per member, no continuous colour bar
+    markers2 = next(t for t in f2.data if t.name == "members")
+    assert len(markers2.marker.color) == len(m.members)
+    assert set(markers2.marker.color) <= {"#2ca02c", "#ff7f0e", "#d62728"}
+    # the band line traces double as the colour key (legend)
+    band_names = {"util < 0.9", "util 0.9–1.0", "util > 1.0 (fail)"}
+    assert any(t.name in band_names for t in f2.data)
 
 
 def test_beam_moment_and_load_direction():
