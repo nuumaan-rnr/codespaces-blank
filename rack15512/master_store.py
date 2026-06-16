@@ -49,6 +49,26 @@ def _section_from_dict(d: Dict[str, Any]) -> CrossSection:
     return CrossSection(**{k: v for k, v in d.items() if k in known})
 
 
+def builtin_others_master() -> "StoredMaster":
+    """The built-in 'others' master holding the custom drive-in sections:
+    'Drivein Rail' (the depth rail) and 'drive in connector' (the cantilever
+    arm with its connector stiffness, RSTAB Konsole jZ = 1.0e6 N*mm/rad)."""
+    from .drive_in import _rstab_arm, _rstab_rail
+    rail = _rstab_rail()
+    rail.name, rail.role = "Drivein Rail", "beam"
+    rail.description = "Drive-in depth rail (RSTAB DRIVE-IN RAIL 2.5)"
+    conn = _rstab_arm()
+    conn.name, conn.role = "drive in connector", "beam"
+    conn.description = "Drive-in cantilever arm + connector (RSTAB Konsole)"
+    conn.connector_k = 1.0e6                   # jZ = 100 kN.cm/rad
+    conn.connector_looseness = 0.0
+    m = StoredMaster(id="others", name="others",
+                     description="Custom sections (drive-in rail & connector)")
+    m.upsert_section(rail, fy=350.0)
+    m.upsert_section(conn, fy=350.0)
+    return m
+
+
 @dataclass
 class StoredMaster:
     """A self-contained, editable section master."""
@@ -186,6 +206,12 @@ class MasterStore:
                          description=description)
         self.save(m)
         return m
+
+    def ensure_builtin(self) -> None:
+        """Create the built-in 'others' master (Drivein Rail + drive in
+        connector) if it is not already in the store."""
+        if not self.exists("others"):
+            self.save(builtin_others_master())
 
     def import_xlsx(self, path: str, name: Optional[str] = None,
                     description: str = "") -> StoredMaster:

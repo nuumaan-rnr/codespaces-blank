@@ -97,5 +97,25 @@ def test_stored_master_builds_a_rack(tmp_path):
     assert model.base_plate.m_rd_n is not None       # base table carried over
 
 
+def test_builtin_others_master(tmp_path):
+    """ensure_builtin() seeds the 'others' master with the Drivein Rail section
+    and the drive in connector (with its connector stiffness)."""
+    store = MasterStore(str(tmp_path / "masters"))
+    store.ensure_builtin()
+    assert store.exists("others")
+    m = store.load("others")
+    assert m.name == "others"
+    assert "Drivein Rail" in m.sections
+    assert "drive in connector" in m.sections
+    lib = m.library
+    rail = lib.get("Drivein Rail")
+    assert rail.A == 709.8 and rail.Iy == 1.8056e6      # RSTAB rail props
+    conn = lib.get("drive in connector")
+    assert conn.connector_k == 1.0e6                    # RSTAB Konsole hinge
+    # idempotent: a second call does not duplicate
+    store.ensure_builtin()
+    assert sum(1 for x in store.list() if x.id == "others") == 1
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

@@ -39,6 +39,7 @@ st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
 
 PSTORE = ProjectStore("projects")
 MSTORE = MasterStore("masters")
+MSTORE.ensure_builtin()          # seed the 'others' master (drive-in sections)
 
 ss = st.session_state
 ss.setdefault("view", "dashboard")
