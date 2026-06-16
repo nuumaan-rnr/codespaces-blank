@@ -387,11 +387,12 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             sp_on = False
             pl_on = True
 
-            # ---- top & back beams + connector stiffness ----------------------
-            st.markdown("**Top & back beams · connector stiffness** — the top "
-                        "(frame-top) and back (rear, per-level) beams are "
-                        "independent (RSTAB beam hinge ≈ 62 kNm/rad).")
-            tb = st.columns(4)
+            # ---- top & back beams (connector stiffness auto from the section) -
+            st.markdown("**Top & back beams** — the top (frame-top) and back "
+                        "(rear, per-level) beams are independent; each beam "
+                        "connector stiffness is taken automatically from the "
+                        "selected section's test data (master).")
+            tb = st.columns(3)
             _beamopt = ["(default)"] + list(beam_names)
             top_sec = tb[0].selectbox(
                 "Top beam section", _beamopt,
@@ -400,22 +401,29 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             back_sec = tb[1].selectbox(
                 "Back beam section", _backopt,
                 index=_idx(_backopt, g("back_beam_section", None) or "(= top beam)"))
-            top_kc = tb[2].number_input(
-                "Top beam connector [kNm/rad] (0=section)", 0.0, 5000.0,
-                float((g("top_connector_stiffness", None) or 0.0) / 1e6), 5.0)
-            back_kc = tb[3].number_input(
-                "Back beam connector [kNm/rad] (0=section)", 0.0, 5000.0,
-                float((g("back_connector_stiffness", None) or 0.0) / 1e6), 5.0)
-            arm_kc = st.number_input(
+            arm_kc = tb[2].number_input(
                 "Cantilever (arm→upright) connector [kNm/rad]", 0.0, 5000.0,
                 gn("arm_connector_stiffness", 1.0e6, 0.0, 5.0e9) / 1e6, 0.5,
                 help="Arm-to-upright bracket rotational stiffness. RSTAB "
                      "Konsole hinge = 1.0 kNm/rad (100 kN·cm/rad).")
+
+            def _conn_label(secname):
+                # resolve the connector stiffness the builder will use for a beam
+                # section: the section's test value, else the generic default
+                if secname and secname in lib.sections:
+                    k = lib.get(secname).connector_k
+                    if k:
+                        return f"{k / 1e6:.0f} kNm/rad (from section)"
+                return "default 100 kNm/rad (no test data in master)"
+
+            _back_name = top_sec if back_sec == "(= top beam)" else back_sec
+            st.caption(
+                f"Auto beam connector — top: {_conn_label(top_sec)}; "
+                f"back: {_conn_label(_back_name)}.")
             di_kw.update(
                 portal_section=None if top_sec == "(default)" else top_sec,
                 back_beam_section=None if back_sec == "(= top beam)" else back_sec,
-                top_connector_stiffness=(top_kc * 1e6) or None,
-                back_connector_stiffness=(back_kc * 1e6) or None,
+                top_connector_stiffness=None, back_connector_stiffness=None,
                 arm_connector_stiffness=arm_kc * 1e6)
 
     with st.container(border=True):

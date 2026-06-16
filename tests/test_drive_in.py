@@ -135,6 +135,19 @@ def test_top_and_back_beams_independent():
     assert all(b.hinge_i.rz == 3.0e7 for b in back)
 
 
+def test_beam_connector_auto_from_section():
+    # with no explicit override, the beam connector stiffness is taken
+    # automatically from the selected beam section's connector_k (master data)
+    from rack15512.library import SectionLibrary
+    lib = SectionLibrary.bundled()
+    bn = lib.names("beam")[0]
+    lib.get(bn).connector_k = 6.16e7
+    m = build_rack(_cfg("drive_in", n_lanes=2, n_deep=2, portal_section=bn,
+                        top_connector_stiffness=None, library=lib))
+    top = [mm for mm in m.members.values() if mm.member_set == "portal beams"]
+    assert top and all(b.hinge_i.rz == 6.16e7 for b in top)
+
+
 def test_rstab_load_cases_and_combos():
     """The drive-in load scheme mirrors the client RSTAB model (sheets 2.1/2.5):
     full + alternate-lane + pattern + top pay-load cases, placement and forklift
