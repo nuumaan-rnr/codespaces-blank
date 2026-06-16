@@ -31,8 +31,8 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from .library import SectionLibrary
-from .model import (Combination, Imperfection, LoadCase, MemberLoad, NodalLoad,
-                    RackModel, SeismicSettings, Steel, Support)
+from .model import (Combination, Hinge, Imperfection, LoadCase, MemberLoad,
+                    NodalLoad, RackModel, SeismicSettings, Steel, Support)
 
 _TOL = 1.0
 
@@ -203,12 +203,20 @@ def build_drive_in(cfg) -> RackModel:
                                  mesh=cfg.mesh_beam)
                     mid += 1
 
-    # ---- top beams (X across frames, every depth line) --------------------
+    # ---- top beams (X across frames) — semi-rigid down-aisle connectors -----
+    k_c = cfg.connector_stiffness
+    m_rd = cfg.connector_m_rd
+    loos = cfg.connector_looseness
+
+    def _portal_hinge():
+        return Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos)
+
     for di in range(nDpos):
         for k in range(nL):
             m.add_member(mid, node_of[(k, di, rz(H))],
                          node_of[(k + 1, di, rz(H))], top.name,
-                         mtype="beam", member_set="portal beams")
+                         mtype="beam", member_set="portal beams",
+                         hinge_i=_portal_hinge(), hinge_j=_portal_hinge())
             mid += 1
 
     # ---- rear spine (X-Z cross-bracing at the closed end) + level beams ----
@@ -229,7 +237,8 @@ def build_drive_in(cfg) -> RackModel:
             for k in range(nL):
                 m.add_member(mid, node_of[(k, d_s, rz(z))],
                              node_of[(k + 1, d_s, rz(z))], top.name,
-                             mtype="beam", member_set="portal beams")
+                             mtype="beam", member_set="portal beams",
+                             hinge_i=_portal_hinge(), hinge_j=_portal_hinge())
                 mid += 1
 
     # ---- plan bracing (X-Y at the top) — selective (alternate lanes) -------

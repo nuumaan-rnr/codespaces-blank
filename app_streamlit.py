@@ -267,19 +267,33 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 index=_idx(["auto", "rear", "centre", "none"],
                            g("spine_position", "auto")))
             c = st.columns(4)
-            rail_sec = c[0].selectbox("Rail section", ["(beam)"] + list(beam_names),
+            frame_depth = c[0].number_input(
+                "Frame depth (leg spacing) [mm]", 300.0, 2000.0,
+                gn("frame_depth", 1100.0, 300.0, 2000.0), 50.0,
+                help="Depth of one upright frame (its two legs). Frames repeat "
+                     "in the depth with a pallet gap between them.")
+            arm_len = c[1].number_input(
+                "Rail arm offset [mm]", 0.0, 600.0,
+                gn("arm_length", 200.0, 0.0, 600.0), 10.0,
+                help="Cantilever-arm offset of the rail into the lane from the "
+                     "upright.")
+            rail_sec = c[2].selectbox("Rail section", ["(beam)"] + list(beam_names),
                                       index=0)
-            impact = c[1].number_input(
-                "Forklift impact [kN]", 0.0, 20.0,
-                gn("impact_load", 2500.0, 0.0, 20000.0) / 1e3, 0.5)
-            impact_h = c[2].number_input("Impact height [mm]", 100.0, 1500.0,
-                                         gn("impact_height", 400.0, 100.0, 1500.0),
-                                         50.0)
             plan_every = c[3].checkbox("Plan bracing every level (shuttle)",
                                        bool(g("plan_every_level", False)))
-            depth_total = n_deep * (pallet_depth + deep_clear) + deep_clear
-            st.caption(f"Deep dimension ≈ {depth_total:.0f} mm · load/level/lane "
-                       f"= {n_deep * wt_pallet:.1f} kN · rails run in the depth.")
+            c = st.columns(4)
+            impact = c[0].number_input(
+                "Forklift impact [kN]", 0.0, 20.0,
+                gn("impact_load", 2500.0, 0.0, 20000.0) / 1e3, 0.5)
+            impact_h = c[1].number_input("Impact height [mm]", 100.0, 1500.0,
+                                         gn("impact_height", 400.0, 100.0, 1500.0),
+                                         50.0)
+            gap = pallet_depth + deep_clear
+            depth_total = n_deep * (frame_depth + gap) + frame_depth
+            st.caption(f"Deep dimension ≈ {depth_total:.0f} mm "
+                       f"({n_deep + 1} frames + {n_deep} gaps) · "
+                       f"load/level/lane = {n_deep * wt_pallet:.1f} kN · "
+                       f"rails run in the depth.")
             end3 = st.checkbox(
                 "3-upright end frame (only when the deep length can't be met "
                 "with the frame + gaps)", bool(g("end_frame_3upright", False)),
@@ -288,7 +302,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             di_kw = dict(
                 di_variant=di_variant, n_lanes=int(n_lanes), lane_width=lane_width,
                 n_deep=int(n_deep), pallet_depth=pallet_depth,
-                deep_clearance=deep_clear, weight_per_pallet=wt_pallet * 1e3,
+                deep_clearance=deep_clear, frame_depth=frame_depth,
+                arm_length=arm_len, weight_per_pallet=wt_pallet * 1e3,
                 spine_position=spine_pos, end_frame_3upright=bool(end3),
                 rail_section=None if rail_sec == "(beam)" else rail_sec,
                 impact_load=impact * 1e3, impact_height=impact_h,

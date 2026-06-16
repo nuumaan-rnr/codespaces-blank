@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · drive-in frame = SPR D/X bracing per frame"
+BUILD = "2026-06-16 · drive-in semi-rigid portal connectors + frame_depth/arm form inputs"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
