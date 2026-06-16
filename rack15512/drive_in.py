@@ -195,10 +195,21 @@ def build_drive_in(cfg) -> RackModel:
     # ---- cantilever arms + rails (continuous in depth on the arm tips) -----
     # A lane is the clear bay between two frames; its two side rails come from
     # the +side of frame k and the -side of frame k+1, so a rail's lane index is
-    # k for side=+1 and k-1 for side=-1.  rail_members records (mid, lane, z) so
-    # the load builder can form the full / alternate-lane / top-level subsets.
+    # k for side=+1 and k-1 for side=-1.  rail_members records (mid, lane, z, di)
+    # so the load builder can form the full / alternate-lane / top-level subsets
+    # and load only the deep (pallet) bays.  The cantilever arm-to-upright
+    # bracket is a semi-rigid moment connection (stiffness from the arm section
+    # connector data, else the cfg connector value).
     a_len = cfg.arm_length or 200.0
-    rail_members: List[Tuple[int, int, float]] = []
+    arm_k = arm.connector_k or cfg.connector_stiffness
+    arm_mrd = arm.connector_m_rd or cfg.connector_m_rd
+    arm_loos = (arm.connector_looseness if arm.connector_looseness is not None
+                else cfg.connector_looseness)
+
+    def _arm_hinge():
+        return Hinge(rz=arm_k, m_rd_z=arm_mrd, looseness=arm_loos)
+
+    rail_members: List[Tuple[int, int, float, int]] = []
     for k in range(nL + 1):
         sides = []
         if k < nL:
@@ -212,20 +223,25 @@ def build_drive_in(cfg) -> RackModel:
                     rn = NN(k * lw + side * a_len, dy[di], z)
                     rail_of[(k, side, di, rz(z))] = rn
                     m.add_member(mid, node_of[(k, di, rz(z))], rn, arm.name,
-                                 mtype="beam", member_set="rail arms")
+                                 mtype="beam", member_set="rail arms",
+                                 hinge_i=_arm_hinge())
                     mid += 1
                 for di in range(nDpos - 1):
                     m.add_member(mid, rail_of[(k, side, di, rz(z))],
                                  rail_of[(k, side, di + 1, rz(z))], rail.name,
                                  mtype="beam", member_set="rail beams",
                                  mesh=cfg.mesh_beam)
-                    rail_members.append((mid, lane, z))
+                    rail_members.append((mid, lane, z, di))
                     mid += 1
 
     # ---- top beams (X across frames) — semi-rigid down-aisle connectors -----
-    k_c = cfg.connector_stiffness
-    m_rd = cfg.connector_m_rd
-    loos = cfg.connector_looseness
+    # connector stiffness / M_Rd / looseness from the selected top-beam SECTION
+    # (master), falling back to the cfg connector values (mirrors the selective
+    # rack).  Used for both the top portal beams and the rear down-aisle beams.
+    k_c = top.connector_k or cfg.connector_stiffness
+    m_rd = top.connector_m_rd or cfg.connector_m_rd
+    loos = (top.connector_looseness if top.connector_looseness is not None
+            else cfg.connector_looseness)
 
     def _portal_hinge():
         return Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos)
@@ -283,11 +299,27 @@ def build_drive_in(cfg) -> RackModel:
                              node_of[(k, di + 1, rz(H))], plan_sec.name,
                              mtype="truss", member_set="plan bracing"); mid += 1
 
-    # ---- supports (pinned bases) ------------------------------------------
+    # ---- supports (semi-rigid floor connection) ---------------------------
+    # rotational base stiffness from the master base-stiffness table (like the
+    # selective rack); rz free.  Without a master (or base_stiffness <= 0) the
+    # base is pinned (rotations free).
+    n_up = (nL + 1) * nDpos
+    if cfg.base_stiffness == "auto" and cfg.master:
+        Q_tot = cfg.n_deep * cfg.weight_per_pallet * nL * len(rail_levels)
+        N_est = cfg.gamma_Q * Q_tot / n_up if n_up else 0.0
+        try:
+            k_base, _ = cfg.master.base_stiffness(up.name, N_est)
+        except Exception:
+            k_base = 0.0
+    elif cfg.base_stiffness == "auto":
+        k_base = 0.0                              # no master -> pinned base
+    else:
+        k_base = float(cfg.base_stiffness)
     for k in range(nL + 1):
         for di in range(nDpos):
+            kk = k_base if k_base > 0 else False
             m.supports.append(Support(node_of[(k, di, rz(0.0))], ux=True,
-                                      uy=True, uz=True, rx=False, ry=False,
+                                      uy=True, uz=True, rx=kk, ry=kk,
                                       rz=False))
 
     _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
@@ -309,8 +341,12 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
              anchor-uplift) and SLS (sway / top-loaded / alternates), each split
              into X and Y via the per-direction sway imperfection.
     """
-    Q = cfg.n_deep * cfg.weight_per_pallet       # lane-level total
-    w_rail = (Q / 2.0) / rail_length if rail_length > 0 else 0.0
+    # multi-deep load is PER PALLET: each deep (gap) bay carries one pallet,
+    # whose weight is shared by the two side rails (weight_per_pallet / 2 each),
+    # applied as a UDL over that bay only — not smeared over the whole rail.
+    # The deep (pallet) bays are the rail segments between two frames (odd di);
+    # the even-di segments span a single 2-leg frame and carry no pallet.
+    w_pallet_half = cfg.weight_per_pallet / 2.0
     z_top = rail_levels[-1]
 
     # ---- pallet (pay) load arrangements ----------------------------------
@@ -322,9 +358,11 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
 
     def pallet_case(name, predicate):
         lc = LoadCase(name, "variable")
-        for mid_, lane, z in rail_members:
-            if predicate(lane, z):
-                lc.member_loads.append(MemberLoad(mid_, qz=-w_rail))
+        for mid_, lane, z, di in rail_members:
+            if di % 2 == 1 and predicate(lane, z):     # deep (pallet) bay
+                L = m.member_length(m.members[mid_])
+                w = w_pallet_half / L if L > 0 else 0.0
+                lc.member_loads.append(MemberLoad(mid_, qz=-w))
         return lc
 
     m.load_cases["pallets"] = pallet_case("pallets", lambda lane, z: True)

@@ -66,9 +66,41 @@ def test_gravity_runs_and_checks():
     m = build_rack(_cfg("drive_in"))
     cases = run_all(m)
     assert cases and all(c.converged for c in cases)
-    codes = {c.check for c in run_checks(m, cases)}
+    checks = run_checks(m, cases)
+    codes = {c.check for c in checks}
     assert {"STRESS", "BUCKLING", "DEFLECTION"} <= codes
     assert any("accidental" in c.name for c in m.combinations)
+    # the rail (support beam) gets its own deflection check (EN 15620 L/200)
+    assert any(c.check == "DEFLECTION" and c.member_set == "rail beams"
+               for c in checks)
+
+
+def test_per_pallet_load_on_deep_bays():
+    # multi-deep load is per pallet: each deep (gap) bay carries one pallet,
+    # shared by its two side rails (weight_per_pallet / 2 on each)
+    m = build_rack(_cfg("drive_in", n_lanes=2, n_deep=2, weight_per_pallet=8000.0,
+                        frame_depth=1000.0, pallet_depth=900.0,
+                        deep_clearance=100.0, beam_levels=[2400.0, 4900.0]))
+    full = m.load_cases["pallets"].member_loads
+    per_member = {round(abs(ml.qz) * m.member_length(m.members[ml.member]), 1)
+                  for ml in full}
+    assert per_member == {4000.0}                     # weight_per_pallet / 2
+    # only deep bays loaded: 4 rails (2 per lane) x 2 deep x 2 levels
+    assert len(full) == 4 * 2 * 2
+
+
+def test_base_springs_and_connectors():
+    m = build_rack(_cfg("drive_in", base_stiffness=4.8e8))
+    # semi-rigid floor connection (rotational springs), not pinned
+    assert m.supports and all(s.rx == 4.8e8 and s.ry == 4.8e8
+                              for s in m.supports)
+    # cantilever rail-arm bracket is a semi-rigid moment connection
+    arms = [mm for mm in m.members.values() if mm.member_set == "rail arms"]
+    assert arms and all(a.hinge_i is not None for a in arms)
+    # top portal + rear down-aisle beams keep their semi-rigid connectors
+    pb = [mm for mm in m.members.values() if mm.member_set == "portal beams"]
+    assert pb and all(b.hinge_i is not None and b.hinge_j is not None
+                      for b in pb)
 
 
 def test_rstab_load_cases_and_combos():
