@@ -230,30 +230,61 @@ def build_drive_in(cfg) -> RackModel:
     def _arm_hinge():
         return Hinge(rz=arm_k, m_rd_z=arm_mrd, looseness=arm_loos)
 
+    is_shuttle = "shuttle" in (cfg.di_variant or "").lower()
     rail_members: List[Tuple[int, int, float, int]] = []
-    for k in range(nL + 1):
-        sides = []
-        if k < nL:
-            sides.append(+1)
-        if k > 0:
-            sides.append(-1)
-        for side in sides:
-            lane = k if side == +1 else k - 1
+    if is_shuttle:
+        # RADIO SHUTTLE: a down-aisle load BEAM connects the uprights in depth
+        # at every frame line and level (the shuttle rail sits on top); only the
+        # ENTRY upright is cantilevered (no through-beam at the open access face).
+        # A frame-line beam carries the pallets of its two adjacent lanes (half
+        # each), so it is recorded once per adjacent lane for the load builder.
+        entry_dis = [nDpos - 1] + ([0] if rear_open else [])   # front (+rear FIFO)
+        for k in range(nL + 1):
+            adj = ([k] if k < nL else []) + ([k - 1] if k > 0 else [])
             for z in rail_levels:
-                for di in range(nDpos):
-                    rn = NN(k * lw + side * a_len, dy[di], z)
-                    rail_of[(k, side, di, rz(z))] = rn
-                    m.add_member(mid, node_of[(k, di, rz(z))], rn, arm.name,
+                for di in range(nDpos - 1):
+                    m.add_member(mid, node_of[(k, di, rz(z))],
+                                 node_of[(k, di + 1, rz(z))], rail.name,
+                                 mtype="beam", member_set="level beams",
+                                 mesh=cfg.mesh_beam,
+                                 hinge_i=_arm_hinge(), hinge_j=_arm_hinge())
+                    for lane in adj:
+                        rail_members.append((mid, lane, z, di))
+                    mid += 1
+                for di in entry_dis:               # entry cantilever stub beam
+                    ydir = 1.0 if di == nDpos - 1 else -1.0
+                    cn = NN(k * lw, dy[di] + ydir * a_len, z)
+                    m.add_member(mid, node_of[(k, di, rz(z))], cn, arm.name,
                                  mtype="beam", member_set="rail arms",
                                  hinge_i=_arm_hinge())
                     mid += 1
-                for di in range(nDpos - 1):
-                    m.add_member(mid, rail_of[(k, side, di, rz(z))],
-                                 rail_of[(k, side, di + 1, rz(z))], rail.name,
-                                 mtype="beam", member_set="rail beams",
-                                 mesh=cfg.mesh_beam)
-                    rail_members.append((mid, lane, z, di))
-                    mid += 1
+    else:
+        # DRIVE-IN: cantilever arms at every upright carry the offset depth rails;
+        # a lane's two side rails come from the +side of frame k and the -side of
+        # frame k+1 (lane index k for side +1, k-1 for side -1).
+        for k in range(nL + 1):
+            sides = []
+            if k < nL:
+                sides.append(+1)
+            if k > 0:
+                sides.append(-1)
+            for side in sides:
+                lane = k if side == +1 else k - 1
+                for z in rail_levels:
+                    for di in range(nDpos):
+                        rn = NN(k * lw + side * a_len, dy[di], z)
+                        rail_of[(k, side, di, rz(z))] = rn
+                        m.add_member(mid, node_of[(k, di, rz(z))], rn, arm.name,
+                                     mtype="beam", member_set="rail arms",
+                                     hinge_i=_arm_hinge())
+                        mid += 1
+                    for di in range(nDpos - 1):
+                        m.add_member(mid, rail_of[(k, side, di, rz(z))],
+                                     rail_of[(k, side, di + 1, rz(z))],
+                                     rail.name, mtype="beam",
+                                     member_set="rail beams", mesh=cfg.mesh_beam)
+                        rail_members.append((mid, lane, z, di))
+                        mid += 1
 
     # ---- top beams (X across the frame tops) — semi-rigid down-aisle connectors
     # top beams and rear (back) beams are independent: each takes its connector
@@ -391,7 +422,7 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
     # ---- pallet (pay) load arrangements ----------------------------------
     dead = LoadCase("dead", "permanent")
     for mm in m.members.values():
-        if mm.member_set in ("rail beams", "rail arms"):
+        if mm.member_set in ("rail beams", "level beams", "rail arms"):
             dead.member_loads.append(MemberLoad(mm.id, qz=-cfg.dead_load_beam))
     m.load_cases["dead"] = dead
 

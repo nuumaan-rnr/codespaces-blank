@@ -42,6 +42,20 @@ def test_spine_by_variant():
     assert _sets(build_rack(_cfg("shuttle_fifo")))["spine bracing"] == 0
 
 
+def test_shuttle_level_beams_and_entry_cantilever():
+    # radio shuttle: load BEAMS connect the uprights at every level (no offset
+    # cantilever rails); only the entry upright(s) carry a cantilever stub
+    m = _sets(build_rack(_cfg("shuttle_lifo", n_lanes=2, n_deep=2)))
+    assert m["level beams"] > 0 and m["rail beams"] == 0
+    # LIFO cantilevers at the front face only; FIFO at both ends (2x)
+    lifo = _sets(build_rack(_cfg("shuttle_lifo", n_lanes=2, n_deep=2)))["rail arms"]
+    fifo = _sets(build_rack(_cfg("shuttle_fifo", n_lanes=2, n_deep=2)))["rail arms"]
+    assert lifo > 0 and fifo == 2 * lifo
+    # drive-in keeps cantilever arms at every upright with offset rails
+    di = _sets(build_rack(_cfg("drive_in", n_lanes=2, n_deep=2)))
+    assert di["rail beams"] > 0 and di["level beams"] == 0
+
+
 def test_spine_and_plan_bay_selection():
     # both the spine and the plan bracing are selectable by module pattern or
     # an explicit list of bays
