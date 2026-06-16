@@ -69,9 +69,14 @@ def build_drive_in(cfg) -> RackModel:
     rail = pick(cfg.rail_section or cfg.beam_section, "beam")
     top = pick(cfg.portal_section or cfg.top_beam_section or cfg.beam_section,
                "beam")
+    # rear (back) down-aisle beams: a separate section so the top beams and the
+    # back beams can differ (falls back to the top-beam section)
+    back = pick(cfg.back_beam_section or cfg.level_beam_section
+                or cfg.portal_section or cfg.top_beam_section or cfg.beam_section,
+                "beam")
     spine_sec = pick(cfg.spine_bracing_section or cfg.brace_section, "bracing")
     plan_sec = pick(cfg.plan_bracing_section or cfg.brace_section, "bracing")
-    for sec in {s.name: s for s in (up, brace, arm, rail, top, spine_sec,
+    for sec in {s.name: s for s in (up, brace, arm, rail, top, back, spine_sec,
                                     plan_sec)}.values():
         fy = cfg.master.fy.get(sec.name) if cfg.master else None
         if fy:
@@ -201,8 +206,12 @@ def build_drive_in(cfg) -> RackModel:
     # bracket is a semi-rigid moment connection (stiffness from the arm section
     # connector data, else the cfg connector value).
     a_len = cfg.arm_length or 200.0
-    arm_k = arm.connector_k or cfg.connector_stiffness
-    arm_mrd = arm.connector_m_rd or cfg.connector_m_rd
+    # cantilever bracket connector (RSTAB Konsole hinge jZ = 1.0e6 N*mm/rad);
+    # an explicit arm_connector_stiffness wins, else the arm section connector,
+    # else the cfg default
+    arm_k = (cfg.arm_connector_stiffness if cfg.arm_connector_stiffness
+             else (arm.connector_k or cfg.connector_stiffness))
+    arm_mrd = cfg.arm_connector_m_rd or arm.connector_m_rd or cfg.connector_m_rd
     arm_loos = (arm.connector_looseness if arm.connector_looseness is not None
                 else cfg.connector_looseness)
 
@@ -234,24 +243,26 @@ def build_drive_in(cfg) -> RackModel:
                     rail_members.append((mid, lane, z, di))
                     mid += 1
 
-    # ---- top beams (X across frames) — semi-rigid down-aisle connectors -----
-    # connector stiffness / M_Rd / looseness from the selected top-beam SECTION
-    # (master), falling back to the cfg connector values (mirrors the selective
-    # rack).  Used for both the top portal beams and the rear down-aisle beams.
-    k_c = top.connector_k or cfg.connector_stiffness
-    m_rd = top.connector_m_rd or cfg.connector_m_rd
-    loos = (top.connector_looseness if top.connector_looseness is not None
-            else cfg.connector_looseness)
+    # ---- top beams (X across the frame tops) — semi-rigid down-aisle connectors
+    # top beams and rear (back) beams are independent: each takes its connector
+    # stiffness / M_Rd / looseness from ITS OWN selected section (master), with
+    # an optional explicit stiffness override, falling back to the cfg values.
+    def _beam_hinge(sec, override):
+        k = override if override else (sec.connector_k or cfg.connector_stiffness)
+        mrd = sec.connector_m_rd or cfg.connector_m_rd
+        ls = (sec.connector_looseness if sec.connector_looseness is not None
+              else cfg.connector_looseness)
+        return lambda: Hinge(rz=k, m_rd_z=mrd, looseness=ls)
 
-    def _portal_hinge():
-        return Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos)
+    _top_hinge = _beam_hinge(top, cfg.top_connector_stiffness)
+    _back_hinge = _beam_hinge(back, cfg.back_connector_stiffness)
 
     for di in range(nDpos):
         for k in range(nL):
             m.add_member(mid, node_of[(k, di, rz(H))],
                          node_of[(k + 1, di, rz(H))], top.name,
                          mtype="beam", member_set="portal beams",
-                         hinge_i=_portal_hinge(), hinge_j=_portal_hinge())
+                         hinge_i=_top_hinge(), hinge_j=_top_hinge())
             mid += 1
 
     # ---- rear spine (X-Z cross-bracing at the closed end) + level beams ----
@@ -268,12 +279,12 @@ def build_drive_in(cfg) -> RackModel:
                              node_of[(k, d_s, rz(b))], spine_sec.name,
                              mtype="truss", member_set="spine bracing")
                 mid += 1
-        for z in rail_levels:                    # down-aisle beams at the rear
+        for z in rail_levels:                    # back beams (rear, per level)
             for k in range(nL):
                 m.add_member(mid, node_of[(k, d_s, rz(z))],
-                             node_of[(k + 1, d_s, rz(z))], top.name,
-                             mtype="beam", member_set="portal beams",
-                             hinge_i=_portal_hinge(), hinge_j=_portal_hinge())
+                             node_of[(k + 1, d_s, rz(z))], back.name,
+                             mtype="beam", member_set="back beams",
+                             hinge_i=_back_hinge(), hinge_j=_back_hinge())
                 mid += 1
 
     # ---- plan bracing (X-Y at the top of the frames) ----------------------

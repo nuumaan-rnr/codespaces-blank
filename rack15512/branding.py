@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · drive-in per-pallet load, base springs, beam+cantilever connector stiffness, rail deflection"
+BUILD = "2026-06-16 · drive-in: base stiffness exposed, separate top/back beams, RSTAB cantilever hinge (1.0e6)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

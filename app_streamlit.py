@@ -375,6 +375,37 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             sp_mod = g("spine_bracing_modules", "all")
             pl_on = True
 
+            # ---- top & back beams + connector stiffness ----------------------
+            st.markdown("**Top & back beams · connector stiffness** — the top "
+                        "(frame-top) and back (rear, per-level) beams are "
+                        "independent (RSTAB beam hinge ≈ 62 kNm/rad).")
+            tb = st.columns(4)
+            _beamopt = ["(default)"] + list(beam_names)
+            top_sec = tb[0].selectbox(
+                "Top beam section", _beamopt,
+                index=_idx(_beamopt, g("portal_section", None) or "(default)"))
+            _backopt = ["(= top beam)"] + list(beam_names)
+            back_sec = tb[1].selectbox(
+                "Back beam section", _backopt,
+                index=_idx(_backopt, g("back_beam_section", None) or "(= top beam)"))
+            top_kc = tb[2].number_input(
+                "Top beam connector [kNm/rad] (0=section)", 0.0, 5000.0,
+                float((g("top_connector_stiffness", None) or 0.0) / 1e6), 5.0)
+            back_kc = tb[3].number_input(
+                "Back beam connector [kNm/rad] (0=section)", 0.0, 5000.0,
+                float((g("back_connector_stiffness", None) or 0.0) / 1e6), 5.0)
+            arm_kc = st.number_input(
+                "Cantilever (arm→upright) connector [kNm/rad]", 0.0, 5000.0,
+                gn("arm_connector_stiffness", 1.0e6, 0.0, 5.0e9) / 1e6, 0.5,
+                help="Arm-to-upright bracket rotational stiffness. RSTAB "
+                     "Konsole hinge = 1.0 kNm/rad (100 kN·cm/rad).")
+            di_kw.update(
+                portal_section=None if top_sec == "(default)" else top_sec,
+                back_beam_section=None if back_sec == "(= top beam)" else back_sec,
+                top_connector_stiffness=(top_kc * 1e6) or None,
+                back_connector_stiffness=(back_kc * 1e6) or None,
+                arm_connector_stiffness=arm_kc * 1e6)
+
     with st.container(border=True):
         levels0 = g("levels", None)
         _beam0 = beam_names[0] if beam_names else None
@@ -448,26 +479,34 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     with st.expander("🔩  Material & brace connections" if is_di
                      else "🔩  Connections, base & checks"):
         if is_di:
-            # drive-in has pinned bases (no rotational base spring) and no
-            # footplate / anchor check, so only the steel grade and the brace
-            # bolt connection are relevant here.
+            # drive-in: steel grade, semi-rigid base, and the brace bolt
+            # connection (no footplate / anchor check).
             c = st.columns(3)
             fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
                                    gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
-            bolt = c[1].selectbox("Brace bolt",
+            base_auto = c[1].checkbox(
+                "Base stiffness from master table",
+                isinstance(g("base_stiffness", "auto"), str),
+                help="Semi-rigid floor connection (rotational spring). "
+                     "Uncheck to enter the value directly.")
+            kbase = c[2].number_input(
+                "Floor stiffness [kNm/rad] (if not auto)", 0.0, 5000.0,
+                float(g("base_stiffness", 5e8) / 1e6
+                      if not isinstance(g("base_stiffness", "auto"), str)
+                      else 500.0), disabled=base_auto,
+                help="Base rotational stiffness; 0 = pinned base.")
+            c = st.columns(3)
+            bolt = c[0].selectbox("Brace bolt",
                                   ["M8", "M10", "M12", "M14", "M16"],
                                   index=_idx(["8", "10", "12", "14", "16"],
                                              str(int(g("bolt_d", 8.0)))))
-            grade = c[2].selectbox(
+            grade = c[1].selectbox(
                 "Bolt grade", ["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
                 index=_idx(["4.6", "4.8", "5.6", "5.8", "8.8", "10.9"],
                            g("bolt_grade", "8.8")))
-            brace_planes = st.number_input(
-                "Brace shear planes (1 single C, 2 double / back-to-back C)",
-                1, 2, int(g("brace_planes", 1)))
+            brace_planes = c[2].number_input(
+                "Brace shear planes (1 / 2)", 1, 2, int(g("brace_planes", 1)))
             # selective-only inputs default (unused by the drive-in model)
-            base_auto = True
-            kbase = 500.0
             brace_factor = gn("brace_area_factor", 0.15, 0.05, 1.0)
             fck = gn("concrete_fck", 25.0, 15.0, 60.0)
             plate_fy = gn("plate_fy", 310.0, 200.0, 460.0)

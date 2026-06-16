@@ -85,9 +85,13 @@ def test_drive_in_form_hides_selective_inputs(tmp_path, monkeypatch):
                                 + list(at.text_input))}
     # drive-in / shuttle inputs present
     assert {"Lanes", "Pallets deep", "Plan bracing type"} <= labels
-    # selective-only inputs hidden
+    # drive-in base is semi-rigid (stiffness shown), and top/back beams +
+    # cantilever connector are configurable
+    assert {"Top beam section", "Back beam section",
+            "Cantilever (arm→upright) connector [kNm/rad]"} <= labels
+    # selective-only inputs hidden (footplate / anchors / bays / beam span)
     for sel_only in ("Bays", "Beam span [mm]", "Plate b [mm] (0=std)",
-                     "Anchors / plate", "Floor stiffness [kNm/rad] (if not auto)"):
+                     "Anchors / plate"):
         assert sel_only not in labels, f"{sel_only!r} should be hidden for drive-in"
 
 

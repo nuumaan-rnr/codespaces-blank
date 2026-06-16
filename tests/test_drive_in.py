@@ -94,13 +94,27 @@ def test_base_springs_and_connectors():
     # semi-rigid floor connection (rotational springs), not pinned
     assert m.supports and all(s.rx == 4.8e8 and s.ry == 4.8e8
                               for s in m.supports)
-    # cantilever rail-arm bracket is a semi-rigid moment connection
+    # cantilever rail-arm bracket connector = RSTAB Konsole hinge (1.0e6 N*mm/rad)
     arms = [mm for mm in m.members.values() if mm.member_set == "rail arms"]
-    assert arms and all(a.hinge_i is not None for a in arms)
+    assert arms and all(a.hinge_i is not None and a.hinge_i.rz == 1.0e6
+                        for a in arms)
     # top portal + rear down-aisle beams keep their semi-rigid connectors
     pb = [mm for mm in m.members.values() if mm.member_set == "portal beams"]
     assert pb and all(b.hinge_i is not None and b.hinge_j is not None
                       for b in pb)
+
+
+def test_top_and_back_beams_independent():
+    # the top (frame-top) and back (rear, per-level) beams are separate member
+    # sets and can take different connector stiffness
+    m = build_rack(_cfg("drive_in", di_variant="drive_in",
+                        top_connector_stiffness=6.16e7,
+                        back_connector_stiffness=3.0e7))
+    top = [mm for mm in m.members.values() if mm.member_set == "portal beams"]
+    back = [mm for mm in m.members.values() if mm.member_set == "back beams"]
+    assert top and back                                   # both present (LIFO)
+    assert all(b.hinge_i.rz == 6.16e7 for b in top)
+    assert all(b.hinge_i.rz == 3.0e7 for b in back)
 
 
 def test_rstab_load_cases_and_combos():

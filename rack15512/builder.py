@@ -271,11 +271,20 @@ class RackConfig:
     rail_section: Optional[str] = None      # depth rail / support arm
     arm_section: Optional[str] = None        # cantilever arm (upright -> rail)
     arm_length: float = 200.0                # rail offset into the lane [mm]
+    # cantilever arm-to-upright bracket connector (RSTAB Konsole hinge: jZ =
+    # 100 kN.cm/rad = 1.0e6 N.mm/rad about local z)
+    arm_connector_stiffness: float = 1.0e6   # N*mm/rad
+    arm_connector_m_rd: Optional[float] = None  # N*mm
     frame_depth: float = 1100.0              # leg spacing within one depth frame
     deep_pitch: Optional[float] = None       # override gap (else pallet+clear)
     level_beam_section: Optional[str] = None  # shuttle: X beam carrying rails
-    portal_section: Optional[str] = None    # top-tie / portal beam (X)
+    portal_section: Optional[str] = None    # top-tie / portal beam (X), top level
     top_beam_section: Optional[str] = None  # access-frame top beam
+    # rear (back) down-aisle beams - separate section + connector from the top
+    # beams so the two can differ
+    back_beam_section: Optional[str] = None
+    top_connector_stiffness: Optional[float] = None   # override top-beam connector
+    back_connector_stiffness: Optional[float] = None  # override back-beam connector
     end_frame_3upright: bool = False        # opt-in 3-upright reinforced end
     end_frame_section: Optional[str] = None  # heavier end-frame upright
     frame_brace_extent: str = "full"        # "full" | "top"
