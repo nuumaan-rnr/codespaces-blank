@@ -46,6 +46,9 @@ def _rstab_arm() -> CrossSection:
         A=732.0, Iy=3.1311e6, Iz=38650.0, J=2179.0,
         Wely=3.1311e6 / 95.0, Welz=38650.0 / 15.0,
         role="beam", width_b=30.0, depth_h=190.0, t=3.0,
+        # shear areas (RSTAB cs3): Avz is the web (depth) shear for strong-axis
+        # bending; Avy the weak-axis (flange) shear.  It_gross = J for FT.
+        Avy=53.0, Avz=521.0, It_gross=2179.0,
         description="RSTAB cs3 cantilever arm")
 
 
@@ -57,6 +60,9 @@ def _rstab_rail() -> CrossSection:
         A=709.8, Iy=1.8056e6, Iz=457718.0, J=1462.0,
         Wely=1.8056e6 / 79.68, Welz=457718.0 / 64.22,
         role="beam", width_b=128.44, depth_h=159.37, t=2.5,
+        # shear areas (RSTAB cs4): Avz web (depth) shear for strong-axis
+        # bending, Avy weak-axis shear.  It_gross = J for FT.
+        Avy=265.0, Avz=229.0, It_gross=1462.0,
         description="RSTAB cs4 drive-in rail")
 
 
@@ -190,10 +196,10 @@ def build_drive_in(cfg) -> RackModel:
     # EN 1993-1-1 §6.4 BUILT_UP check governs them instead of the single-section
     # STRESS/BUCKLING checks.
     end_k = {0, nL} if getattr(cfg, "built_up_end_columns", False) else set()
-    # EN 15512 buckling lengths (drive-in is pinned-pinned, K=1.0): cross-aisle
-    # (local y) is braced by the frame ladder at the bracing pitch; down-aisle
-    # (local z) the upright is unbraced between the base and the top (the rails
-    # restrain cross-aisle only), so it buckles over the full frame height.
+    # EN 15512 buckling lengths: cross-aisle (local y) is braced by the frame
+    # ladder at the bracing pitch.  Down-aisle (local z) is refined below from a
+    # geometric buckling eigenvalue (FEM 10.2.07 critical upright); the full
+    # frame height is only the conservative fallback.
     lcr_ca = float(cfg.bracing_pitch or 600.0)
     lcr_da = H
     for k in range(nL + 1):
@@ -391,6 +397,22 @@ def build_drive_in(cfg) -> RackModel:
             m.supports.append(Support(node_of[(k, di, rz(0.0))], ux=True,
                                       uy=True, uz=True, rx=False, ry=kk,
                                       rz=False))
+
+    # down-aisle (local z) upright effective length from a geometric buckling
+    # eigenvalue of the FEM 10.2.07 critical upright (base spring k_base, top held
+    # against down-aisle sway, loads at the rail levels); falls back to the full
+    # height set above if the eigensolve is unavailable.
+    try:
+        from .buckling_eig import column_effective_length
+        E_up = m.materials[up.material].E
+        lcr_eig = column_effective_length(rail_levels, H, E_up, up.Iz,
+                                          A=up.area_eff, k_base=k_base)
+        if lcr_eig:
+            for mm in m.members.values():
+                if mm.member_set in ("uprights", "end columns"):
+                    mm.L_buckling_z = lcr_eig
+    except Exception:
+        pass
 
     _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
            rail_members, acc_h)

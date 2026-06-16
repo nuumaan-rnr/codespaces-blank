@@ -91,6 +91,57 @@ class OpenSeesEngine:
         ops.wipe()
         return res
 
+    def buckling_factor(self, model: RackModel, loads: AssembledLoads,
+                        max_dof: int = 3000) -> float:
+        """Smallest critical load factor alpha_cr for the assembled `loads`,
+        from a geometric (nonlinear-tangent) buckling eigenvalue:
+
+            K0 . phi = -alpha_cr . Kg . phi,   Kg = K_t(2nd order) - K0(elastic)
+
+        K0 is the elastic tangent (Linear transform / truss) and K_t the tangent
+        of the loaded second-order model (PDelta transform / corotTruss), both
+        extracted with ops.printA on a FullGeneral system using the SAME (Plain)
+        numbering, so Kg is the geometric stiffness for `loads`.  Returns inf if
+        it cannot be formed (degenerate / too large / numpy missing)."""
+        try:
+            import numpy as np
+        except Exception:
+            return float("inf")
+
+        def _matrix(order: int):
+            self._build(model, order, None)
+            self._apply_loads(model, loads)
+            ops.constraints("Transformation")
+            ops.numberer("Plain")               # identical ordering for both
+            ops.system("FullGeneral")
+            ops.test("NormDispIncr", 1.0e-8, 1)
+            ops.algorithm("Linear")
+            ops.integrator("LoadControl", 1.0)
+            ops.analysis("Static")
+            ok = ops.analyze(1) == 0
+            a = ops.printA("-ret")
+            ops.wipe()
+            if not ok or not a:
+                return None
+            n = int(round(len(a) ** 0.5))
+            if n * n != len(a) or n > max_dof:
+                return None
+            return np.asarray(a, dtype=float).reshape(n, n)
+
+        try:
+            K0 = _matrix(1)
+            Kt = _matrix(2)
+            if K0 is None or Kt is None or K0.shape != Kt.shape:
+                return float("inf")
+            mu = np.linalg.eigvals(np.linalg.solve(K0, Kt - K0))
+            lam = [-1.0 / m.real for m in mu
+                   if abs(m.imag) <= 1.0e-6 * (abs(m.real) + 1e-30)
+                   and abs(m.real) > 1e-12]
+            lam = [x for x in lam if x > 1.0e-6]
+            return min(lam) if lam else float("inf")
+        except Exception:
+            return float("inf")
+
     def modal(self, model: RackModel, masses: Dict[int, float],
               n_modes: int) -> "ModalResult":
         """Build the model once (linear), assign translational lumped mass,
@@ -260,11 +311,23 @@ class OpenSeesEngine:
                 self._coords[t] = p
                 tags.append(t)
             tags.append(end_j)
+            # shear-flexible (Timoshenko) when both shear areas are supplied,
+            # so short/deep bays (drive-in rails) pick up shear deformation and
+            # match RSTAB; otherwise Euler-Bernoulli elasticBeamColumn.
+            shear = bool(sec.Avy and sec.Avy > 0 and sec.Avz and sec.Avz > 0)
             for k in range(nseg):
                 ele = self._new_tag()
-                ops.element("elasticBeamColumn", ele, tags[k], tags[k + 1],
-                            A_an, mat.E, mat.G, sec.J, sec.Iy, sec.Iz,
-                            self._transf_tag)
+                if shear:
+                    ops.element("ElasticTimoshenkoBeam", ele,
+                                tags[k], tags[k + 1], mat.E, mat.G, A_an,
+                                sec.J, sec.Iy, sec.Iz,
+                                sec.Avy * m.area_factor,
+                                sec.Avz * m.area_factor,
+                                self._transf_tag)
+                else:
+                    ops.element("elasticBeamColumn", ele, tags[k], tags[k + 1],
+                                A_an, mat.E, mat.G, sec.J, sec.Iy, sec.Iz,
+                                self._transf_tag)
                 mmap.segments.append(_Segment(
                     ele_tag=ele, tag_i=tags[k], tag_j=tags[k + 1],
                     x_start=L * k / nseg, length=L / nseg))

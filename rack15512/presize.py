@@ -119,13 +119,18 @@ def static_upright_demand(cfg) -> Dict:
     # cross-aisle (local y) is braced by the frame ladder at the bracing pitch
     Lcr_ca = float(getattr(cfg, "bracing_pitch", 600.0) or 600.0)
     system = getattr(cfg, "system_type", "selective")
-    # down-aisle (local z, K=1.0):
-    #  * drive-in / shuttle: the upright is unbraced down-aisle between the base
-    #    and the top (rails restrain cross-aisle only) -> full frame height;
+    # down-aisle (local z):
+    #  * drive-in / shuttle: the upright is unbraced down-aisle between the
+    #    semi-rigid base and the portal top.  The full-run analysis derives the
+    #    effective length from a critical-upright buckling eigenvalue
+    #    (rack15512.buckling_eig); for this pre-run suggester we use the FEM
+    #    10.2.07 curvature value K = 0.7 (contra-flexure between the semi-rigid
+    #    base and the level/top restraints), NOT the conservative K = 1.0 full
+    #    height which double-counts the second-order sway the engine resolves;
     #  * selective: restrained at every beam level by the moment frame -> the
     #    largest beam-level gap.
     if system != "selective":
-        Lcr_da = H
+        Lcr_da = 0.7 * H
     else:
         top_seg = max(H - sum(gaps), 0.0)
         Lcr_da = max(gaps + [top_seg]) if (gaps or top_seg) else 2000.0

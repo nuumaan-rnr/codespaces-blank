@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-17 · built-in 'others' master: Drivein Rail + drive in connector sections"
+BUILD = "2026-06-17 · drive-in: eigenvalue down-aisle effective length (FEM 10.2.07) + Timoshenko shear on rails/arms"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

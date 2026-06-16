@@ -94,6 +94,12 @@ class CrossSection:
     y0: Optional[float] = None                    # shear-centre offset [mm]
     Iy_gross: Optional[float] = None
     Iz_gross: Optional[float] = None
+    # shear areas for Timoshenko (shear-flexible) beams [mm^2]; when both are
+    # given the engine builds an ElasticTimoshenkoBeam so the deflection of
+    # short, deep bays (e.g. drive-in rails) includes shear deformation, to
+    # match RSTAB.  Left None -> Euler-Bernoulli elasticBeamColumn.
+    Avy: Optional[float] = None                   # shear area along local y
+    Avz: Optional[float] = None                   # shear area along local z
 
     @property
     def area_eff(self) -> float:
@@ -558,6 +564,9 @@ class RackModel:
     base_plate: Optional[BasePlate] = None
     splices: List[Splice] = field(default_factory=list)
     built_up: Optional[BuiltUpColumn] = None
+    # drive-in / shuttle: compute the upright down-aisle buckling length from a
+    # geometric buckling eigenvalue before the design combinations (run_all)
+    auto_buckling: bool = False
 
     # ---- convenience builders -------------------------------------------
     def add_node(self, nid: int, x: float, y: float, z: float) -> Node:

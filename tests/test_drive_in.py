@@ -231,6 +231,54 @@ def test_no_built_up_by_default():
     assert _sets(m)["end columns"] == 0
 
 
+def test_upright_downaisle_effective_length_from_eigenvalue():
+    # the down-aisle (local z) upright effective length is taken from the
+    # critical-upright buckling eigenvalue (FEM 10.2.07), NOT the full frame
+    # height - the engine already runs the 2nd-order sway, so K=1.0 full height
+    # would double-count it (over-conservative).
+    H = 6000.0
+    m = build_rack(_cfg("drive_in", frame_height=H, base_stiffness=5.0e8))
+    ups = [mm for mm in m.members.values() if mm.member_set == "uprights"]
+    assert ups
+    lz = {round(mm.L_buckling_z) for mm in ups}
+    assert len(lz) == 1                       # all uprights share one length
+    lcr = lz.pop()
+    assert 0 < lcr < H                         # below full height (less conservative)
+    # cross-aisle stays the braced bracing pitch
+    assert all(mm.L_buckling_y == 600.0 for mm in ups)
+
+
+def test_eigenvalue_effective_length_responds_to_base_spring():
+    from rack15512.buckling_eig import column_effective_length
+    H, E, Iz = 6000.0, 210000.0, 1.2e6
+    free = column_effective_length([2400.0, 4900.0], H, E, Iz, A=2000.0,
+                                   k_base=0.0)
+    stiff = column_effective_length([2400.0, 4900.0], H, E, Iz, A=2000.0,
+                                    k_base=5.0e8)
+    assert free and stiff
+    assert 0 < free <= H and 0 < stiff <= H
+    assert stiff < free                        # a stiffer base shortens L_cr
+
+
+def test_eigenvalue_recovers_euler_pinned_pinned():
+    # a single top load on a pinned base / sway-held top is the Euler
+    # pinned-pinned column: L_cr -> H (within a few percent on a meshed model)
+    from rack15512.buckling_eig import column_effective_length
+    H, E, Iz = 4000.0, 210000.0, 1.0e6
+    lcr = column_effective_length([H], H, E, Iz, A=2000.0, k_base=0.0, mesh=10)
+    assert lcr and abs(lcr - H) / H < 0.05
+
+
+def test_drivein_sections_are_shear_flexible():
+    # the RSTAB drive-in rail and cantilever arm carry shear areas so the FEA
+    # builds Timoshenko (shear-flexible) elements
+    m = build_rack(_cfg("drive_in"))
+    rail = m.sections["DRIVE-IN RAIL 2.5"]
+    arm = m.sections["UU30x190x3 arm"]
+    assert rail.Avy and rail.Avz and rail.It_gross
+    assert arm.Avy and arm.Avz and arm.It_gross
+
+
 def test_frames_have_gaps():
     # frame bracing only within the 2-leg frames, not in the pallet gaps
     m = build_rack(_cfg("drive_in", n_deep=3, frame_depth=1100.0,

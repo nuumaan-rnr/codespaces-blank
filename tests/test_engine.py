@@ -208,5 +208,45 @@ def test_second_order_sway_amplification():
     assert M_base == pytest.approx(H * L + P * d2, rel=0.02)
 
 
+def test_timoshenko_shear_deflection():
+    """A short, deep simply-supported beam under gravity UDL: with shear areas
+    the engine builds a Timoshenko element and the midspan deflection picks up
+    the shear term wL^2/(8 G As) on top of the 5wL^4/384EI bending term."""
+    L, w = 1000.0, 20.0           # short span -> shear is significant
+    Iz_d, A_d, As = 5.0e6, 3000.0, 600.0     # deep section + web shear area
+
+    def midspan_defl(shear):
+        m = RackModel()
+        m.materials["S355"] = Steel("S355", E=E, fy=355.0, G=G)
+        sec = CrossSection("D", "S355", A=A_d, Iy=1.0e6, Iz=Iz_d, J=J,
+                           Wely=2.0e4, Welz=2.0e4)
+        if shear:
+            sec.Avy = As
+            sec.Avz = As
+        m.sections["D"] = sec
+        m.add_node(1, 0, 0, 0)
+        m.add_node(2, L, 0, 0)
+        m.add_member(1, 1, 2, "D", mesh=8)
+        m.supports.append(Support(1, ux=True, uy=True, uz=True,
+                                  rx=True, ry=False, rz=False))
+        m.supports.append(Support(2, ux=False, uy=True, uz=True,
+                                  rx=True, ry=False, rz=False))
+        loads = AssembledLoads()
+        loads.add_member(1, 0.0, 0.0, -w)
+        r = run(m, loads)
+        assert r.converged
+        mr = r.members[1]
+        mid = [s for s in mr.stations if abs(s.x - L / 2) < 1e-6][0]
+        return mid.defl_y
+
+    eb = midspan_defl(False)
+    ti = midspan_defl(True)
+    bend = -5 * w * L**4 / (384 * E * Iz_d)
+    shear = -w * L**2 / (8 * G * As)
+    assert eb == pytest.approx(bend, rel=1e-3)            # Euler-Bernoulli
+    assert ti == pytest.approx(bend + shear, rel=1e-2)    # + shear term
+    assert abs(ti) > abs(eb)                              # shear softens it
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

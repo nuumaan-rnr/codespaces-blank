@@ -15,6 +15,11 @@ A_eff/Wy_eff/Wz_eff may be blank (gross values are used), curves default
 to 'b', material defaults to 'steel'.  If your master uses different
 column names, pass `mapping={'your column': 'canonical name', ...}`.
 
+Optional extra columns (all blank-able): connector_k, connector_m_rd,
+connector_looseness, Avy, Avz, It_gross, Iw_gross, y0.  Avy/Avz are shear
+areas: when both are present the FEA builds a Timoshenko (shear-flexible)
+beam for that section instead of an Euler-Bernoulli one.
+
 Property axes follow the member local-axes convention documented in
 `rack15512.model` (Iz = axis engaged by gravity bending of horizontal
 beams and by down-aisle bending of uprights).
@@ -30,9 +35,12 @@ from typing import Dict, List, Optional
 from .model import CrossSection
 
 _NUM_FIELDS = ("A", "Iy", "Iz", "J", "Wely", "Welz")
-# optional columns; connector_* in N*mm units (per-beam connector data)
+# optional columns; connector_* in N*mm units (per-beam connector data);
+# Avy/Avz are shear areas (Timoshenko); It_gross/Iw_gross/y0 are the
+# gross torsion / warping / shear-centre props for the FT-buckling check
 _OPT_NUM_FIELDS = ("A_eff", "Wy_eff", "Wz_eff",
-                   "connector_k", "connector_m_rd", "connector_looseness")
+                   "connector_k", "connector_m_rd", "connector_looseness",
+                   "Avy", "Avz", "It_gross", "Iw_gross", "y0")
 _CURVES = ("a0", "a", "b", "c", "d")
 
 
