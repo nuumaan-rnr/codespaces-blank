@@ -93,7 +93,9 @@ def build_drive_in(cfg) -> RackModel:
         raise ValueError("define at least one storage level")
     H = cfg.frame_height or (rail_levels[-1] + 1000.0)
     H = max(H, rail_levels[-1] + _TOL)
-    zs = sorted({0.0, *rail_levels, H})
+    from .builder import bracing_elevations
+    brace_zs = [z for z in bracing_elevations(cfg, H) if z <= H + _TOL]
+    zs = sorted({0.0, *rail_levels, *brace_zs, H})
 
     def rz(z):
         return round(z, 3)
@@ -144,27 +146,38 @@ def build_drive_in(cfg) -> RackModel:
                              member_set="uprights", mesh=cfg.mesh_upright)
                 mid += 1
 
-    # ---- frame bracing (within each frame's 2 legs only; gaps stay clear) --
+    # ---- frame bracing — same as the SPR frame (bottom + top horizontal
+    # struts and D/X diagonals at bracing_pitch), applied within each frame's
+    # two legs; the pallet gaps between frames stay clear.
     xpat = (cfg.bracing_type or "D").upper() == "X"
     for k in range(nL + 1):
-        for bi in frame_bays:                    # only the within-frame bays
-            for i, (a, b) in enumerate(zip(zz, zz[1:])):
-                na = node_of[(k, bi, rz(a))]
-                nb = node_of[(k, bi + 1, rz(b))]
-                nc = node_of[(k, bi + 1, rz(a))]
-                ndn = node_of[(k, bi, rz(b))]
+        for bi in frame_bays:                    # legs (bi, bi+1) of one frame
+            la, lb = bi, bi + 1                   # the two legs in depth
+            outer = la if cfg.bracing_first_side != "inner" else lb
+            inner = lb if outer == la else la
+            if not brace_zs:
+                continue
+            j0, j1 = rz(brace_zs[0]), rz(brace_zs[-1])
+            m.add_member(mid, node_of[(k, la, j0)], node_of[(k, lb, j0)],
+                         brace.name, mtype="truss", member_set="bracing")
+            mid += 1
+            if len(brace_zs) > 1:
+                m.add_member(mid, node_of[(k, la, j1)], node_of[(k, lb, j1)],
+                             brace.name, mtype="truss", member_set="bracing")
+                mid += 1
+            for p in range(len(brace_zs) - 1):
+                ja, jb = rz(brace_zs[p]), rz(brace_zs[p + 1])
                 if xpat:
-                    m.add_member(mid, na, nb, brace.name, mtype="truss",
-                                 member_set="bracing"); mid += 1
-                    m.add_member(mid, nc, ndn, brace.name, mtype="truss",
-                                 member_set="bracing"); mid += 1
-                else:                            # D: alternating zigzag
-                    if i % 2 == 0:
-                        m.add_member(mid, na, nb, brace.name, mtype="truss",
-                                     member_set="bracing")
-                    else:
-                        m.add_member(mid, nc, ndn, brace.name, mtype="truss",
-                                     member_set="bracing")
+                    m.add_member(mid, node_of[(k, la, ja)], node_of[(k, lb, jb)],
+                                 brace.name, mtype="truss", member_set="bracing")
+                    mid += 1
+                    m.add_member(mid, node_of[(k, lb, ja)], node_of[(k, la, jb)],
+                                 brace.name, mtype="truss", member_set="bracing")
+                    mid += 1
+                else:                            # D zigzag (first side = outer)
+                    lo, hi = (outer, inner) if p % 2 == 0 else (inner, outer)
+                    m.add_member(mid, node_of[(k, lo, ja)], node_of[(k, hi, jb)],
+                                 brace.name, mtype="truss", member_set="bracing")
                     mid += 1
 
     # ---- cantilever arms + rails (continuous in depth on the arm tips) -----
