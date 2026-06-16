@@ -221,7 +221,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         c = st.columns(4)
         name = c[0].text_input("Configuration name", g("name", "Config 1"))
         up_sec = c[1].selectbox(
-            "Upright", up_names,
+            "Upright", up_names, key="cfg_upright",
             index=_idx(up_names, g("upright_section", "UP0010")))
         br_sec = c[2].selectbox(
             "Bracing", br_names,
@@ -823,7 +823,71 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         plan_bracing_modules=pl_mod, plan_bracing_type=pl_type,
         plan_bracing_module_list=pl_list)
     cfg.master = master
+    _upright_suggester(cfg, lib, master, up_names)
     return cfg
+
+
+def _upright_suggester(cfg, lib, master, up_names):
+    """Pre-run, closed-form upright pre-sizing: rank the master upright sections
+    for a given axial load + buckling length (drive-in is pinned-pinned, K=1.0)
+    and one-click apply the chosen section to the configuration."""
+    from rack15512 import presize
+    if not up_names:
+        return
+    with st.expander("💡 Suggest upright section (closed-form, pre-run)"):
+        est = presize.static_upright_demand(cfg)
+        st.caption(
+            f"Static estimate: factored load ≈ {est['P_total']/1e3:.0f} kN over "
+            f"{est['n_uprights']} uprights → ~{est['N_avg']/1e3:.1f} kN avg; "
+            f"design (×2 worst/avg) ≈ {est['N_design']/1e3:.1f} kN. "
+            "Edit the load/lengths with your own calculated values; "
+            "drive-in uprights are pinned-pinned (K = 1.0).")
+        c = st.columns(4)
+        N = c[0].number_input("Axial load N [kN]", 0.0, 2000.0,
+                              round(est["N_design"] / 1e3, 1), 1.0,
+                              key="sug_N")
+        lcy = c[1].number_input("Lcr down-aisle [mm]", 100.0, 12000.0,
+                                float(est["Lcr_y"]), 50.0, key="sug_lcy")
+        lcz = c[2].number_input("Lcr cross-aisle [mm]", 100.0, 12000.0,
+                                float(est["Lcr_z"]), 50.0, key="sug_lcz")
+        fy = c[3].number_input("fy [MPa]", 200.0, 700.0,
+                               float(est["fy"]), 5.0, key="sug_fy")
+
+        def _fy_of(name):
+            if master is not None:
+                try:
+                    return master.fy.get(name) or fy
+                except Exception:
+                    return fy
+            return fy
+
+        rows = presize.suggest_uprights(lib, _fy_of, N=N * 1e3, Lcr_y=lcy,
+                                        Lcr_z=lcz)
+        if not rows:
+            st.info("No upright sections in the master.")
+            return
+        st.dataframe(
+            [{"section": r["name"], "A [mm²]": round(r["area"]),
+              "fy": round(r["fy"]), "χ_min": round(r["chi_min"], 3),
+              "N_b,Rd [kN]": round(r["N_b_Rd"] / 1e3, 1),
+              "utilisation": round(r["util"], 3),
+              "status": ("✅ PASS" if r["passes"] else "❌ FAIL")
+              + (" · lightest" if r["recommended"] else "")}
+             for r in rows],
+            hide_index=True, width="stretch")
+        passing = [r["name"] for r in rows if r["passes"]]
+        rec = next((r["name"] for r in rows if r["recommended"]), None)
+        if passing:
+            cc = st.columns([3, 1])
+            pick = cc[0].selectbox("Apply upright section", passing,
+                                   index=passing.index(rec) if rec else 0,
+                                   key="sug_pick")
+            if cc[1].button("Apply", key="sug_apply"):
+                st.session_state["cfg_upright"] = pick
+                st.rerun()
+        else:
+            st.warning("No section passes — increase the section range or "
+                       "reduce the load / buckling length.")
 
 
 def _idx(options, value):
