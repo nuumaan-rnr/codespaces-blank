@@ -259,6 +259,9 @@ class RackConfig:
     deep_clearance: float = 50.0            # clearance per deep position [mm]
     weight_per_pallet: float = 10000.0      # N per pallet
     rail_section: Optional[str] = None      # depth rail / support arm
+    arm_section: Optional[str] = None        # cantilever arm (upright -> rail)
+    arm_length: float = 200.0                # rail offset into the lane [mm]
+    deep_pitch: Optional[float] = None       # override depth pitch (else pallet+clear)
     level_beam_section: Optional[str] = None  # shuttle: X beam carrying rails
     portal_section: Optional[str] = None    # top-tie / portal beam (X)
     top_beam_section: Optional[str] = None  # access-frame top beam
