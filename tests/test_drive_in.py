@@ -91,8 +91,9 @@ def test_per_pallet_load_on_deep_bays():
 
 def test_base_springs_and_connectors():
     m = build_rack(_cfg("drive_in", base_stiffness=4.8e8))
-    # semi-rigid floor connection (rotational springs), not pinned
-    assert m.supports and all(s.rx == 4.8e8 and s.ry == 4.8e8
+    # semi-rigid floor connection in the down-aisle direction (ry) only; the
+    # cross-aisle (rx) base is pinned (braced depth frames)
+    assert m.supports and all(s.ry == 4.8e8 and s.rx is False
                               for s in m.supports)
     # cantilever rail-arm bracket connector = RSTAB Konsole hinge (1.0e6 N*mm/rad)
     arms = [mm for mm in m.members.values() if mm.member_set == "rail arms"]

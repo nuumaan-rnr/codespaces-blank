@@ -326,11 +326,14 @@ def build_drive_in(cfg) -> RackModel:
         k_base = 0.0                              # no master -> pinned base
     else:
         k_base = float(cfg.base_stiffness)
+    # the floor-connection stiffness is a DOWN-AISLE value (bending in the X-Z
+    # plane -> M_y -> ry); cross-aisle (rx) is held by the braced depth frames,
+    # so the base spring is applied in the down-aisle direction (ry) only.
     for k in range(nL + 1):
         for di in range(nDpos):
             kk = k_base if k_base > 0 else False
             m.supports.append(Support(node_of[(k, di, rz(0.0))], ux=True,
-                                      uy=True, uz=True, rx=kk, ry=kk,
+                                      uy=True, uz=True, rx=False, ry=kk,
                                       rz=False))
 
     _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
