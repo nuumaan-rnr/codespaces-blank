@@ -299,7 +299,7 @@ class RackConfig:
     tall_frame_threshold: float = 6000.0    # >this → front stability beam
     internal_frame_mode: str = "truncated"  # "truncated" | "full"
     internal_frame_extra: float = 300.0     # truncated uprights above top load
-    top_depth_tie: bool = False             # drive-in: depth tie at frame tops
+    top_depth_tie: bool = True              # drive-in: depth tie (beam) at frame tops
     rail_eccentricity: float = 0.0          # rail-to-upright offset (Y) [mm]
     impact_load: float = 2500.0             # deprecated: superseded by
     impact_height: float = 400.0            # accidental_load_x/y + accidental_height

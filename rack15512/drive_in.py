@@ -266,17 +266,23 @@ def build_drive_in(cfg) -> RackModel:
             mid += 1
 
     # ---- rear spine (X-Z cross-bracing at the closed end) + level beams ----
+    # RSTAB arrangement: an X-braced tower only in ALTERNATE width bays, with one
+    # X panel per STOREY (between the base, the rail levels and the top) - not in
+    # every bay and every fine sub-elevation.
     has_spine = (not rear_open) and cfg.spine_position != "none"
     if has_spine:
         d_s = 0                                  # rear / closed end
-        for k in range(nL):
-            for a, b in zip(zz, zz[1:]):
-                m.add_member(mid, node_of[(k, d_s, rz(a))],
-                             node_of[(k + 1, d_s, rz(b))], spine_sec.name,
+        spine_lanes = list(range(0, nL, 2))      # alternate bays (RSTAB)
+        spine_levels = sorted({0.0, *rail_levels, H})
+        for k in spine_lanes:
+            for a, b in zip(spine_levels, spine_levels[1:]):
+                ja, jb = rz(a), rz(b)
+                m.add_member(mid, node_of[(k, d_s, ja)],
+                             node_of[(k + 1, d_s, jb)], spine_sec.name,
                              mtype="truss", member_set="spine bracing")
                 mid += 1
-                m.add_member(mid, node_of[(k + 1, d_s, rz(a))],
-                             node_of[(k, d_s, rz(b))], spine_sec.name,
+                m.add_member(mid, node_of[(k + 1, d_s, ja)],
+                             node_of[(k, d_s, jb)], spine_sec.name,
                              mtype="truss", member_set="spine bracing")
                 mid += 1
         for z in rail_levels:                    # back beams (rear, per level)
@@ -309,6 +315,17 @@ def build_drive_in(cfg) -> RackModel:
                 m.add_member(mid, node_of[(k + 1, di, rz(H))],
                              node_of[(k, di + 1, rz(H))], plan_sec.name,
                              mtype="truss", member_set="plan bracing"); mid += 1
+
+    # ---- top depth tie: a BEAM along the depth (Y) at the top of each upright
+    # line, running front-to-back through the frames AND the gaps (ties the
+    # frame tops together along the lane).
+    if getattr(cfg, "top_depth_tie", True):
+        for k in range(nL + 1):
+            for di in range(nDpos - 1):
+                m.add_member(mid, node_of[(k, di, rz(H))],
+                             node_of[(k, di + 1, rz(H))], top.name,
+                             mtype="beam", member_set="top depth ties")
+                mid += 1
 
     # ---- supports (semi-rigid floor connection) ---------------------------
     # rotational base stiffness from the master base-stiffness table (like the
