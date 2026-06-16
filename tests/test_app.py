@@ -36,6 +36,33 @@ def test_dashboard_opens_on_load(tmp_path, monkeypatch):
     assert "rnr-empty" in md
 
 
+def test_upright_suggester_apply_no_error(tmp_path, monkeypatch):
+    """Clicking Apply in the upright suggester must not raise the
+    'cannot modify cfg_upright after the widget is instantiated' error."""
+    if not os.path.exists(MASTER):
+        pytest.skip("Master.xlsx not present")
+    monkeypatch.chdir(tmp_path)
+    from rack15512.master_store import MasterStore
+    from rack15512.project import ProjectStore
+    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    ps = ProjectStore("projects")
+    proj = ps.create_project("Job")
+    sysm = ps.add_system(proj.id, "Aisle 1")
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    _setss(at, view="configure", project_id=proj.id, system_id=sysm.id,
+           config_id=None, edit_cfg=None)
+    at.run()
+    assert not at.exception
+    apply = next((b for b in at.button if b.key == "sug_apply"), None)
+    if apply is None:
+        pytest.skip("no passing upright section to apply")
+    apply.click().run()
+    assert not at.exception
+    # the deferred pick has been applied to the upright selector
+    assert at.session_state["cfg_upright"]
+
+
 def test_new_project_and_configure_shows_first_side(tmp_path, monkeypatch):
     if not os.path.exists(MASTER):
         pytest.skip("Master.xlsx not present")

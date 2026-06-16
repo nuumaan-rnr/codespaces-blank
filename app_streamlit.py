@@ -208,6 +208,12 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     br_names = lib.names("bracing") or lib.names()
     beam_names = lib.names("beam") or lib.names()
 
+    # apply a section picked in the upright suggester on the PREVIOUS run, before
+    # the Upright selectbox (key 'cfg_upright') is instantiated below
+    _pending_up = st.session_state.pop("_pending_upright", None)
+    if _pending_up is not None and _pending_up in up_names:
+        st.session_state["cfg_upright"] = _pending_up
+
     di_fam = st.radio(
         "Rack family",
         ["Selective pallet racking", "Drive-in / Drive-through / Radio shuttle"],
@@ -890,7 +896,9 @@ def _upright_suggester(cfg, lib, master, up_names):
                                    index=passing.index(rec) if rec else 0,
                                    key="sug_pick")
             if cc[1].button("Apply", key="sug_apply"):
-                st.session_state["cfg_upright"] = pick
+                # defer to the next run (the Upright widget already exists this
+                # run); the top of the form applies it before that widget
+                st.session_state["_pending_upright"] = pick
                 st.rerun()
         else:
             st.warning("No section passes — increase the section range or "
