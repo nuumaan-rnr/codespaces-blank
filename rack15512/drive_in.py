@@ -96,7 +96,13 @@ def build_drive_in(cfg) -> RackModel:
     H = max(H, rail_levels[-1] + _TOL)
     from .builder import bracing_elevations
     brace_zs = [z for z in bracing_elevations(cfg, H) if z <= H + _TOL]
-    zs = sorted({0.0, *rail_levels, *brace_zs, H})
+    # accidental (forklift) impact height: a node ~400 mm above the base so the
+    # impact is applied where a truck actually strikes, not at a rail level
+    # (mirrors the SPR rule, builder.py:395).
+    acc_h = cfg.accidental_height
+    if not (100.0 <= acc_h < H):
+        acc_h = min(400.0, 0.5 * H)
+    zs = sorted({0.0, *rail_levels, *brace_zs, acc_h, H})
 
     def rz(z):
         return round(z, 3)
@@ -187,7 +193,12 @@ def build_drive_in(cfg) -> RackModel:
                     mid += 1
 
     # ---- cantilever arms + rails (continuous in depth on the arm tips) -----
+    # A lane is the clear bay between two frames; its two side rails come from
+    # the +side of frame k and the -side of frame k+1, so a rail's lane index is
+    # k for side=+1 and k-1 for side=-1.  rail_members records (mid, lane, z) so
+    # the load builder can form the full / alternate-lane / top-level subsets.
     a_len = cfg.arm_length or 200.0
+    rail_members: List[Tuple[int, int, float]] = []
     for k in range(nL + 1):
         sides = []
         if k < nL:
@@ -195,6 +206,7 @@ def build_drive_in(cfg) -> RackModel:
         if k > 0:
             sides.append(-1)
         for side in sides:
+            lane = k if side == +1 else k - 1
             for z in rail_levels:
                 for di in range(nDpos):
                     rn = NN(k * lw + side * a_len, dy[di], z)
@@ -207,6 +219,7 @@ def build_drive_in(cfg) -> RackModel:
                                  rail_of[(k, side, di + 1, rz(z))], rail.name,
                                  mtype="beam", member_set="rail beams",
                                  mesh=cfg.mesh_beam)
+                    rail_members.append((mid, lane, z))
                     mid += 1
 
     # ---- top beams (X across frames) — semi-rigid down-aisle connectors -----
@@ -264,62 +277,145 @@ def build_drive_in(cfg) -> RackModel:
                                       uy=True, uz=True, rx=False, ry=False,
                                       rz=False))
 
-    _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL)
+    _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
+           rail_members, acc_h)
     _checks(m, cfg, nL)
     return m
 
 
-def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL) -> None:
+def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
+           rail_members, acc_h) -> None:
+    """Build the drive-in load cases and combinations to mirror the client
+    RSTAB scheme (sheets 2.1 / 2.5):
+
+      cases  dead, pallets (full), pallets_alt1/alt2 (even/odd lanes),
+             pallets_pattern (checkerboard lane x level), pallets_top (top
+             level only), placement (+X) / placement_y (+Y), impact_x / impact_y
+             (forklift, 1.25 kN down-aisle / 2.5 kN cross-aisle at ~400 mm);
+      combos ULS proof (pay / placement / accidental / pattern / alternates /
+             anchor-uplift) and SLS (sway / top-loaded / alternates), each split
+             into X and Y via the per-direction sway imperfection.
+    """
     Q = cfg.n_deep * cfg.weight_per_pallet       # lane-level total
     w_rail = (Q / 2.0) / rail_length if rail_length > 0 else 0.0
+    z_top = rail_levels[-1]
+
+    # ---- pallet (pay) load arrangements ----------------------------------
     dead = LoadCase("dead", "permanent")
-    pallets = LoadCase("pallets", "variable")
     for mm in m.members.values():
         if mm.member_set in ("rail beams", "rail arms"):
             dead.member_loads.append(MemberLoad(mm.id, qz=-cfg.dead_load_beam))
-        if mm.member_set == "rail beams":
-            pallets.member_loads.append(MemberLoad(mm.id, qz=-w_rail))
     m.load_cases["dead"] = dead
-    m.load_cases["pallets"] = pallets
 
-    top_front = node_of[(0, nDpos - 1, rz(rail_levels[-1]))]
-    place = LoadCase("placement", "variable")
-    place.nodal_loads.append(NodalLoad(top_front, fx=cfg.placement_load))
-    m.load_cases["placement"] = place
-    place_y = LoadCase("placement_y", "variable")
-    place_y.nodal_loads.append(NodalLoad(top_front, fy=cfg.placement_load))
-    m.load_cases["placement_y"] = place_y
+    def pallet_case(name, predicate):
+        lc = LoadCase(name, "variable")
+        for mid_, lane, z in rail_members:
+            if predicate(lane, z):
+                lc.member_loads.append(MemberLoad(mid_, qz=-w_rail))
+        return lc
 
-    impact = cfg.impact_load and cfg.impact_height > 0
-    if impact:
-        zj = min(rail_levels, key=lambda z: abs(z - cfg.impact_height))
-        n_imp = node_of[(0, nDpos - 1, rz(zj))]
+    m.load_cases["pallets"] = pallet_case("pallets", lambda lane, z: True)
+    # RSTAB LC12/LC13: alternate lanes loaded (disjoint, union = full)
+    alt1 = pallet_case("pallets_alt1", lambda lane, z: lane % 2 == 0)
+    alt2 = pallet_case("pallets_alt2", lambda lane, z: lane % 2 == 1)
+    # checkerboard lane x level (worst differential sway) and top-level-only
+    patt = pallet_case(
+        "pallets_pattern",
+        lambda lane, z: (lane + rail_levels.index(z)) % 2 == 0)
+    top = pallet_case("pallets_top", lambda lane, z: abs(z - z_top) <= _TOL)
+    has_pattern = cfg.include_pattern and nL >= 2
+    if has_pattern:
+        for lc in (alt1, alt2, patt, top):
+            m.load_cases[lc.name] = lc
+
+    # ---- placement (0.5 kN) at the front-face top-level upright -----------
+    k_load = max(0, min(int(cfg.load_frame), nL))
+    front = node_of[(k_load, nDpos - 1, rz(z_top))]
+    placement = cfg.include_placement and cfg.placement_load > 0
+    if placement:
+        px = LoadCase("placement", "variable")
+        px.nodal_loads.append(NodalLoad(front, fx=cfg.placement_load))
+        m.load_cases["placement"] = px
+        py = LoadCase("placement_y", "variable")
+        py.nodal_loads.append(NodalLoad(front, fy=cfg.placement_load))
+        m.load_cases["placement_y"] = py
+
+    # ---- forklift impact at ~400 mm above base on the front-face upright --
+    # (RSTAB LC5/LC6: 1.25 kN down-aisle, 2.5 kN cross-aisle; reuses the SPR
+    # accidental_load_x/y + accidental_height, applied at the impact-height node)
+    accidental = (cfg.include_accidental
+                  and (cfg.accidental_load_x or cfg.accidental_load_y))
+    if accidental:
+        n_imp = node_of[(k_load, nDpos - 1, rz(acc_h))]
         ix = LoadCase("impact_x", "accidental")
-        ix.nodal_loads.append(NodalLoad(n_imp, fx=cfg.impact_load))
+        ix.nodal_loads.append(NodalLoad(n_imp, fx=cfg.accidental_load_x))
         m.load_cases["impact_x"] = ix
         iy = LoadCase("impact_y", "accidental")
-        iy.nodal_loads.append(NodalLoad(n_imp, fy=2.0 * cfg.impact_load))
+        iy.nodal_loads.append(NodalLoad(n_imp, fy=cfg.accidental_load_y))
         m.load_cases["impact_y"] = iy
 
-    m.combinations = [
-        Combination("ULS1", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q}),
-        Combination("ULS2", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                                    "placement": cfg.gamma_Q}),
-        Combination("ULS3", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                                    "placement_y": cfg.gamma_Q}),
-        Combination("SLS1", "SLS", {"dead": 1.0, "pallets": 1.0},
-                    imperfection=False),
-    ]
-    if impact:
-        m.combinations.insert(3, Combination(
-            "ULS-impactX", "ULS",
-            {"dead": 1.0, "pallets": 1.0, "impact_x": 1.0}, imp_directions=["+x"]))
-        m.combinations.insert(4, Combination(
-            "ULS-impactY", "ULS",
-            {"dead": 1.0, "pallets": 1.0, "impact_y": 1.0}, imp_directions=["+y"]))
+    # ---- combinations (RSTAB 2.5: per-direction proof + SLS sets) ---------
+    gG, gQ = cfg.gamma_G_uls, cfg.gamma_Q
+    psi = cfg.pay_placement_factor
+    anc = cfg.anchor_placement_factor
+    combos: List[Combination] = []
+    for d, dirs in (("X", ["+x", "-x"]), ("Y", ["+y", "-y"])):
+        plc = "placement" if d == "X" else "placement_y"
+        # CO1/CO4 — pay load
+        combos.append(Combination(f"ULS-pay-{d}", "ULS",
+                                  {"dead": gG, "pallets": gQ}, imp_directions=dirs))
+        # CO2/CO5 — placement (psi-reduced pay + placement)
+        if placement:
+            combos.append(Combination(
+                f"ULS-placement-{d}", "ULS",
+                {"dead": gG, "pallets": psi, plc: psi}, imp_directions=dirs))
+        # CO3/CO6 — accidental (gamma = 1.0 on all actions)
+        if accidental:
+            ic = "impact_x" if d == "X" else "impact_y"
+            combos.append(Combination(
+                f"ULS-accidental-{d}", "ULS",
+                {"dead": 1.0, "pallets": 1.0, ic: 1.0}, imp_directions=dirs))
+        # CO7/CO8 — pattern; alternates
+        if has_pattern:
+            combos.append(Combination(
+                f"ULS-pattern-{d}", "ULS",
+                {"dead": gG, "pallets_pattern": gQ}, imp_directions=dirs))
+            combos.append(Combination(
+                f"ULS-alt1-{d}", "ULS",
+                {"dead": gG, "pallets_alt1": gQ}, imp_directions=dirs))
+            combos.append(Combination(
+                f"ULS-alt2-{d}", "ULS",
+                {"dead": gG, "pallets_alt2": gQ}, imp_directions=dirs))
+        # CO9/CO10 — anchor / uplift (reduced placement, no pay load)
+        if placement:
+            combos.append(Combination(
+                f"ULS-anchor-{d}", "ULS",
+                {"dead": 1.0, plc: anc}, imp_directions=dirs))
+        # CO13-CO22 — SLS (now with the sway imperfection)
+        combos.append(Combination(f"SLS-sway-{d}", "SLS",
+                                  {"dead": 1.0, "pallets": 1.0},
+                                  imp_directions=dirs))
+        if has_pattern:
+            combos.append(Combination(f"SLS-top-{d}", "SLS",
+                                      {"dead": 1.0, "pallets_top": 1.0},
+                                      imp_directions=dirs))
+            combos.append(Combination(f"SLS-alt1-{d}", "SLS",
+                                      {"dead": 1.0, "pallets_alt1": 1.0},
+                                      imp_directions=dirs))
+            combos.append(Combination(f"SLS-alt2-{d}", "SLS",
+                                      {"dead": 1.0, "pallets_alt2": 1.0},
+                                      imp_directions=dirs))
+    m.combinations = combos
+
+    # RSTAB drive-in imperfections: 1/300 down-aisle (X), 1/200 cross-aisle (Y).
+    # Honour an explicit user value; otherwise fall back to these drive-in
+    # defaults rather than the SPR phi_s (1/350).
+    phi_down = cfg.phi_s if cfg.phi_s != 1.0 / 350.0 else 1.0 / 300.0
+    phi_cross = cfg.phi_s_cross if cfg.phi_s_cross is not None else 1.0 / 200.0
     m.imperfection = Imperfection(
-        n_cols=nL + 1, phi_s=cfg.phi_s, phi_l=cfg.connector_looseness,
-        method="EHF", directions=["+x", "-x", "+y", "-y"])
+        n_cols=nL + 1, phi_s=phi_down, phi_s_cross=phi_cross,
+        phi_l=cfg.connector_looseness, method="EHF",
+        directions=["+x", "-x", "+y", "-y"])
 
 
 def _checks(m, cfg, nL) -> None:

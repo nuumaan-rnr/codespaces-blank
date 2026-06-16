@@ -281,13 +281,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                       index=0)
             plan_every = c[3].checkbox("Plan bracing every level (shuttle)",
                                        bool(g("plan_every_level", False)))
-            c = st.columns(4)
-            impact = c[0].number_input(
-                "Forklift impact [kN]", 0.0, 20.0,
-                gn("impact_load", 2500.0, 0.0, 20000.0) / 1e3, 0.5)
-            impact_h = c[1].number_input("Impact height [mm]", 100.0, 1500.0,
-                                         gn("impact_height", 400.0, 100.0, 1500.0),
-                                         50.0)
+            st.caption("Forklift impact (1.25 kN down-aisle / 2.5 kN cross-aisle "
+                       "at ~400 mm), placement, pattern loads and per-direction "
+                       "imperfections are set in the “Loads, imperfection & "
+                       "factors” expander; seismic in the “Seismic” expander.")
             gap = pallet_depth + deep_clear
             depth_total = n_deep * (frame_depth + gap) + frame_depth
             st.caption(f"Deep dimension ≈ {depth_total:.0f} mm "
@@ -328,7 +325,6 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 built_up_end_columns=bool(boxed), built_up_arrangement=bu_arr,
                 built_up_h0=bu_h0, built_up_panel=bu_panel,
                 rail_section=None if rail_sec == "(beam)" else rail_sec,
-                impact_load=impact * 1e3, impact_height=impact_h,
                 plan_every_level=bool(plan_every))
 
     with st.container(border=True):
@@ -453,13 +449,19 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                  float(g("dead_load_beam", 0.05)))
         place = c[1].number_input("Placement load [kN]", 0.0, 5.0,
                                   float(g("placement_load", 500.0) / 1e3))
-        phi_s = c[2].number_input("Out-of-plumb (1/x)", 100.0, 1000.0, 300.0)
-        c = st.columns(3)
-        ax = c[0].number_input("Accidental X [kN]", 0.0, 10.0,
+        phi_s = c[2].number_input(
+            "Out-of-plumb down-aisle (1/x)", 100.0, 1000.0, 300.0,
+            help="Down-aisle (X) sway imperfection 1/x. Drive-in default 1/300.")
+        c = st.columns(4)
+        phi_s_cross = c[0].number_input(
+            "Out-of-plumb cross-aisle (1/x)", 100.0, 1000.0, 200.0,
+            help="Cross-aisle (Y) sway imperfection 1/x. Drive-in default 1/200; "
+                 "ignored for selective racking.")
+        ax = c[1].number_input("Accidental X [kN]", 0.0, 10.0,
                                float(g("accidental_load_x", 1250.0) / 1e3))
-        ay = c[1].number_input("Accidental Y [kN]", 0.0, 10.0,
+        ay = c[2].number_input("Accidental Y [kN]", 0.0, 10.0,
                                float(g("accidental_load_y", 2500.0) / 1e3))
-        ah = c[2].number_input("Accidental height [mm]", 100.0, 1000.0,
+        ah = c[3].number_input("Accidental height [mm]", 100.0, 1000.0,
                                gn("accidental_height", 400.0, 100.0, 1000.0), 50.0)
         c = st.columns(3)
         inc_place = c[0].checkbox("Include placement loads",
@@ -610,6 +612,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         beam_laterally_restrained=bool(beam_restrained),
         pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),
         gamma_G=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
+        phi_s_cross=1.0 / phi_s_cross,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_structure_type=s_struct,

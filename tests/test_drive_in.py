@@ -68,7 +68,58 @@ def test_gravity_runs_and_checks():
     assert cases and all(c.converged for c in cases)
     codes = {c.check for c in run_checks(m, cases)}
     assert {"STRESS", "BUCKLING", "DEFLECTION"} <= codes
-    assert any("impact" in c.name for c in m.combinations)
+    assert any("accidental" in c.name for c in m.combinations)
+
+
+def test_rstab_load_cases_and_combos():
+    """The drive-in load scheme mirrors the client RSTAB model (sheets 2.1/2.5):
+    full + alternate-lane + pattern + top pay-load cases, placement and forklift
+    accidental cases, and a per-direction ULS proof + SLS combination set."""
+    m = build_rack(_cfg("drive_in", n_lanes=3))
+    lcs = set(m.load_cases)
+    assert {"dead", "pallets", "pallets_alt1", "pallets_alt2", "pallets_pattern",
+            "pallets_top", "placement", "placement_y", "impact_x",
+            "impact_y"} <= lcs
+    # RSTAB accidental magnitudes: 1.25 kN down-aisle (X), 2.5 kN cross-aisle (Y)
+    assert abs(m.load_cases["impact_x"].nodal_loads[0].fx - 1250.0) < 1e-6
+    assert abs(m.load_cases["impact_y"].nodal_loads[0].fy - 2500.0) < 1e-6
+    # alternate lanes partition the full pay load (RSTAB LC12 ∪ LC13 = LC2)
+    full = {ml.member for ml in m.load_cases["pallets"].member_loads}
+    a1 = {ml.member for ml in m.load_cases["pallets_alt1"].member_loads}
+    a2 = {ml.member for ml in m.load_cases["pallets_alt2"].member_loads}
+    assert a1 | a2 == full and not (a1 & a2)
+    # per-direction proof + SLS combos, both X and Y; SLS keeps the imperfection
+    names = {c.name for c in m.combinations}
+    for d in ("X", "Y"):
+        assert {f"ULS-pay-{d}", f"ULS-placement-{d}", f"ULS-accidental-{d}",
+                f"ULS-pattern-{d}", f"ULS-anchor-{d}", f"SLS-sway-{d}"} <= names
+    assert all(c.imperfection for c in m.combinations if c.kind == "SLS")
+
+
+def test_accidental_applied_at_strike_height_on_front_face():
+    """RSTAB applies the forklift impact ~400 mm above the floor on a front-face
+    upright — not snapped to a rail level."""
+    m = build_rack(_cfg("drive_in", accidental_height=400.0,
+                        beam_levels=[2400.0, 4900.0]))
+    n = m.nodes[m.load_cases["impact_x"].nodal_loads[0].node]
+    assert abs(n.z - 400.0) < 1e-6                     # at the strike height
+    assert n.z not in (2400.0, 4900.0)                 # not a rail level
+    assert abs(n.y - max(nn.y for nn in m.nodes.values())) < 1e-6   # front face
+
+
+def test_per_direction_imperfection():
+    m = build_rack(_cfg("drive_in"))
+    # down-aisle 1/300, cross-aisle 1/200 -> different EHF magnitudes
+    assert m.imperfection.value_for("+y") > m.imperfection.value_for("+x")
+
+
+def test_seismic_cases_generated():
+    m = build_rack(_cfg("drive_in", n_lanes=1, n_deep=1, beam_levels=[2000.0],
+                        frame_height=3000.0, seismic=True, seismic_n_modes=3))
+    assert m.seismic is not None and m.seismic.enabled
+    cases = run_all(m)
+    assert any(c.kind == "SEISMIC" for c in cases)
+    assert all(c.converged for c in cases)
 
 
 def test_deep_dimension():

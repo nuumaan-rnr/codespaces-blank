@@ -43,7 +43,7 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
             geom_sway = None
             name = combo.name
             if direction:
-                phi = model.imperfection.value()
+                phi = model.imperfection.value_for(direction)
                 vec = DIRECTION_VECTORS[direction]
                 if model.imperfection.method.upper() == "EHF":
                     loads = apply_ehf(model, base_loads, phi, vec)

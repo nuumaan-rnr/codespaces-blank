@@ -222,7 +222,14 @@ class RackConfig:
     # design
     gamma_G: float = 1.3
     gamma_Q: float = 1.4
-    phi_s: float = 1.0 / 350.0              # out-of-plumb tolerance
+    phi_s: float = 1.0 / 350.0              # out-of-plumb tolerance (down-aisle)
+    phi_s_cross: Optional[float] = None     # cross-aisle out-of-plumb; None=phi_s
+    # drive-in ULS factors (RSTAB scheme): gamma_G for ULS proof combos, the
+    # psi-reduced factor on simultaneous pay+placement, and the placement factor
+    # for the anchor/uplift combos (1.0 DL + anchor_placement_factor*placement)
+    gamma_G_uls: float = 1.35
+    pay_placement_factor: float = 1.26
+    anchor_placement_factor: float = 0.4
     mesh_beam: int = 4
     mesh_upright: int = 1                   # per segment between elevations
     # ---- seismic (IS 1893:2016); see model.SeismicSettings ----------------
@@ -276,8 +283,9 @@ class RackConfig:
     internal_frame_extra: float = 300.0     # truncated uprights above top load
     top_depth_tie: bool = False             # drive-in: depth tie at frame tops
     rail_eccentricity: float = 0.0          # rail-to-upright offset (Y) [mm]
-    impact_load: float = 2500.0             # forklift impact (N); 0 disables
-    impact_height: float = 400.0            # impact application height [mm]
+    impact_load: float = 2500.0             # deprecated: superseded by
+    impact_height: float = 400.0            # accidental_load_x/y + accidental_height
+    #                                         (kept only for config back-compat)
     # built-up (battened/laced) boxed end columns — EN 1993-1-1 §6.4 check
     built_up_end_columns: bool = False      # opt-in: boxed end-frame uprights
     built_up_arrangement: str = "battened"  # "battened" | "laced"

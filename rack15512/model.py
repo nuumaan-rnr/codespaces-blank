@@ -262,21 +262,35 @@ class Imperfection:
     phi: Optional[float] = None
     n_cols: Optional[int] = None
     phi_s: float = 1.0 / 350.0
+    phi_s_cross: Optional[float] = None     # cross-aisle (+y/-y) out-of-plumb;
+    #                                         None -> use phi_s in both directions
     phi_l: float = 0.0
     phi_min: float = 1.0 / 500.0
     method: str = "EHF"
     directions: List[str] = field(
         default_factory=lambda: ["+x", "-x", "+y", "-y"])
 
-    def value(self) -> float:
+    def _phi_from(self, phi_s: float) -> float:
         if self.phi is not None:
             return self.phi
         if not self.n_cols:
             raise ValueError(
                 "Imperfection: give either phi directly or n_cols "
                 "(+ phi_s, phi_l) to compute it.")
-        phi = math.sqrt(0.5 + 1.0 / self.n_cols) * (2.0 * self.phi_s + self.phi_l)
+        phi = math.sqrt(0.5 + 1.0 / self.n_cols) * (2.0 * phi_s + self.phi_l)
         return max(phi, self.phi_min)
+
+    def value(self) -> float:
+        """Down-aisle (X) imperfection (also the default for all directions)."""
+        return self._phi_from(self.phi_s)
+
+    def value_for(self, direction: str) -> float:
+        """Direction-specific imperfection: cross-aisle (+y/-y) uses
+        phi_s_cross when given (EN 15512 / RSTAB use a larger cross-aisle
+        out-of-plumb), otherwise the down-aisle value."""
+        if direction in ("+y", "-y") and self.phi_s_cross is not None:
+            return self._phi_from(self.phi_s_cross)
+        return self._phi_from(self.phi_s)
 
 
 DIRECTION_VECTORS: Dict[str, Tuple[float, float]] = {

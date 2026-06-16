@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · drive-in built-up boxed end-column check (EN 1993-1-1 §6.4)"
+BUILD = "2026-06-16 · drive-in load cases & combos mirror RSTAB (patterns, accidental @400mm, per-dir imperfections, seismic)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
