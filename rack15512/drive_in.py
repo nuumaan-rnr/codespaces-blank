@@ -99,11 +99,24 @@ def build_drive_in(cfg) -> RackModel:
         return round(z, 3)
 
     # ---- grid --------------------------------------------------------------
-    p = cfg.deep_pitch or (cfg.pallet_depth + cfg.deep_clearance)
+    # depth frames: 2-leg ladders (legs frame_depth apart) repeated with a gap.
+    # n_deep = number of pallet gaps => n_deep+1 frames. dy = leg Y positions;
+    # frame bays (braced) are within-frame leg pairs, gap bays are unbraced.
     lw = cfg.lane_width
     nL, nD = cfg.n_lanes, cfg.n_deep
+    fd = cfg.frame_depth
+    gap = cfg.deep_pitch or (cfg.pallet_depth + cfg.deep_clearance)
+    pitch = fd + gap
+    dy: List[float] = []
+    frame_bays: List[int] = []                   # bay index i = (dy[i], dy[i+1])
+    for f in range(nD + 1):
+        y0 = f * pitch
+        frame_bays.append(len(dy))               # the within-frame bay
+        dy.append(y0)
+        dy.append(y0 + fd)
+    nDpos = len(dy)                              # number of depth positions
     front_open, rear_open = _open_faces(cfg.di_variant)
-    rail_length = nD * p
+    rail_length = dy[-1]
 
     node_of: Dict[tuple, int] = {}
     rail_of: Dict[tuple, int] = {}
@@ -115,37 +128,37 @@ def build_drive_in(cfg) -> RackModel:
         return ctr[0]
 
     for k in range(nL + 1):
-        for d in range(nD + 1):
+        for di in range(nDpos):
             for z in zs:
-                node_of[(k, d, rz(z))] = NN(k * lw, d * p, z)
+                node_of[(k, di, rz(z))] = NN(k * lw, dy[di], z)
 
     mid = 1
     zz = sorted(zs)
 
-    # ---- uprights (depth ladder at each width line) ------------------------
+    # ---- uprights (legs of each depth frame, at every width line) ----------
     for k in range(nL + 1):
-        for d in range(nD + 1):
+        for di in range(nDpos):
             for a, b in zip(zz, zz[1:]):
-                m.add_member(mid, node_of[(k, d, rz(a))], node_of[(k, d, rz(b))],
-                             up.name, member_set="uprights",
-                             mesh=cfg.mesh_upright)
+                m.add_member(mid, node_of[(k, di, rz(a))],
+                             node_of[(k, di, rz(b))], up.name,
+                             member_set="uprights", mesh=cfg.mesh_upright)
                 mid += 1
 
-    # ---- frame bracing (depth-vertical Y-Z plane, per frame) ---------------
+    # ---- frame bracing (within each frame's 2 legs only; gaps stay clear) --
     xpat = (cfg.bracing_type or "D").upper() == "X"
     for k in range(nL + 1):
-        for d in range(nD):                      # depth bays
+        for bi in frame_bays:                    # only the within-frame bays
             for i, (a, b) in enumerate(zip(zz, zz[1:])):
-                na = node_of[(k, d, rz(a))]
-                nb = node_of[(k, d + 1, rz(b))]
-                nc = node_of[(k, d + 1, rz(a))]
-                ndn = node_of[(k, d, rz(b))]
+                na = node_of[(k, bi, rz(a))]
+                nb = node_of[(k, bi + 1, rz(b))]
+                nc = node_of[(k, bi + 1, rz(a))]
+                ndn = node_of[(k, bi, rz(b))]
                 if xpat:
                     m.add_member(mid, na, nb, brace.name, mtype="truss",
                                  member_set="bracing"); mid += 1
                     m.add_member(mid, nc, ndn, brace.name, mtype="truss",
                                  member_set="bracing"); mid += 1
-                else:                            # D: alternate diagonal
+                else:                            # D: alternating zigzag
                     if i % 2 == 0:
                         m.add_member(mid, na, nb, brace.name, mtype="truss",
                                      member_set="bracing")
@@ -154,34 +167,35 @@ def build_drive_in(cfg) -> RackModel:
                                      member_set="bracing")
                     mid += 1
 
-    # ---- cantilever arms + rails ------------------------------------------
+    # ---- cantilever arms + rails (continuous in depth on the arm tips) -----
     a_len = cfg.arm_length or 200.0
     for k in range(nL + 1):
         sides = []
         if k < nL:
-            sides.append(+1)                     # rail into the lane on the right
+            sides.append(+1)
         if k > 0:
-            sides.append(-1)                     # rail into the lane on the left
+            sides.append(-1)
         for side in sides:
             for z in rail_levels:
-                for d in range(nD + 1):
-                    rn = NN(k * lw + side * a_len, d * p, z)
-                    rail_of[(k, side, d, rz(z))] = rn
-                    m.add_member(mid, node_of[(k, d, rz(z))], rn, arm.name,
+                for di in range(nDpos):
+                    rn = NN(k * lw + side * a_len, dy[di], z)
+                    rail_of[(k, side, di, rz(z))] = rn
+                    m.add_member(mid, node_of[(k, di, rz(z))], rn, arm.name,
                                  mtype="beam", member_set="rail arms")
                     mid += 1
-                for d in range(nD):              # rail spans each depth bay
-                    m.add_member(mid, rail_of[(k, side, d, rz(z))],
-                                 rail_of[(k, side, d + 1, rz(z))], rail.name,
+                for di in range(nDpos - 1):
+                    m.add_member(mid, rail_of[(k, side, di, rz(z))],
+                                 rail_of[(k, side, di + 1, rz(z))], rail.name,
                                  mtype="beam", member_set="rail beams",
                                  mesh=cfg.mesh_beam)
                     mid += 1
 
     # ---- top beams (X across frames, every depth line) --------------------
-    for d in range(nD + 1):
+    for di in range(nDpos):
         for k in range(nL):
-            m.add_member(mid, node_of[(k, d, rz(H))], node_of[(k + 1, d, rz(H))],
-                         top.name, mtype="beam", member_set="portal beams")
+            m.add_member(mid, node_of[(k, di, rz(H))],
+                         node_of[(k + 1, di, rz(H))], top.name,
+                         mtype="beam", member_set="portal beams")
             mid += 1
 
     # ---- rear spine (X-Z cross-bracing at the closed end) + level beams ----
@@ -210,24 +224,25 @@ def build_drive_in(cfg) -> RackModel:
                   else range(0, nL, 3) if cfg.plan_bracing_modules == "every_3rd"
                   else range(0, nL, 2))          # default: alternate lanes
     for k in plan_lanes:
-        for d in range(nD):                      # single diagonal per cell
-            m.add_member(mid, node_of[(k, d, rz(H))],
-                         node_of[(k + 1, d + 1, rz(H))], plan_sec.name,
+        for di in range(nDpos - 1):              # single diagonal per cell
+            m.add_member(mid, node_of[(k, di, rz(H))],
+                         node_of[(k + 1, di + 1, rz(H))], plan_sec.name,
                          mtype="truss", member_set="plan bracing"); mid += 1
 
     # ---- supports (pinned bases) ------------------------------------------
     for k in range(nL + 1):
-        for d in range(nD + 1):
-            m.supports.append(Support(node_of[(k, d, rz(0.0))], ux=True, uy=True,
-                                      uz=True, rx=False, ry=False, rz=False))
+        for di in range(nDpos):
+            m.supports.append(Support(node_of[(k, di, rz(0.0))], ux=True,
+                                      uy=True, uz=True, rx=False, ry=False,
+                                      rz=False))
 
-    _loads(m, cfg, rail_levels, rail_length, node_of, rz, H, nL, nD)
+    _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL)
     _checks(m, cfg, nL)
     return m
 
 
-def _loads(m, cfg, rail_levels, rail_length, node_of, rz, H, nL, nD) -> None:
-    Q = nD * cfg.weight_per_pallet               # lane-level total
+def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL) -> None:
+    Q = cfg.n_deep * cfg.weight_per_pallet       # lane-level total
     w_rail = (Q / 2.0) / rail_length if rail_length > 0 else 0.0
     dead = LoadCase("dead", "permanent")
     pallets = LoadCase("pallets", "variable")
@@ -239,7 +254,7 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, H, nL, nD) -> None:
     m.load_cases["dead"] = dead
     m.load_cases["pallets"] = pallets
 
-    top_front = node_of[(0, nD, rz(rail_levels[-1]))]
+    top_front = node_of[(0, nDpos - 1, rz(rail_levels[-1]))]
     place = LoadCase("placement", "variable")
     place.nodal_loads.append(NodalLoad(top_front, fx=cfg.placement_load))
     m.load_cases["placement"] = place
@@ -250,7 +265,7 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, H, nL, nD) -> None:
     impact = cfg.impact_load and cfg.impact_height > 0
     if impact:
         zj = min(rail_levels, key=lambda z: abs(z - cfg.impact_height))
-        n_imp = node_of[(0, nD, rz(zj))]
+        n_imp = node_of[(0, nDpos - 1, rz(zj))]
         ix = LoadCase("impact_x", "accidental")
         ix.nodal_loads.append(NodalLoad(n_imp, fx=cfg.impact_load))
         m.load_cases["impact_x"] = ix

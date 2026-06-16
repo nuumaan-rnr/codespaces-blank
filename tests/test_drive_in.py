@@ -72,7 +72,19 @@ def test_gravity_runs_and_checks():
 
 
 def test_deep_dimension():
-    m = build_rack(_cfg("drive_in", n_deep=6, pallet_depth=1200.0,
-                        deep_clearance=50.0))
+    # depth = n_deep*(frame_depth + gap) + frame_depth; frames are 2-leg ladders
+    m = build_rack(_cfg("drive_in", n_deep=3, frame_depth=1100.0,
+                        pallet_depth=1000.0, deep_clearance=100.0))
     ys = [n.y for n in m.nodes.values()]
-    assert max(ys) == 6 * (1200.0 + 50.0)
+    assert max(ys) == 3 * (1100.0 + 1100.0) + 1100.0      # 7700, the RSTAB depth
+
+
+def test_frames_have_gaps():
+    # frame bracing only within the 2-leg frames, not in the pallet gaps
+    m = build_rack(_cfg("drive_in", n_deep=3, frame_depth=1100.0,
+                        pallet_depth=1000.0, deep_clearance=100.0))
+    # brace Y midpoints: should cluster in frame bays (0-1100, 2200-3300, ...)
+    ymid = sorted({round((m.nodes[mm.node_i].y + m.nodes[mm.node_j].y) / 2)
+                   for mm in m.members.values() if mm.member_set == "bracing"})
+    # no brace spans a gap bay (e.g. 1100-2200 -> midpoint ~1650)
+    assert all(not (1101 < y < 2199) for y in ymid)

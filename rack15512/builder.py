@@ -261,7 +261,8 @@ class RackConfig:
     rail_section: Optional[str] = None      # depth rail / support arm
     arm_section: Optional[str] = None        # cantilever arm (upright -> rail)
     arm_length: float = 200.0                # rail offset into the lane [mm]
-    deep_pitch: Optional[float] = None       # override depth pitch (else pallet+clear)
+    frame_depth: float = 1100.0              # leg spacing within one depth frame
+    deep_pitch: Optional[float] = None       # override gap (else pallet+clear)
     level_beam_section: Optional[str] = None  # shuttle: X beam carrying rails
     portal_section: Optional[str] = None    # top-tie / portal beam (X)
     top_beam_section: Optional[str] = None  # access-frame top beam
