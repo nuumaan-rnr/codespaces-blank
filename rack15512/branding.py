@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · drive-in levels pallet-driven (pallet+clearance) + top-beam gap above last bay"
+BUILD = "2026-06-16 · drive-in spine & plan bracing selectable by module pattern or specific bays"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

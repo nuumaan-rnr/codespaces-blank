@@ -38,6 +38,18 @@ from .model import (BuiltUpColumn, Combination, Hinge, Imperfection, LoadCase,
 _TOL = 1.0
 
 
+def _select_bays(n: int, modules: str, bay_list) -> List[int]:
+    """Width bays (lanes) to brace: an explicit bay list overrides the mode;
+    otherwise all / every_3rd / alternate (default)."""
+    if bay_list:
+        return [k for k in bay_list if 0 <= k < n]
+    if modules == "all":
+        return list(range(n))
+    if modules == "every_3rd":
+        return list(range(0, n, 3))
+    return list(range(0, n, 2))               # alternate
+
+
 def _open_faces(variant: str) -> Tuple[bool, bool]:
     """(front_open, rear_open).  Front (d=n_deep) is always the access face;
     the rear (d=0) is closed for LIFO/drive-in, open for FIFO/drive-through."""
@@ -272,7 +284,10 @@ def build_drive_in(cfg) -> RackModel:
     has_spine = (not rear_open) and cfg.spine_position != "none"
     if has_spine:
         d_s = 0                                  # rear / closed end
-        spine_lanes = list(range(0, nL, 2))      # alternate bays (RSTAB)
+        # selectable bays (default alternate = RSTAB); one X panel per storey
+        spine_lanes = _select_bays(nL, cfg.spine_bracing_modules,
+                                   getattr(cfg, "spine_bracing_module_list",
+                                           None))
         spine_levels = sorted({0.0, *rail_levels, H})
         for k in spine_lanes:
             for a, b in zip(spine_levels, spine_levels[1:]):
@@ -297,15 +312,8 @@ def build_drive_in(cfg) -> RackModel:
     # type: 'D' single diagonal or 'X' crossed per cell; modules: an explicit
     # lane list (plan_bracing_module_list) or all / every_3rd / alternate lanes.
     plan_x = (getattr(cfg, "plan_bracing_type", "D") or "D").upper() == "X"
-    mod_list = getattr(cfg, "plan_bracing_module_list", None)
-    if mod_list:
-        plan_lanes = [k for k in mod_list if 0 <= k < nL]
-    elif cfg.plan_bracing_modules == "all":
-        plan_lanes = list(range(nL))
-    elif cfg.plan_bracing_modules == "every_3rd":
-        plan_lanes = list(range(0, nL, 3))
-    else:                                        # default: alternate lanes
-        plan_lanes = list(range(0, nL, 2))
+    plan_lanes = _select_bays(nL, cfg.plan_bracing_modules,
+                              getattr(cfg, "plan_bracing_module_list", None))
     for k in plan_lanes:
         for di in range(nDpos - 1):
             m.add_member(mid, node_of[(k, di, rz(H))],

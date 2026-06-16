@@ -343,36 +343,48 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             from rack15512.cf_sections import STD_1C
             _libbr = [n for n in br_names if n not in STD_1C]
             brace_opts = ["(frame brace)"] + STD_1C + _libbr
-            st.markdown("**Top plan bracing & spine** — the spine is placed "
-                        "automatically per the variant (Spine setting above).")
+            st.markdown("**Top plan bracing & rear spine** — the spine is placed "
+                        "automatically per the variant; both are selectable by "
+                        "module pattern or specific bays (lane indices).")
+            _mods = ["all", "alternate", "every_3rd"]
+
+            def _bays(txt):
+                return [int(s) for s in txt.replace(" ", "").split(",")
+                        if s.lstrip("-").isdigit()] or None
+
             bc = st.columns(4)
             sp_sec = bc[0].selectbox(
                 "Spine section", brace_opts,
                 index=_idx(brace_opts,
                            g("spine_bracing_section", None) or "(frame brace)"))
+            sp_mod = bc[1].selectbox(
+                "Spine modules", _mods,
+                index=_idx(_mods, g("spine_bracing_modules", "alternate")),
+                help="Rear-spine bays. 'alternate' matches the RSTAB model.")
             pl_default = g("plan_bracing_section", "1C36x21x6x1.2")
-            pl_sec = bc[1].selectbox(
+            pl_sec = bc[2].selectbox(
                 "Plan section", brace_opts,
                 index=_idx(brace_opts,
                            pl_default if pl_default in brace_opts
                            else "(frame brace)"))
-            pl_mod = bc[2].selectbox(
-                "Plan modules", ["all", "alternate", "every_3rd"],
-                index=_idx(["all", "alternate", "every_3rd"],
-                           g("plan_bracing_modules", "all")))
-            pl_type = bc[3].selectbox(
+            pl_mod = bc[3].selectbox(
+                "Plan modules", _mods,
+                index=_idx(_mods, g("plan_bracing_modules", "all")))
+            bc2 = st.columns([1, 2, 2])
+            pl_type = bc2[0].selectbox(
                 "Plan bracing type", ["D", "X"],
                 index=_idx(["D", "X"], g("plan_bracing_type", "D")),
                 help="D = single diagonal per cell; X = crossed.")
-            pl_specific = st.text_input(
-                "Specific plan modules (lane indices, e.g. 0,2 — overrides modes)",
+            sp_specific = bc2[1].text_input(
+                "Specific spine bays (e.g. 0,2 — overrides modules)",
+                value=",".join(str(i) for i in (g("spine_bracing_module_list",
+                                                  None) or [])))
+            pl_specific = bc2[2].text_input(
+                "Specific plan bays (e.g. 0,2 — overrides modules)",
                 value=",".join(str(i) for i in (g("plan_bracing_module_list",
                                                   None) or [])))
-            pl_list = [int(s) for s in pl_specific.replace(" ", "").split(",")
-                       if s.lstrip("-").isdigit()] or None
-            # spine is auto from the variant; these selective-only flags default
+            sp_list, pl_list = _bays(sp_specific), _bays(pl_specific)
             sp_on = False
-            sp_mod = g("spine_bracing_modules", "all")
             pl_on = True
 
             # ---- top & back beams + connector stiffness ----------------------
@@ -769,6 +781,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                                   None) or [])))
             pl_list = [int(s) for s in pl_specific.replace(" ", "").split(",")
                        if s.lstrip("-").isdigit()] or None
+            sp_list = None          # selective spine bays use the module pattern
 
     cfg = RackConfig(
         system_type="drive_in" if is_di else "selective", **di_kw,
@@ -804,7 +817,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         seismic_n_modes=int(s_modes),
         spine_bracing=sp_on,
         spine_bracing_section=None if sp_sec == "(frame brace)" else sp_sec,
-        spine_bracing_modules=sp_mod,
+        spine_bracing_modules=sp_mod, spine_bracing_module_list=sp_list,
         plan_bracing=pl_on,
         plan_bracing_section=None if pl_sec == "(frame brace)" else pl_sec,
         plan_bracing_modules=pl_mod, plan_bracing_type=pl_type,

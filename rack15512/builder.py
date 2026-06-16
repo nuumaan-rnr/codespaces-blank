@@ -139,7 +139,9 @@ class RackConfig:
     spine_bracing: bool = False
     spine_bracing_section: Optional[str] = "1C60x40x10x1.6"
     spine_bracing_pitch: Optional[float] = None            # None = bracing_pitch
-    spine_bracing_modules: str = "every_3rd"  # 'alternate'|'every_3rd'
+    spine_bracing_modules: str = "every_3rd"  # 'all'|'alternate'|'every_3rd'
+    # specific bays (lane indices) to spine-brace; overrides the mode above
+    spine_bracing_module_list: Optional[List[int]] = None
     spine_bracing_area_factor: float = 0.15
     spine_offset_single: float = 150.0        # spine offset behind a single rack
     # row / frame spacers (ties): one member_set "frame spacer", modelled as

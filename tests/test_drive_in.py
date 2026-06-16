@@ -42,6 +42,23 @@ def test_spine_by_variant():
     assert _sets(build_rack(_cfg("shuttle_fifo")))["spine bracing"] == 0
 
 
+def test_spine_and_plan_bay_selection():
+    # both the spine and the plan bracing are selectable by module pattern or
+    # an explicit list of bays
+    def spine(**kw):
+        return _sets(build_rack(_cfg("drive_in", n_lanes=4, **kw)))["spine bracing"]
+
+    def plan(**kw):
+        return _sets(build_rack(_cfg("drive_in", n_lanes=4, **kw)))["plan bracing"]
+
+    assert spine(spine_bracing_modules="all") \
+        > spine(spine_bracing_modules="alternate") > 0
+    assert spine(spine_bracing_module_list=[1]) \
+        < spine(spine_bracing_modules="all")
+    assert plan(plan_bracing_modules="all") \
+        > plan(plan_bracing_module_list=[0]) > 0
+
+
 def test_rails_on_arms_offset_into_lane():
     m = build_rack(_cfg("drive_in"))
     # rail nodes are offset from the upright lines by arm_length (200)
