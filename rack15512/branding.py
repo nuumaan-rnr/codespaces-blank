@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-16 · drive-in base spring down-aisle-only (matches SPR)"
+BUILD = "2026-06-16 · stop run + 'model not stable' when no ULS converges (SPR & drive-in)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

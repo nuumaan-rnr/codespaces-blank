@@ -29,7 +29,12 @@ def _run(model: RackModel, outdir: str) -> int:
     print(f"Model '{model.name}': {len(model.nodes)} nodes, "
           f"{len(model.members)} members, "
           f"{len(model.combinations)} combinations")
-    cases = run_all(model)
+    from .analysis import UnstableModelError
+    try:
+        cases = run_all(model)
+    except UnstableModelError as exc:
+        print(f"MODEL NOT STABLE: {exc}", file=sys.stderr)
+        return 1
     checks = run_checks(model, cases)
 
     report = write_report(model, cases, checks)

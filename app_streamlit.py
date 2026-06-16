@@ -17,7 +17,7 @@ import pickle
 
 from rack15512 import branding as B
 from rack15512 import ui
-from rack15512.analysis import run_all
+from rack15512.analysis import UnstableModelError, run_all
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
@@ -1374,6 +1374,8 @@ def render_view_config():
                 ui.toast_verdict(summary["verdict"])
                 _run_summary_dialog(summary,
                                     target=(proj.id, sysm.id, conf.id))
+            except UnstableModelError as exc:
+                st.error(f"🛑 Model not stable — run stopped. {exc}")
             except Exception as exc:
                 st.error(f"Analysis failed: {exc}")
                 st.exception(exc)
@@ -1489,6 +1491,8 @@ def render_view_config():
                     ui.toast_verdict(summary["verdict"])
                     _run_summary_dialog(summary,
                                         target=(proj.id, sysm.id, conf.id))
+                except UnstableModelError as exc:
+                    st.error(f"🛑 Model not stable — run stopped. {exc}")
                 except Exception as exc:
                     st.error(f"Analysis failed: {exc}")
                     st.exception(exc)
@@ -1809,6 +1813,8 @@ def render_seismic_study():
             ui.toast_verdict(summary["verdict"])
             goto("view_config", project_id=proj.id, system_id=sysm.id,
                  config_id=conf.id)
+        except UnstableModelError as exc:
+            st.error(f"🛑 Model not stable — run stopped. {exc}")
         except Exception as exc:
             st.error(f"Analysis failed: {exc}")
             st.exception(exc)
@@ -2084,6 +2090,8 @@ def render_configure():
                 ui.toast_verdict(summary["verdict"])
                 # popup: cases/combinations/convergence/stress + results link
                 _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
+            except UnstableModelError as exc:
+                st.error(f"🛑 Model not stable — run stopped. {exc}")
             except Exception as exc:
                 st.error(f"Analysis failed: {exc}")
                 st.exception(exc)

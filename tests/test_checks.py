@@ -573,11 +573,41 @@ def test_overloaded_rack_fails_checks():
                      upright_section="UP-90x70x1.8",
                      pallet_load_per_level=60000.0)   # 6 t per bay per level
     model = build_rack(cfg)
-    cases = run_all(model)
+    from rack15512.analysis import UnstableModelError
+    try:
+        cases = run_all(model)
+    except UnstableModelError:
+        return                       # fully unstable: run stopped (a valid fail)
     checks = run_checks(model, cases)
     converged = [c for c in cases if c.kind == "ULS" and c.converged]
     # either the second-order analysis diverges (instability) or checks fail
     assert (not converged) or (not all_ok(checks))
+
+
+def test_unstable_model_stops_run():
+    """When no ULS combination converges, run_all stops with UnstableModelError
+    (the actionable 'change upright/beams' message)."""
+    from rack15512.analysis import UnstableModelError
+    from rack15512.model import (Combination, CrossSection, LoadCase, NodalLoad,
+                                 RackModel, Steel, Support)
+    m = RackModel()
+    m.materials["steel"] = Steel("steel", fy=355.0)
+    m.sections["s"] = CrossSection("s", "steel", A=100.0, Iy=1e4, Iz=1e4,
+                                   J=1e3, Wely=1e3, Welz=1e3)
+    m.add_node(1, 0.0, 0.0, 0.0)
+    m.add_node(2, 0.0, 0.0, 1000.0)
+    m.add_member(1, 1, 2, "s", mtype="beam")
+    # pinned base (rotations free) + free top -> a lateral load makes it a
+    # mechanism, so the ULS case cannot converge
+    m.supports.append(Support(1, ux=True, uy=True, uz=True,
+                              rx=False, ry=False, rz=False))
+    lc = LoadCase("dead", "permanent")
+    lc.nodal_loads.append(NodalLoad(2, fx=1000.0))
+    m.load_cases["dead"] = lc
+    m.combinations = [Combination("ULS1", "ULS", {"dead": 1.35},
+                                  imperfection=False)]
+    with pytest.raises(UnstableModelError):
+        run_all(m)
 
 
 if __name__ == "__main__":

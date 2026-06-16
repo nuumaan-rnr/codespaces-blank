@@ -15,6 +15,11 @@ from .model import DIRECTION_VECTORS, RackModel
 from .results import CaseResult
 
 
+class UnstableModelError(RuntimeError):
+    """Raised when no ULS combination converges - the structure is unstable
+    and the run is stopped so the sections can be revised."""
+
+
 def run_all(model: RackModel, progress=None) -> List[CaseResult]:
     # set RACK_VERBOSE=1 to echo per-combination run remarks to the terminal
     # (otherwise remarks go only to the progress callback, e.g. the app UI)
@@ -75,13 +80,24 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
                     case.sway_first_order = lin.max_sway
             results.append(case)
 
+    # if NO ULS combination converged the structure is unstable -> stop the run
+    # with an actionable message (applies to selective and drive-in / shuttle)
+    uls = [c for c in results if c.kind == "ULS"]
+    if uls and not any(c.converged for c in uls):
+        msg = ("Model not stable - no ULS combination converged. Increase the "
+               "upright and/or beam (rail) section sizes, or add bracing, to "
+               "make the structure stable.")
+        print("ANALYSIS STOPPED: " + msg, file=sys.stderr, flush=True)
+        step(msg, 1.0)
+        raise UnstableModelError(msg)
+
     if model.seismic and model.seismic.enabled:
         from .seismic import run_seismic
         results += run_seismic(model, progress=progress)
 
-    # surface a stopped/diverged analysis on the command prompt: a combination
-    # whose second-order solve did not converge means the structure is unstable
-    # under that case and the analysis effectively stopped there.
+    # surface a partially stopped/diverged analysis on the command prompt: a
+    # combination whose second-order solve did not converge means the structure
+    # is unstable under that case.
     stopped = [c.name for c in results if not c.converged]
     if stopped:
         msg = ("ANALYSIS STOPPED - did not converge: "
