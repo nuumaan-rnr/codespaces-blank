@@ -197,7 +197,10 @@ def test_full_run_with_xlsx_master():
     assert model.materials[
         model.sections["RHS 100x50x1.6"].material].fy == 310.0
     sup = model.supports[0]
-    assert isinstance(sup.rx, float) and sup.rx > 0   # auto base stiffness
+    # auto base stiffness applied in the down-aisle direction (ry) only;
+    # cross-aisle (rx) base is pinned (braced frame)
+    assert isinstance(sup.ry, float) and sup.ry > 0
+    assert sup.rx is False
     cases = run_all(model)
     assert all(c.converged for c in cases)
     checks = run_checks(model, cases)

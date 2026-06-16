@@ -11,6 +11,7 @@ from __future__ import annotations
 import html as _html
 import json as _json
 import os as _os
+import sys as _sys
 import time as _time
 
 import streamlit as st
@@ -403,6 +404,8 @@ def run_with_status(run_fn, label="Running analysis"):
         box.write(f"Error: {exc}")
         log(f"FAILED: {exc}", "error")
         _render_console()
+        # echo to the command prompt (terminal running Streamlit)
+        print(f"ANALYSIS STOPPED: {exc}", file=_sys.stderr, flush=True)
         raise
     total = _time.time() - start
     bar.progress(1.0)

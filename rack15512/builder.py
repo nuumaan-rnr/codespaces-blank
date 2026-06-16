@@ -146,6 +146,12 @@ class RackConfig:
     # simply-supported truss members (axial only, no flexural stiffness); the
     # section may be a beam section selected by the user
     spacer_section: Optional[str] = None      # None = the frame brace section
+    # frame-spacer vertical placement (industry standard): one tie every
+    # spacer_spacing up the frame, a mandatory tie spacer_top_offset below the
+    # top, and at least spacer_min ties
+    spacer_spacing: float = 2400.0            # [mm]
+    spacer_top_offset: float = 200.0          # [mm] below frame height
+    spacer_min: int = 2
     # upright splice: auto-placed at H/2 when frame height > splice_above
     # (max manufacturable upright length); set splice_z to position it
     splice_z: Optional[float] = None
@@ -316,6 +322,25 @@ def bracing_elevations(cfg: RackConfig, frame_height: float) -> List[float]:
     return zs
 
 
+def frame_spacer_levels(cfg: RackConfig, frame_height: float) -> List[float]:
+    """Frame-spacer (row-tie) elevations per industry standard: one tie every
+    `spacer_spacing` up the frame, a mandatory tie `spacer_top_offset` below the
+    top, and at least `spacer_min` ties."""
+    spacing = max(cfg.spacer_spacing, 1.0)
+    top = max(frame_height - cfg.spacer_top_offset, 0.0)
+    zs: List[float] = []
+    z = spacing
+    while z < top - 0.5 * spacing:            # keep clear of the mandatory top tie
+        zs.append(z)
+        z += spacing
+    if top > _TOL:
+        zs.append(top)
+    # enforce the minimum number of ties (halve down from the lowest)
+    while zs and len(zs) < max(cfg.spacer_min, 1):
+        zs.insert(0, zs[0] / 2.0)
+    return sorted({round(v, 1) for v in zs if v > _TOL})
+
+
 def _pick(lib: SectionLibrary, name: str, role: str) -> str:
     """Section name, falling back to the first master entry of the role."""
     if name in lib.sections:
@@ -422,11 +447,16 @@ def build_rack(cfg: RackConfig) -> RackModel:
     if splice_z is None and H > cfg.splice_above:
         splice_z = H / 2.0
 
+    # frame-spacer (row-tie) elevations: industry standard, not at every beam
+    # level (used only when the module has a back-to-back spacer pair)
+    spacer_zs = frame_spacer_levels(cfg, H) if spacer_pair is not None else []
+
     zs: List[float] = [0.0]
     extra = {splice_z} if splice_z else set()
     if (cfg.accidental_load_x or cfg.accidental_load_y) \
             and 0.0 < acc_h < H:
         extra.add(acc_h)
+    extra |= set(spacer_zs)
     for z in sorted(set(beam_levels) | set(brace_zs) | {H} | extra):
         if z - zs[-1] > _TOL:
             zs.append(z)
@@ -566,7 +596,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
     if spacer_pair is not None:
         sa, sb = spacer_pair
         for i in range(n_lines):
-            for z in beam_levels:
+            for z in spacer_zs:              # industry std: every ~2400 mm + top
                 j = j_of(z)
                 m.add_member(mid, nid(i, sa, j), nid(i, sb, j), spsec,
                              mtype="beam", member_set="frame spacer")
@@ -739,11 +769,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
         k_base, _ = cfg.master.base_stiffness(up.name, N_est)
     else:
         k_base = float(cfg.base_stiffness)
+    # The EN 15512 floor-connection test gives the DOWN-AISLE rotational
+    # stiffness (bending in the X-Z plane -> M_y -> ry).  Cross-aisle (rx) is
+    # provided by the braced frame, so the base is pinned about X.  Apply the
+    # base spring in the down-aisle direction (ry) only.
     for i in range(n_lines):
         for s in sides:
             k = k_base if k_base > 0 else False
             m.supports.append(Support(nid(i, s, 0), ux=True, uy=True, uz=True,
-                                      rx=k, ry=k, rz=False))
+                                      rx=False, ry=k, rz=False))
     # spine tower bases: a pinned floor connection (translations held, free to
     # rotate) for the spine between back-to-back modules / behind a single one
     for node in spine_base_nodes:

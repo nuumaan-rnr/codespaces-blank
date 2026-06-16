@@ -79,4 +79,14 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
         from .seismic import run_seismic
         results += run_seismic(model, progress=progress)
 
+    # surface a stopped/diverged analysis on the command prompt: a combination
+    # whose second-order solve did not converge means the structure is unstable
+    # under that case and the analysis effectively stopped there.
+    stopped = [c.name for c in results if not c.converged]
+    if stopped:
+        msg = ("ANALYSIS STOPPED - did not converge: "
+               + ", ".join(stopped[:6]) + ("..." if len(stopped) > 6 else ""))
+        print(msg, file=sys.stderr, flush=True)
+        step(msg, 1.0)
+
     return results

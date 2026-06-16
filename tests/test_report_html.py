@@ -35,9 +35,10 @@ def _built():
 @needs_master
 def test_base_and_connector_stiffness_in_model():
     m = _built()
-    # every support carries a real rotational base spring (not free/fixed)
-    assert all(isinstance(s.rx, float) and s.rx > 0 for s in m.supports)
-    assert all(isinstance(s.ry, float) and s.ry > 0 for s in m.supports)
+    # the base spring is applied in the down-aisle direction (ry) only; the
+    # cross-aisle (rx) base is pinned, provided by the braced frame (EN 15512)
+    assert any(isinstance(s.ry, float) and s.ry > 0 for s in m.supports)
+    assert all(s.rx is False for s in m.supports)
     # base moment-resistance table for the partial-restraint check
     assert m.base_plate.m_rd_n
     # beam connectors carry rotational stiffness (semi-rigid)

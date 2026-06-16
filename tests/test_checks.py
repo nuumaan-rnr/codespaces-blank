@@ -187,6 +187,30 @@ def test_back_to_back_module_and_buckling_rules():
     assert xups[0].L_buckling_y == pytest.approx(600.0)
 
 
+def test_frame_spacers_and_downaisle_base():
+    from rack15512.builder import frame_spacer_levels
+    cfg = RackConfig(module="back-to-back", n_bays=1, depth=1000.0, b2b_gap=300.0,
+                     beam_levels=[1500.0, 3000.0, 4500.0], frame_height=7500.0,
+                     base_stiffness=8e8)
+    # industry rule: a tie every 2400 mm + a mandatory tie 200 mm below the top
+    assert frame_spacer_levels(cfg, 7500.0) == [2400.0, 4800.0, 7300.0]
+    m = build_rack(cfg)
+    sp_z = sorted({round(m.nodes[mm.node_i].z) for mm in m.members.values()
+                   if mm.member_set == "frame spacer"})
+    assert sp_z == [2400, 4800, 7300]          # not at every beam level
+    # base spring is applied in the down-aisle direction (ry) only; the
+    # cross-aisle (rx) base is pinned (braced frame)
+    assert all(s.rx is False for s in m.supports)
+    assert any(s.ry == 8e8 for s in m.supports)
+
+
+def test_frame_spacer_minimum_two():
+    from rack15512.builder import frame_spacer_levels
+    cfg = RackConfig(frame_height=3000.0)
+    lv = frame_spacer_levels(cfg, 3000.0)
+    assert len(lv) >= 2 and lv[-1] == 2800.0   # min 2, mandatory top at H-200
+
+
 def test_buckling_only_on_uprights():
     model = build_rack(RackConfig(n_bays=1, beam_levels=[1800.0]))
     cases = run_all(model)
