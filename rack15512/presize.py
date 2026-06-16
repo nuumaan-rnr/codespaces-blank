@@ -115,7 +115,12 @@ def static_upright_demand(cfg) -> Dict:
             gaps.append(z - prev)
             prev = z
         n_levels = len(bl)
-    max_gap = max(gaps) if gaps else 2000.0
+    # down-aisle (K=1.0) buckling length = the largest unbraced upright segment
+    # between vertical restraints (base->L1, level gaps, and last level->top)
+    top_seg = max(float(getattr(cfg, "frame_height", 0.0) or 0.0)
+                  - sum(gaps), 0.0)
+    Lcr_da = max(gaps + [top_seg]) if (gaps or top_seg) else 2000.0
+    # cross-aisle = the frame-bracing pitch (braced ladder)
     pitch = float(getattr(cfg, "bracing_pitch", 600.0) or 600.0)
 
     system = getattr(cfg, "system_type", "selective")
@@ -137,6 +142,6 @@ def static_upright_demand(cfg) -> Dict:
 
     n_avg = P / n_up if n_up else 0.0
     return {"N_design": k_dist * n_avg, "N_avg": n_avg, "k_dist": k_dist,
-            "Lcr_y": max_gap, "Lcr_z": pitch, "fy": float(getattr(cfg,
+            "Lcr_y": Lcr_da, "Lcr_z": pitch, "fy": float(getattr(cfg,
             "steel_fy", 355.0)), "n_uprights": n_up, "P_total": P,
             "n_levels": n_levels}

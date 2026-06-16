@@ -843,23 +843,23 @@ def _upright_suggester(cfg, lib, master, up_names):
     if not up_names:
         return
     with st.expander("💡 Suggest upright section (closed-form, pre-run)"):
+        # all four inputs are computed directly from the configuration so they
+        # always track the current inputs (no stale manual values)
         est = presize.static_upright_demand(cfg)
+        N, lcy, lcz = est["N_design"], est["Lcr_y"], est["Lcr_z"]
+        fy = est["fy"]
         st.caption(
-            f"Static estimate: factored load ≈ {est['P_total']/1e3:.0f} kN over "
-            f"{est['n_uprights']} uprights → ~{est['N_avg']/1e3:.1f} kN avg; "
-            f"design (×2 worst/avg) ≈ {est['N_design']/1e3:.1f} kN. "
-            "Edit the load/lengths with your own calculated values; "
-            "drive-in uprights are pinned-pinned (K = 1.0).")
+            f"Computed from the configuration: factored pallet load "
+            f"≈ {est['P_total']/1e3:.0f} kN over {est['n_uprights']} uprights "
+            f"→ ~{est['N_avg']/1e3:.1f} kN average · design load "
+            f"= ×{est['k_dist']:g} worst/avg. Buckling lengths are pinned-pinned "
+            "(K = 1.0): down-aisle = largest level gap, cross-aisle = bracing "
+            "pitch. fy is per section from the master.")
         c = st.columns(4)
-        N = c[0].number_input("Axial load N [kN]", 0.0, 2000.0,
-                              round(est["N_design"] / 1e3, 1), 1.0,
-                              key="sug_N")
-        lcy = c[1].number_input("Lcr down-aisle [mm]", 100.0, 12000.0,
-                                float(est["Lcr_y"]), 50.0, key="sug_lcy")
-        lcz = c[2].number_input("Lcr cross-aisle [mm]", 100.0, 12000.0,
-                                float(est["Lcr_z"]), 50.0, key="sug_lcz")
-        fy = c[3].number_input("fy [MPa]", 200.0, 700.0,
-                               float(est["fy"]), 5.0, key="sug_fy")
+        c[0].metric("Axial load N", f"{N/1e3:.1f} kN")
+        c[1].metric("Lcr down-aisle", f"{lcy:.0f} mm")
+        c[2].metric("Lcr cross-aisle", f"{lcz:.0f} mm")
+        c[3].metric("fy (default)", f"{fy:.0f} MPa")
 
         def _fy_of(name):
             if master is not None:
@@ -869,8 +869,7 @@ def _upright_suggester(cfg, lib, master, up_names):
                     return fy
             return fy
 
-        rows = presize.suggest_uprights(lib, _fy_of, N=N * 1e3, Lcr_y=lcy,
-                                        Lcr_z=lcz)
+        rows = presize.suggest_uprights(lib, _fy_of, N=N, Lcr_y=lcy, Lcr_z=lcz)
         if not rows:
             st.info("No upright sections in the master.")
             return
