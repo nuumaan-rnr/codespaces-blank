@@ -324,7 +324,9 @@ def build_drive_in(cfg) -> RackModel:
     # stiffness / M_Rd / looseness from ITS OWN selected section (master), with
     # an optional explicit stiffness override, falling back to the cfg values.
     def _beam_hinge(sec, override):
-        k = override if override else (sec.connector_k or cfg.connector_stiffness)
+        # connector stiffness resolves by the upright wall thickness it bolts to
+        # (beam-stiffness import), else the section's connector_k / cfg default
+        k = override or (sec.connector_k_for(up.t) or cfg.connector_stiffness)
         mrd = sec.connector_m_rd or cfg.connector_m_rd
         ls = (sec.connector_looseness if sec.connector_looseness is not None
               else cfg.connector_looseness)

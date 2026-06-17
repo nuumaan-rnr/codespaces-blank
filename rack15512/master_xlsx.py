@@ -273,6 +273,67 @@ def load_upright_properties(path: str) -> MasterWorkbook:
                                role_hint="upright")
 
 
+def _norm_section(name) -> str:
+    """Normalise a section name for matching across sheets (drop spaces /
+    case): 'RHS 60x40x1.2' == 'RHS60X40X1.2'."""
+    import re
+    return re.sub(r"\s+", "", str(name or "")).upper()
+
+
+def parse_beam_stiffness(path: str) -> Dict[str, Dict]:
+    """Parse a beam-to-upright connector-stiffness sheet into
+    {normalised section name: {'kb': [[upl_mm, k N*mm/rad], ...], 'm_rd': N*mm}}.
+
+    The sheet has a 'Section' column, an optional 'M_Rd' column [kNcm] and one
+    or more 'Kb @ UPL <t>' columns [kNcm/rad] (t = upright wall thickness)."""
+    import openpyxl
+    import re
+    wb = openpyxl.load_workbook(path, data_only=True)
+    out: Dict[str, Dict] = {}
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+        cols: Dict = {}
+        header_row = None
+        for r in range(1, min(ws.max_row, 12) + 1):
+            vals = {c: str(ws.cell(r, c).value or "").strip()
+                    for c in range(1, ws.max_column + 1)}
+            low = {c: v.lower() for c, v in vals.items()}
+            if (any(v == "section" for v in low.values())
+                    and any("kb" in v for v in low.values())):
+                header_row = r
+                for c, v in low.items():
+                    if v == "section":
+                        cols["section"] = c
+                    elif v.startswith("m_rd") or v.startswith("mrd"):
+                        cols["m_rd"] = c
+                    elif "kb" in v:
+                        mm = re.search(r"upl\s*([\d.]+)", v)
+                        if mm:
+                            cols.setdefault("kb", []).append(
+                                (float(mm.group(1)), c))
+                break
+        if header_row is None or "section" not in cols or not cols.get("kb"):
+            continue
+        for r in range(header_row + 1, ws.max_row + 1):
+            nm = ws.cell(r, cols["section"]).value
+            if not nm:
+                continue
+            kb = []
+            for upl, c in sorted(cols["kb"]):
+                v = _num(ws.cell(r, c).value)
+                if v:
+                    kb.append([upl, v * KNCM])          # kNcm/rad -> N*mm/rad
+            if not kb:
+                continue
+            entry: Dict = {"kb": kb}
+            if "m_rd" in cols:
+                mrd = _num(ws.cell(r, cols["m_rd"]).value)
+                if mrd:
+                    entry["m_rd"] = mrd * KNCM          # kNcm -> N*mm
+            out[_norm_section(nm)] = entry
+    return out
+
+
 def _rows(ws) -> List[list]:
     return [list(r) for r in ws.iter_rows(values_only=True)]
 

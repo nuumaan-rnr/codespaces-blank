@@ -519,7 +519,9 @@ def build_rack(cfg: RackConfig) -> RackModel:
     looseness_used = [cfg.connector_looseness]
     for z, sec_name, _ in specs:
         sec = m.sections[sec_name]
-        k_c = sec.connector_k or cfg.connector_stiffness
+        # connector stiffness resolves by the upright wall thickness it bolts to
+        # (beam-stiffness import), else the section's connector_k / cfg default
+        k_c = sec.connector_k_for(up.t) or cfg.connector_stiffness
         m_rd = sec.connector_m_rd or cfg.connector_m_rd
         loos = (sec.connector_looseness
                 if sec.connector_looseness is not None

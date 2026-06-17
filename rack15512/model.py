@@ -86,6 +86,10 @@ class CrossSection:
     connector_looseness: Optional[float] = None   # [rad]
     connector_v_rd: Optional[float] = None        # connector shear resist [N]
     connector_arm: float = 400.0                  # test cantilever arm a [mm]
+    # beam-to-upright connector stiffness as a function of the UPRIGHT wall
+    # thickness it bolts to: [[upl_mm, k N*mm/rad], ...] (from a beam-stiffness
+    # import).  When present the builder resolves connector_k by the upright t.
+    connector_k_by_upl: Optional[List[List[float]]] = None
     # gross-section torsion / warping properties for flexural-torsional
     # buckling (EN 15512 9.7.5); optional - FT buckling is included only
     # when present.  Iy_gross/Iz_gross default to Iy/Iz.
@@ -112,6 +116,19 @@ class CrossSection:
     @property
     def mod_z_eff(self) -> float:
         return self.Wz_eff if self.Wz_eff is not None else self.Welz
+
+    def connector_k_for(self, upright_t: Optional[float]) -> Optional[float]:
+        """Beam-to-upright connector stiffness [N*mm/rad] for the upright wall
+        thickness it bolts to: the closest UPL row of connector_k_by_upl when
+        present (and a thickness is known), else the single connector_k."""
+        tbl = self.connector_k_by_upl
+        if tbl and upright_t:
+            row = min(tbl, key=lambda r: abs(r[0] - upright_t))
+            return row[1]
+        if tbl:
+            # no upright thickness known: use the middle UPL row
+            return sorted(tbl, key=lambda r: r[0])[len(tbl) // 2][1]
+        return self.connector_k
 
     @property
     def iy(self) -> float:

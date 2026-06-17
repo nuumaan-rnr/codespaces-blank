@@ -107,6 +107,36 @@ def test_bracing_blank_header_first_sheet_detected():
     assert s.A > 0 and s.Iz > 0
 
 
+STIFF = os.path.join(HERE, "..", "examples", "Beam_Stiffness.xlsx")
+needs_stiff = pytest.mark.skipif(
+    not (os.path.exists(STIFF) and os.path.exists(BEAMS)),
+    reason="beam stiffness / beam master example not present")
+
+
+@needs_stiff
+def test_beam_stiffness_parse_and_merge(tmp_path):
+    from rack15512.master_xlsx import parse_beam_stiffness
+    from rack15512.master_store import MasterStore, StoredMaster
+    bs = parse_beam_stiffness(STIFF)
+    assert bs and "RHS60X40X1.6" in bs                  # name normalised
+    e = bs["RHS60X40X1.6"]
+    assert len(e["kb"]) == 3 and e["m_rd"] > 0
+    assert e["kb"][0][1] == pytest.approx(1566.0 * 1e4)  # kNcm/rad -> N*mm/rad
+
+    store = MasterStore(str(tmp_path / "m"))
+    mw = load_master(BEAMS, role_hint="beam")
+    sm = StoredMaster.from_workbook(mw, "beam", "Beam")
+    sm.company = "Acme"
+    store.save(sm)
+    nb, nbt = store.merge_stiffness("beam", STIFF)
+    assert nb > 0                                        # beams updated
+    cs = store.load("beam").library.get("RHS60X40X1.6")
+    assert cs.connector_k_by_upl and cs.connector_m_rd
+    # connector stiffness resolves by upright wall thickness (nearest UPL)
+    assert cs.connector_k_for(1.6) < cs.connector_k_for(2.5)
+    assert cs.connector_k_for(None) == cs.connector_k    # middle-UPL default
+
+
 @needs
 def test_fy_override_uses_input_fy():
     # fy_override makes every section take the input steel_fy, ignoring master

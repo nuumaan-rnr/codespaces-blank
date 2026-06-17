@@ -229,6 +229,48 @@ class MasterStore:
         if os.path.isdir(d):
             shutil.rmtree(d)
 
+    def merge_stiffness(self, mid: str, path: str) -> Tuple[int, int]:
+        """Merge a stiffness sheet into an existing master IN PLACE, matched by
+        section name.  A beam-connector sheet sets connector_k_by_upl / M_Rd (and
+        a default connector_k) on matching beam sections; a BASE_STIFFNESS sheet
+        adds per-upright base tables.  Returns (sections_updated, base_added)."""
+        from .master_xlsx import (_norm_section, _parse_base_stiffness,
+                                  parse_beam_stiffness)
+        m = self.load(mid)
+        by_norm: Dict[str, str] = {}
+        for nm in m.sections:
+            by_norm.setdefault(_norm_section(nm), nm)
+
+        updated = 0
+        for key, entry in parse_beam_stiffness(path).items():
+            target = by_norm.get(key)
+            if target is None:
+                continue
+            sec = m.sections[target]
+            if entry.get("kb"):
+                sec["connector_k_by_upl"] = entry["kb"]
+                mid_row = sorted(entry["kb"])[len(entry["kb"]) // 2]
+                sec["connector_k"] = mid_row[1]        # default (middle UPL)
+            if entry.get("m_rd"):
+                sec["connector_m_rd"] = entry["m_rd"]
+            updated += 1
+
+        base_added = 0
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(path, data_only=True)
+            if "BASE_STIFFNESS" in wb.sheetnames:
+                for up, rows in _parse_base_stiffness(wb["BASE_STIFFNESS"]).items():
+                    tgt = by_norm.get(_norm_section(up), up)
+                    m.base_tables[tgt] = [list(r) for r in rows]
+                    base_added += 1
+        except Exception:
+            pass
+
+        m.updated = _now()
+        self.save(m)
+        return updated, base_added
+
     def _unique_id(self, base: str) -> str:
         mid, k = base, 2
         while self.exists(mid):
