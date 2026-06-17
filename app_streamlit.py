@@ -2423,14 +2423,15 @@ def _render_master(sm):
                 MSTORE.delete(sm.id)
                 st.rerun()
 
-            # merge stiffness data into this master, matched by section name:
-            # a beam-connector sheet (Section / M_Rd / Kb @ UPL ...) sets the
-            # beam connector stiffness; a BASE_STIFFNESS sheet adds upright base
-            # tables.
+            # merge supplementary data into this master, matched by section
+            # name: a geometry sheet (Section / Thickness / depth / edges) sets
+            # the thickness & edge distances; a beam-connector sheet
+            # (Section / M_Rd / Kb @ UPL ...) sets the connector stiffness; a
+            # BASE_STIFFNESS sheet adds upright base tables.
             stf = st.file_uploader(
-                "Merge stiffness data (beam connector Kb / base stiffness)",
+                "Merge section data (thickness / connector Kb / base stiffness)",
                 type=["xlsx", "xlsm"], key=f"stf_{sm.id}")
-            if stf and st.button("Merge stiffness", key=f"mstf_{sm.id}"):
+            if stf and st.button("Merge data", key=f"mstf_{sm.id}"):
                 t = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
                 t.write(stf.getvalue())
                 t.close()

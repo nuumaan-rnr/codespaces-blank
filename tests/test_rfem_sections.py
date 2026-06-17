@@ -150,6 +150,37 @@ def test_beam_stiffness_parse_and_merge(tmp_path):
     assert cs.connector_k_for(None) == cs.connector_k    # middle-UPL default
 
 
+UPGEO = os.path.join(HERE, "..", "examples", "Upright_Geometry.xlsx")
+BMGEO = os.path.join(HERE, "..", "examples", "Beam_Geometry.xlsx")
+needs_geo = pytest.mark.skipif(
+    not (os.path.exists(UPGEO) and os.path.exists(RFEM)),
+    reason="geometry / upright example not present")
+
+
+@needs_geo
+def test_geometry_parse_and_merge_thickness(tmp_path):
+    from rack15512.master_xlsx import parse_section_geometry
+    from rack15512.master_store import MasterStore, StoredMaster
+    g = parse_section_geometry(UPGEO)
+    assert g["UP0002"]["t"] == 1.6 and g["UP0004"]["t"] == 2.0   # explicit gauge
+    assert g["UP0002"]["e1"] and g["UP0002"]["e2"]               # edge distances
+    if os.path.exists(BMGEO):
+        gb = parse_section_geometry(BMGEO)
+        assert gb["RHS60X40X1.2"]["t"] == 1.2
+
+    # merge the explicit thickness into the RFEM upright master (replaces the
+    # imported gauge estimate)
+    store = MasterStore(str(tmp_path / "m"))
+    mw = load_master(RFEM, role_hint="upright")
+    sm = StoredMaster.from_workbook(mw, "up", "Up")
+    sm.company = "Acme"
+    store.save(sm)
+    n, _ = store.merge_stiffness("up", UPGEO)
+    assert n >= 25
+    up = store.load("up").library.get("UP0004")
+    assert up.t == 2.0 and up.e1 and up.e2
+
+
 @needs
 def test_fy_override_uses_input_fy():
     # fy_override makes every section take the input steel_fy, ignoring master

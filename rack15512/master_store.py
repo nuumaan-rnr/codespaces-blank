@@ -230,18 +230,19 @@ class MasterStore:
             shutil.rmtree(d)
 
     def merge_stiffness(self, mid: str, path: str) -> Tuple[int, int]:
-        """Merge a stiffness sheet into an existing master IN PLACE, matched by
-        section name.  A beam-connector sheet sets connector_k_by_upl / M_Rd (and
-        a default connector_k) on matching beam sections; a BASE_STIFFNESS sheet
+        """Merge supplementary data into an existing master IN PLACE, matched by
+        section name: a beam-connector sheet sets connector_k_by_upl / M_Rd (and
+        a default connector_k); a geometry sheet sets the section thickness t and
+        edge distances (and depth/width when missing); a BASE_STIFFNESS sheet
         adds per-upright base tables.  Returns (sections_updated, base_added)."""
         from .master_xlsx import (_norm_section, _parse_base_stiffness,
-                                  parse_beam_stiffness)
+                                  parse_beam_stiffness, parse_section_geometry)
         m = self.load(mid)
         by_norm: Dict[str, str] = {}
         for nm in m.sections:
             by_norm.setdefault(_norm_section(nm), nm)
 
-        updated = 0
+        touched = set()
         for key, entry in parse_beam_stiffness(path).items():
             target = by_norm.get(key)
             if target is None:
@@ -253,7 +254,23 @@ class MasterStore:
                 sec["connector_k"] = mid_row[1]        # default (middle UPL)
             if entry.get("m_rd"):
                 sec["connector_m_rd"] = entry["m_rd"]
-            updated += 1
+            touched.add(target)
+
+        # geometry / thickness (the explicit sheet gauge replaces any estimate)
+        for key, entry in parse_section_geometry(path).items():
+            target = by_norm.get(key)
+            if target is None:
+                continue
+            sec = m.sections[target]
+            sec["t"] = entry["t"]
+            for k in ("e1", "e2"):
+                if entry.get(k) is not None:
+                    sec[k] = entry[k]
+            for k in ("depth_h", "width_b"):           # fill only if missing
+                if entry.get(k) and not sec.get(k):
+                    sec[k] = entry[k]
+            touched.add(target)
+        updated = len(touched)
 
         base_added = 0
         try:

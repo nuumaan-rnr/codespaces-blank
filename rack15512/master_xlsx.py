@@ -300,6 +300,65 @@ def _norm_section(name) -> str:
     return re.sub(r"\s+", "", str(name or "")).upper()
 
 
+def parse_section_geometry(path: str) -> Dict[str, Dict]:
+    """Parse a geometry table (UPRIGHT_MASTER / BEAM_MASTER with columns like
+    Section, Thickness (mm), H depth, Width, edge 1/2, or Sec Height/Depth/Thick)
+    into {normalised name: {'t', 'depth_h', 'width_b', 'e1', 'e2'}} in mm.
+
+    Only the explicit sheet-gauge thickness and edge distances are taken as
+    authoritative; depth/width are filled best-effort (the RFEM full-property
+    import already sets them)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True)
+    out: Dict[str, Dict] = {}
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+        cols: Dict = {}
+        hdr = None
+        for r in range(1, min(ws.max_row, 10) + 1):
+            low = {c: str(ws.cell(r, c).value or "").strip().lower()
+                   for c in range(1, ws.max_column + 1)}
+            if any(v == "section" for v in low.values()):
+                hdr = r
+                for c, v in low.items():
+                    if v == "section":
+                        cols["section"] = c
+                    elif "thick" in v:           # 'Thickness (mm)'/'Sec Thick'
+                        cols["t"] = c
+                    elif "h depth" in v:         # cm -> mm
+                        cols["depth_h"] = (c, 10.0)
+                    elif v == "sec height":
+                        cols["depth_h"] = (c, 1.0)
+                    elif v.startswith("width") or v == "sec depth":
+                        cols["width_b"] = (c, 1.0)   # values are mm despite label
+                    elif "edge 1" in v or v == "e1":
+                        cols["e1"] = c
+                    elif "edge 2" in v or v == "e2":
+                        cols["e2"] = c
+                break
+        if hdr is None or "section" not in cols or "t" not in cols:
+            continue
+        for r in range(hdr + 1, ws.max_row + 1):
+            nm = ws.cell(r, cols["section"]).value
+            t = _num(ws.cell(r, cols["t"]).value)
+            if not nm or not t:
+                continue
+            entry: Dict = {"t": t}                # thickness already in mm
+            for key in ("depth_h", "width_b"):
+                if key in cols:
+                    c, fac = cols[key]
+                    v = _num(ws.cell(r, c).value)
+                    if v:
+                        entry[key] = v * fac
+            for key in ("e1", "e2"):
+                if key in cols:
+                    v = _num(ws.cell(r, cols[key]).value)
+                    if v:
+                        entry[key] = v
+            out[_norm_section(nm)] = entry
+    return out
+
+
 def parse_beam_stiffness(path: str) -> Dict[str, Dict]:
     """Parse a beam-to-upright connector-stiffness sheet into
     {normalised section name: {'kb': [[upl_mm, k N*mm/rad], ...], 'm_rd': N*mm}}.
