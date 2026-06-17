@@ -99,6 +99,21 @@ def test_pallet_sliding_caps_base_shear():
     assert hi["sliding_scale_x"] == 1.0
 
 
+def test_pallet_sliding_uses_elastic_acceleration():
+    # a REALISTIC friction (mu=0.37) must still bind in a high zone, because the
+    # cap is compared against the elastic Ah*R (what the pallet feels), not the
+    # R-reduced design Ah (which is far below the friction cap and never binds)
+    from rack15512.analysis import run_all
+    m = build_rack(RackConfig(n_bays=1, beam_levels=[1500.0, 3000.0],
+                              depth=1000.0))
+    m.seismic = SeismicSettings(enabled=True, zone="V", soil_type="II",
+                                importance=1.5, response_reduction=4.0,
+                                pallet_sliding=True, pallet_mu=0.37)
+    m.combinations = []
+    run_all(m)
+    assert m.seismic_summary["sliding_scale_x"] < 1.0
+
+
 def test_spine_bracing_reduces_down_aisle_drift():
     base = dict(module="back-to-back", n_bays=2, b2b_gap=250.0,
                 beam_levels=[1500.0, 3000.0], depth=1000.0,

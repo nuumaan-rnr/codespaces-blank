@@ -274,19 +274,23 @@ def _pallet_live_weight(model: RackModel, s) -> float:
 def _apply_pallet_sliding(env: SeismicEnvelope, model: RackModel, s,
                           total_W: float) -> None:
     """EN 16681 unit-load sliding: cap the horizontal force the pallet (live)
-    mass transfers at ~ c_mu_h*mu*W_pallet.  Approximate: scale the envelope by
-    the weight-averaged reduction f_pallet*(cap/Ah)+(1-f_pallet) using the
-    design Ah (structure dead mass is not capped)."""
+    mass transfers at ~ c_mu_h*mu*W_pallet.  The unit load slides on the ACTUAL
+    (elastic) acceleration it feels at the beam - the behaviour factor R reduces
+    the steel frame's design forces, not the pallet-to-beam friction interface -
+    so the friction cap is compared against the un-reduced Ah*R.  When it binds,
+    scale the envelope by the weight-averaged reduction
+    f_pallet*(cap/Ah_el)+(1-f_pallet) (the structure dead mass is not capped)."""
     env.sliding_scale = 1.0
     if not getattr(s, "pallet_sliding", False) or total_W <= 0.0:
         return
     cap = s.c_mu_h * s.pallet_mu
     t = getattr(env, "t_emp", 0.0) or 0.0
     ah = horizontal_seismic_coefficient(t if t > 0 else 0.30, s)
-    if ah <= 0.0 or cap >= ah:
-        return                              # sliding does not govern
+    ah_el = ah * max(s.response_reduction, 1.0)      # un-reduce by R (elastic)
+    if ah_el <= 0.0 or cap >= ah_el:
+        return                              # friction >= demand: no sliding
     f_pallet = _pallet_live_weight(model, s) / total_W
-    scale = f_pallet * (cap / ah) + (1.0 - f_pallet)
+    scale = f_pallet * (cap / ah_el) + (1.0 - f_pallet)
     env.sliding_scale = scale
     env.base_shear *= scale
     _apply_scale(env, scale)

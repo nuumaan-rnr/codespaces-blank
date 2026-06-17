@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-17 · cross-aisle bracing: 'X up to level' selector (X lower frames) replaces 'different pattern below'"
+BUILD = "2026-06-17 · EN 16681 unit-load sliding cap compared vs elastic Ah*R (now relieves seismic forces when it binds)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
