@@ -423,9 +423,45 @@ def _num(v, default: Optional[float] = None) -> Optional[float]:
     return float(v)
 
 
+def _geom_upright(name, desc, header, cells):
+    """Build an upright CrossSection from a GEOMETRY-only row (no A/I/W columns):
+    overall depth, width and wall thickness -> gross channel properties.  Used
+    when the UPRIGHT_MASTER sheet carries only dimensions; the exact perforated
+    properties can be merged later (MasterStore.merge_stiffness)."""
+    from .cf_sections import lipped_channel
+
+    def col(*keys, fac=1.0):
+        for idx, h in enumerate(header):
+            if any(k in h for k in keys) and idx < len(cells):
+                v = _num(cells[idx])
+                return v * fac if v is not None else None
+        return None
+
+    t = col("thickness (mm", "thickness(mm") or col("t wall", fac=10.0) or 1.6
+    depth = col("h depth", fac=10.0) or col("length") or 90.0   # mm
+    width = col("width") or 61.0                                 # mm
+    e1 = col("edge 1", "e1")
+    e2 = col("edge 2", "e2")
+    cs = lipped_channel(name, depth, width, 0.0, t)   # plain channel (no lip)
+    # our convention: local z = strong/down-aisle (the larger inertia)
+    if cs.Iy >= cs.Iz:
+        Iz, Iy, Welz, Wely = cs.Iy, cs.Iz, cs.Wely, cs.Welz
+    else:
+        Iz, Iy, Welz, Wely = cs.Iz, cs.Iy, cs.Welz, cs.Wely
+    return CrossSection(
+        name=name, material="steel", role="upright",
+        A=cs.A, Iy=Iy, Iz=Iz, J=cs.J, Wely=Wely, Welz=Welz,
+        A_eff=cs.A, Wy_eff=Wely, Wz_eff=Welz,
+        buckling_curve_y="b", buckling_curve_z="b",
+        t=t, e1=e1, e2=e2, depth_h=depth, width_b=width,
+        It_gross=cs.J, Iy_gross=Iy, Iz_gross=Iz,
+        description=f"{desc} (geometry-derived gross properties)")
+
+
 def _parse_uprights(ws):
     out = []
     header = None
+    geom_only = False
     # optional gross torsion/warping/shear-centre columns for FT buckling,
     # found by header text (any position): IT/J, Iw, y0, Iyy_g, Izz_g
     cols = {}
@@ -434,6 +470,10 @@ def _parse_uprights(ws):
         if header is None:
             if cells and str(cells[0]).strip() == "Section":
                 header = [str(c or "").strip().lower() for c in cells]
+                # geometry-only sheet: no area / second-moment columns present
+                geom_only = not any(
+                    ("aeff" in h or "iyy" in h or "izz" in h
+                     or h.strip() in ("a", "a (cm2)", "a cm2")) for h in header)
                 for idx, h in enumerate(header):
                     if ("it" in h or h.startswith("j")) and "cm4" in h:
                         cols["It"] = idx
@@ -443,6 +483,12 @@ def _parse_uprights(ws):
                         cols["y0"] = idx
             continue
         if not cells or not cells[0]:
+            continue
+
+        if geom_only:
+            name = str(cells[0]).strip()
+            desc = str(cells[1] or "").strip() if len(cells) > 1 else ""
+            out.append((_geom_upright(name, desc, header, cells), 355.0))
             continue
 
         def opt(key, fac):
@@ -512,9 +558,7 @@ def _parse_beams(ws):
         h = _num(cells[2])                  # mm
         b = _num(cells[3])
         t = _num(cells[4])
-        Iz = _num(cells[5]) * CM4           # workbook major I (sheet value)
-        Welz = _num(cells[6]) * CM3
-        fy = _num(cells[7], 27.0) * KNCM2
+        fy = _num(cells[7], 27.0) * KNCM2 if len(cells) > 7 else 355.0
 
         def opt(col, fac):
             if col is None or col >= len(cells):
@@ -527,11 +571,17 @@ def _parse_beams(ws):
         A = h * b - hi * bi
         Iy = (h * b**3 - hi * bi**3) / 12.0
         Wely = 2.0 * Iy / b
+        # major axis I/W: from the sheet when given, else from the geometry
+        Iz_sheet = _num(cells[5]) if len(cells) > 5 else None
+        Iz = Iz_sheet * CM4 if Iz_sheet else (b * h**3 - bi * hi**3) / 12.0
+        Welz_sheet = _num(cells[6]) if len(cells) > 6 else None
+        Welz = Welz_sheet * CM3 if Welz_sheet else 2.0 * Iz / h
         hm, bm = h - t, b - t               # closed thin-wall torsion
         J = 2.0 * t * (hm * bm) ** 2 / (hm + bm)
         out.append((CrossSection(
             name=name, material="steel", role="beam",
             A=A, Iy=Iy, Iz=Iz, J=J, Wely=Wely, Welz=Welz,
+            t=t, depth_h=h, width_b=b,
             buckling_curve_y="b", buckling_curve_z="b",
             connector_k=opt(k_col, k_fac),
             connector_m_rd=opt(mrd_col, mrd_fac),

@@ -158,6 +158,20 @@ needs_geo = pytest.mark.skipif(
 
 
 @needs_geo
+def test_geometry_only_master_imports_standalone():
+    # a geometry-only UPRIGHT_MASTER/BEAM_MASTER (Section + dims + thickness,
+    # no A/I/W columns) must import without crashing, computing gross properties
+    mu = load_master(UPGEO, role_hint="upright")
+    assert len(mu.library.sections) >= 25
+    u = mu.library.get("UP0002")
+    assert u.A > 0 and u.Iz > u.Iy and u.t == 1.6        # strong axis = local z
+    if os.path.exists(BMGEO):
+        mb = load_master(BMGEO, role_hint="beam")
+        b = mb.library.get("RHS 60x40x1.2")
+        assert b.A > 0 and b.Iz > b.Iy and b.t == 1.2
+
+
+@needs_geo
 def test_geometry_parse_and_merge_thickness(tmp_path):
     from rack15512.master_xlsx import parse_section_geometry
     from rack15512.master_store import MasterStore, StoredMaster
