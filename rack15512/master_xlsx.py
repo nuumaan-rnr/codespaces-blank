@@ -78,6 +78,8 @@ def load_master(path: str, role_hint: Optional[str] = None) -> MasterWorkbook:
         raise ImportError("reading .xlsx masters requires openpyxl "
                           "(pip install openpyxl)") from None
     wb = openpyxl.load_workbook(path, data_only=True)
+    if "SECTIONS" in wb.sheetnames:                 # consolidated template
+        return _load_template(wb)
     if _is_rfem_persheet(wb):
         import os as _os
         hint = role_hint or _infer_role(_os.path.basename(path))
@@ -293,6 +295,141 @@ def load_upright_properties(path: str) -> MasterWorkbook:
                                role_hint="upright")
 
 
+# ------------------------------------------------------ consolidated template
+# A single workbook with a SECTIONS sheet (one row per section, all roles) plus
+# optional BASE_STIFFNESS and BEAM_STIFFNESS sheets - the "fill one file and
+# import" template (see rack15512.master_template.build_master_template).
+
+# SECTIONS column key (header text before any '(unit)') -> (field, unit factor
+# to the model's N/mm set).  String fields handled separately.
+_TEMPLATE_FIELDS = {
+    "a": ("A", CM2), "iy": ("Iy", CM4), "iz": ("Iz", CM4), "j": ("J", CM4),
+    "wely": ("Wely", CM3), "welz": ("Welz", CM3),
+    "avy": ("Avy", CM2), "avz": ("Avz", CM2),
+    "it_gross": ("It_gross", CM4), "it": ("It_gross", CM4),
+    "iw_gross": ("Iw_gross", 1.0e6), "iw": ("Iw_gross", 1.0e6),
+    "y0": ("y0", 10.0), "depth_h": ("depth_h", 1.0), "depth": ("depth_h", 1.0),
+    "width_b": ("width_b", 1.0), "width": ("width_b", 1.0),
+    "t": ("t", 1.0), "e1": ("e1", 1.0), "e2": ("e2", 1.0),
+    "connector_k": ("connector_k", 1.0e6),       # kNm/rad -> N*mm/rad
+    "connector_m_rd": ("connector_m_rd", 1.0e6),
+}
+
+
+_CURVES = ("a0", "a", "b", "c", "d")
+
+
+def _norm_header(h) -> str:
+    return str(h or "").split("(")[0].strip().lower().replace(" ", "_")
+
+
+def _load_template(wb) -> MasterWorkbook:
+    """Build a MasterWorkbook from the consolidated template: a SECTIONS sheet
+    (header-driven, one row per section, with a 'role' column) plus optional
+    BASE_STIFFNESS (upright | N kN | k_b kNcm/rad | M_Rd kNcm) and
+    BEAM_STIFFNESS (Section | M_Rd kNcm | Kb @ UPL <t> kNcm/rad) sheets."""
+    sections: Dict[str, CrossSection] = {}
+    fy_map: Dict[str, float] = {}
+    ws = wb["SECTIONS"]
+    # header row = the first row containing 'name'
+    hdr_row = None
+    for r in range(1, min(ws.max_row, 10) + 1):
+        if any(_norm_header(ws.cell(r, c).value) == "name"
+               for c in range(1, ws.max_column + 1)):
+            hdr_row = r
+            break
+    if hdr_row is None:
+        raise ValueError("template SECTIONS sheet has no 'name' column")
+    cols = {_norm_header(ws.cell(hdr_row, c).value): c
+            for c in range(1, ws.max_column + 1)}
+    for r in range(hdr_row + 1, ws.max_row + 1):
+        name = ws.cell(r, cols["name"]).value
+        if not name:
+            continue
+        name = str(name).strip()
+        kw: Dict = {}
+        for key, (field, fac) in _TEMPLATE_FIELDS.items():
+            c = cols.get(key)
+            if c:
+                v = _num(ws.cell(r, c).value)
+                if v is not None:
+                    kw[field] = v * fac
+        for key, field in (("curve_y", "buckling_curve_y"),
+                           ("curve_z", "buckling_curve_z")):
+            c = cols.get(key)
+            v = str(ws.cell(r, c).value or "").strip().lower() if c else ""
+            kw[field] = v if v in _CURVES else "b"
+        role = str(ws.cell(r, cols["role"]).value or "").strip().lower() \
+            if cols.get("role") else "upright"
+        desc = str(ws.cell(r, cols["description"]).value or "").strip() \
+            if cols.get("description") else ""
+        kw.setdefault("A", 0.0)
+        kw.setdefault("Iy", 0.0)
+        kw.setdefault("Iz", 0.0)
+        kw.setdefault("J", kw["A"] * 4.0 or 1.0)
+        kw.setdefault("Wely", 1.0)
+        kw.setdefault("Welz", 1.0)
+        sections[name] = CrossSection(name=name, material="steel",
+                                      role=role or "upright", description=desc,
+                                      **kw)
+        fyc = cols.get("fy")
+        fy = _num(ws.cell(r, fyc).value) if fyc else None
+        fy_map[name] = fy if fy else 355.0
+
+    base: Dict[str, list] = {}
+    if "BASE_STIFFNESS" in wb.sheetnames:
+        base = _base_stiffness_flat(wb["BASE_STIFFNESS"])
+    if "BEAM_STIFFNESS" in wb.sheetnames:
+        for key, e in _beam_stiffness_ws(wb["BEAM_STIFFNESS"]).items():
+            for nm, s in sections.items():
+                if _norm_section(nm) == key:
+                    if e.get("kb"):
+                        s.connector_k_by_upl = e["kb"]
+                        mid = sorted(e["kb"])[len(e["kb"]) // 2]
+                        s.connector_k = mid[1]
+                    if e.get("m_rd"):
+                        s.connector_m_rd = e["m_rd"]
+    return MasterWorkbook(library=SectionLibrary(sections),
+                          base_tables=base, fy=fy_map)
+
+
+def _base_stiffness_flat(ws) -> Dict[str, list]:
+    """Read a FLAT base-stiffness sheet (upright | N kN | k_b kNcm/rad |
+    M_Rd kNcm) into {upright: sorted [(N N, k_b N*mm/rad, M_Rd N*mm), ...]}."""
+    hdr = None
+    cols: Dict = {}
+    for r in range(1, min(ws.max_row, 10) + 1):
+        low = {c: _norm_header(ws.cell(r, c).value)
+               for c in range(1, ws.max_column + 1)}
+        if "upright" in low.values() and any(v == "n" for v in low.values()):
+            hdr = r
+            for c, v in low.items():
+                if v in ("upright", "section"):
+                    cols["up"] = c
+                elif v == "n":
+                    cols["n"] = c
+                elif v in ("k_b", "kb"):
+                    cols["k"] = c
+                elif v in ("m_rd", "mrd"):
+                    cols["m"] = c
+            break
+    out: Dict[str, list] = {}
+    if hdr is None or "up" not in cols or "n" not in cols:
+        return out
+    for r in range(hdr + 1, ws.max_row + 1):
+        up = ws.cell(r, cols["up"]).value
+        n = _num(ws.cell(r, cols["n"]).value)
+        if not up or n is None:
+            continue
+        k = _num(ws.cell(r, cols.get("k", 0)).value) or 0.0
+        mrd = _num(ws.cell(r, cols.get("m", 0)).value) or 0.0
+        out.setdefault(str(up).strip(), []).append(
+            (n * KN, k * KNCM, mrd * KNCM))         # kN, kNcm/rad, kNcm
+    for up in out:
+        out[up].sort(key=lambda row: row[0])
+    return out
+
+
 def _norm_section(name) -> str:
     """Normalise a section name for matching across sheets (drop spaces /
     case): 'RHS 60x40x1.2' == 'RHS60X40X1.2'."""
@@ -359,6 +496,51 @@ def parse_section_geometry(path: str) -> Dict[str, Dict]:
     return out
 
 
+def _beam_stiffness_ws(ws) -> Dict[str, Dict]:
+    """Parse one beam-connector-stiffness worksheet (see parse_beam_stiffness)."""
+    import re
+    cols: Dict = {}
+    header_row = None
+    for r in range(1, min(ws.max_row, 12) + 1):
+        vals = {c: str(ws.cell(r, c).value or "").strip()
+                for c in range(1, ws.max_column + 1)}
+        low = {c: v.lower() for c, v in vals.items()}
+        if (any(v == "section" for v in low.values())
+                and any("kb" in v for v in low.values())):
+            header_row = r
+            for c, v in low.items():
+                if v == "section":
+                    cols["section"] = c
+                elif v.startswith("m_rd") or v.startswith("mrd"):
+                    cols["m_rd"] = c
+                elif "kb" in v:
+                    mm = re.search(r"upl\s*([\d.]+)", v)
+                    if mm:
+                        cols.setdefault("kb", []).append((float(mm.group(1)), c))
+            break
+    out: Dict[str, Dict] = {}
+    if header_row is None or "section" not in cols or not cols.get("kb"):
+        return out
+    for r in range(header_row + 1, ws.max_row + 1):
+        nm = ws.cell(r, cols["section"]).value
+        if not nm:
+            continue
+        kb = []
+        for upl, c in sorted(cols["kb"]):
+            v = _num(ws.cell(r, c).value)
+            if v:
+                kb.append([upl, v * KNCM])              # kNcm/rad -> N*mm/rad
+        if not kb:
+            continue
+        entry: Dict = {"kb": kb}
+        if "m_rd" in cols:
+            mrd = _num(ws.cell(r, cols["m_rd"]).value)
+            if mrd:
+                entry["m_rd"] = mrd * KNCM              # kNcm -> N*mm
+        out[_norm_section(nm)] = entry
+    return out
+
+
 def parse_beam_stiffness(path: str) -> Dict[str, Dict]:
     """Parse a beam-to-upright connector-stiffness sheet into
     {normalised section name: {'kb': [[upl_mm, k N*mm/rad], ...], 'm_rd': N*mm}}.
@@ -366,50 +548,10 @@ def parse_beam_stiffness(path: str) -> Dict[str, Dict]:
     The sheet has a 'Section' column, an optional 'M_Rd' column [kNcm] and one
     or more 'Kb @ UPL <t>' columns [kNcm/rad] (t = upright wall thickness)."""
     import openpyxl
-    import re
     wb = openpyxl.load_workbook(path, data_only=True)
     out: Dict[str, Dict] = {}
     for sheet in wb.sheetnames:
-        ws = wb[sheet]
-        cols: Dict = {}
-        header_row = None
-        for r in range(1, min(ws.max_row, 12) + 1):
-            vals = {c: str(ws.cell(r, c).value or "").strip()
-                    for c in range(1, ws.max_column + 1)}
-            low = {c: v.lower() for c, v in vals.items()}
-            if (any(v == "section" for v in low.values())
-                    and any("kb" in v for v in low.values())):
-                header_row = r
-                for c, v in low.items():
-                    if v == "section":
-                        cols["section"] = c
-                    elif v.startswith("m_rd") or v.startswith("mrd"):
-                        cols["m_rd"] = c
-                    elif "kb" in v:
-                        mm = re.search(r"upl\s*([\d.]+)", v)
-                        if mm:
-                            cols.setdefault("kb", []).append(
-                                (float(mm.group(1)), c))
-                break
-        if header_row is None or "section" not in cols or not cols.get("kb"):
-            continue
-        for r in range(header_row + 1, ws.max_row + 1):
-            nm = ws.cell(r, cols["section"]).value
-            if not nm:
-                continue
-            kb = []
-            for upl, c in sorted(cols["kb"]):
-                v = _num(ws.cell(r, c).value)
-                if v:
-                    kb.append([upl, v * KNCM])          # kNcm/rad -> N*mm/rad
-            if not kb:
-                continue
-            entry: Dict = {"kb": kb}
-            if "m_rd" in cols:
-                mrd = _num(ws.cell(r, cols["m_rd"]).value)
-                if mrd:
-                    entry["m_rd"] = mrd * KNCM          # kNcm -> N*mm
-            out[_norm_section(nm)] = entry
+        out.update(_beam_stiffness_ws(wb[sheet]))
     return out
 
 

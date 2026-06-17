@@ -195,6 +195,27 @@ def test_geometry_parse_and_merge_thickness(tmp_path):
     assert up.t == 2.0 and up.e1 and up.e2
 
 
+def test_consolidated_template_roundtrips(tmp_path):
+    # the generated template imports as ONE master: all roles + base + beam
+    # stiffness, with the labelled units converted to the model's N/mm
+    from rack15512.master_template import build_master_template
+    p = str(tmp_path / "tpl.xlsx")
+    build_master_template(p)
+    mw = load_master(p)
+    assert {s.role for s in mw.library.sections.values()} == {
+        "upright", "beam", "bracing", "others"}
+    u = mw.library.get("UP0002")
+    assert u.A == pytest.approx(318.0)        # 3.18 cm2 -> mm2
+    assert u.Iz > u.Iy                        # major axis in local z
+    assert u.Avy and u.Avz and u.It_gross and u.Iw_gross and u.y0
+    assert u.t == 1.6 and mw.fy["UP0002"] == 355.0
+    # base stiffness table parsed (kN, kNcm/rad, kNcm -> N, N*mm/rad, N*mm)
+    assert mw.base_tables["UP0002"][0][0] == pytest.approx(30000.0)
+    # beam connector stiffness resolves by upright thickness
+    b = mw.library.get("RHS 60x40x1.6")
+    assert b.connector_k_by_upl and b.connector_k_for(1.6) < b.connector_k_for(2.5)
+
+
 @needs
 def test_fy_override_uses_input_fy():
     # fy_override makes every section take the input steel_fy, ignoring master

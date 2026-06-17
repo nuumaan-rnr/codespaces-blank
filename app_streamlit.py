@@ -2383,6 +2383,13 @@ def render_masters():
 
     # ---- import a master (company mandatory) -----------------------------
     st.subheader("Import a master")
+    from rack15512.master_template import template_bytes
+    st.download_button(
+        "⬇ Download the consolidated template (all sections + base & beam "
+        "stiffness)", data=template_bytes(), file_name="Master_Template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="One workbook: SECTIONS (uprights/beams/bracings/others), "
+             "BASE_STIFFNESS and BEAM_STIFFNESS. Fill it and import it here.")
     up = st.file_uploader("Master file (.xlsx / .csv / .json)",
                           type=["xlsx", "xlsm", "csv", "json"])
     ic = st.columns(2)
