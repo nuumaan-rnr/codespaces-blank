@@ -2444,25 +2444,38 @@ def render_configure():
         (st.error if lvl == "error" else st.warning)(m)
 
     c = st.columns(3)
-    if c[0].button("👁 Preview model", width="stretch"):
-        try:
-            model = build_rack(cfg)
-            st.session_state["_preview"] = True
-            cc = st.columns(2)
-            cc[0].pyplot(plot_model(model))
-            cc[1].pyplot(plot_frame_elevation(model, 0.0))
-            st.caption(f"{len(model.nodes)} nodes · {len(model.members)} "
-                       f"members · first diagonal: {cfg.bracing_first_side}")
-        except (ValueError, KeyError) as e:
-            st.error(str(e))
+    preview = c[0].button("👁 Preview model", width="stretch")
     save_label = ("💾 Update configuration" if ss.config_id
                   else "💾 Save configuration")
-    if c[1].button(save_label, width="stretch"):
+    save = c[1].button(save_label, width="stretch")
+    run = c[2].button("💾▶ Save & run", type="primary", width="stretch")
+
+    if preview:
+        st.session_state["_preview"] = True
+    # the preview persists across parameter edits (it is rebuilt from the live
+    # config each rerun), so it stays visible while you keep editing
+    if st.session_state.get("_preview"):
+        with st.container(border=True):
+            hc = st.columns([6, 1])
+            hc[0].markdown("**Model preview** (updates as you edit)")
+            if hc[1].button("✕ Hide preview", key="hide_preview"):
+                st.session_state["_preview"] = False
+                st.rerun()
+            try:
+                model = build_rack(cfg)
+                cc = st.columns(2)
+                cc[0].pyplot(plot_model(model))
+                cc[1].pyplot(plot_frame_elevation(model, 0.0))
+                st.caption(f"{len(model.nodes)} nodes · {len(model.members)} "
+                           f"members · first diagonal: {cfg.bracing_first_side}")
+            except (ValueError, KeyError) as e:
+                st.error(str(e))
+
+    if save:
         conf = _save_config(proj.id, sysm.id, cfg, master_id, notes)
         if conf:
             ss.config_id = conf.id        # subsequent saves update this one
-    if c[2].button("💾▶ Save & run", type="primary",
-                   width="stretch"):
+    if run:
         conf = _save_config(proj.id, sysm.id, cfg, master_id, notes,
                             silent=True)
         if conf:

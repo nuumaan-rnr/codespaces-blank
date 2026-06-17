@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-17 · back-to-back row-spacer section selectable in the form (bracing or beam)"
+BUILD = "2026-06-17 · persistent live model preview in the configuration form (stays visible while editing)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
