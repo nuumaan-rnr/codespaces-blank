@@ -778,6 +778,12 @@ def build_rack(cfg: RackConfig) -> RackModel:
         else:
             # no test data: keep the historical selective default
             k_base = 5.0e8
+    elif cfg.base_stiffness == "derived":
+        # calculated from the R899 formulas (floor + upright), h = first beam
+        from .base_stiffness import derived_base_stiffness
+        h0 = specs[0][0] if specs else (cfg.frame_height or 1200.0)
+        k_base = derived_base_stiffness(up, m.materials[up.material].E, h0,
+                                        f_ck=cfg.concrete_fck)
     else:
         k_base = float(cfg.base_stiffness)
     # The EN 15512 floor-connection test gives the DOWN-AISLE rotational

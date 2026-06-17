@@ -534,17 +534,27 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             c = st.columns(3)
             fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
                                    gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
-            base_auto = c[1].checkbox(
-                "Base stiffness from master table",
-                isinstance(g("base_stiffness", "auto"), str),
-                help="Semi-rigid floor connection (rotational spring). "
-                     "Uncheck to enter the value directly.")
+            _bs = g("base_stiffness", "auto")
+            _bmodes = ["Master table (tested)", "Calculated (R899 formula)",
+                       "Manual value"]
+            _bidx = (1 if _bs == "derived"
+                     else 2 if not isinstance(_bs, str) else 0)
+            base_mode = c[1].selectbox(
+                "Base stiffness source", _bmodes, index=_bidx,
+                help="Down-aisle floor connection (rotational spring). "
+                     "'Master table' = tested EN 15512 values (falls back to "
+                     "the R899 calculation if the upright has no table); "
+                     "'Calculated' = R899 formula from the upright properties "
+                     "(k_b Eq43 in series with k_h Eq46); "
+                     "'Manual value' = the value entered below.")
             kbase = c[2].number_input(
-                "Floor stiffness [kNm/rad] (if not auto)", 0.0, 5000.0,
-                float(g("base_stiffness", 5e8) / 1e6
-                      if not isinstance(g("base_stiffness", "auto"), str)
-                      else 500.0), disabled=base_auto,
-                help="Base rotational stiffness; 0 = pinned base.")
+                "Floor stiffness [kNm/rad] (Manual)", 0.0, 5000.0,
+                float(_bs / 1e6 if not isinstance(_bs, str) else 500.0),
+                disabled=(base_mode != "Manual value"),
+                help="Used only with the 'Manual value' source; 0 = pinned.")
+            base_stiff = ("auto" if base_mode == _bmodes[0]
+                          else "derived" if base_mode == _bmodes[1]
+                          else kbase * 1e6)
             c = st.columns(3)
             bolt = c[0].selectbox("Brace bolt",
                                   ["M8", "M10", "M12", "M14", "M16"],
@@ -570,15 +580,24 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             c = st.columns(3)
             fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
                                    gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
-            base_auto = c[1].checkbox(
-                "Base stiffness from master table",
-                isinstance(g("base_stiffness", "auto"), str))
-            kbase = c[2].number_input("Floor stiffness [kNm/rad] (if not auto)",
+            _bs = g("base_stiffness", "auto")
+            _bmodes = ["Master table (tested)", "Calculated (R899 formula)",
+                       "Manual value"]
+            _bidx = (1 if _bs == "derived"
+                     else 2 if not isinstance(_bs, str) else 0)
+            base_mode = c[1].selectbox(
+                "Base stiffness source", _bmodes, index=_bidx,
+                help="'Master table' = tested EN 15512 values (falls back to "
+                     "5.0e8 with no master); 'Calculated' = R899 formula from "
+                     "the upright properties; 'Manual value' = value below.")
+            kbase = c[2].number_input("Floor stiffness [kNm/rad] (Manual)",
                                       0.0, 5000.0,
-                                      float(g("base_stiffness", 5e8) / 1e6
-                                            if not isinstance(
-                                                g("base_stiffness", "auto"), str)
-                                            else 500.0), disabled=base_auto)
+                                      float(_bs / 1e6 if not isinstance(_bs, str)
+                                            else 500.0),
+                                      disabled=(base_mode != "Manual value"))
+            base_stiff = ("auto" if base_mode == _bmodes[0]
+                          else "derived" if base_mode == _bmodes[1]
+                          else kbase * 1e6)
             c = st.columns(3)
             brace_factor = c[0].number_input(
                 "Bracing area factor", 0.05, 1.0,
@@ -806,7 +825,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         bracing_start=bstart, bracing_pitch=bpitch,
         bracing_type_zone1=None if zone1 == "same" else zone1,
         upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
-        base_stiffness="auto" if base_auto else kbase * 1e6,
+        base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),
         concrete_fck=fck, plate_fy=plate_fy,

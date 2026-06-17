@@ -385,10 +385,13 @@ def build_drive_in(cfg) -> RackModel:
     #      which need only upright properties, so a value is always available
     #      (there is no pinned fallback).
     # An explicit numeric base_stiffness overrides both.
+    # Source order (cfg.base_stiffness): 'auto' -> master table else calculated;
+    # 'derived' -> always calculated from R899 (ignore the master table); a
+    # number -> that explicit value.
     n_up = (nL + 1) * nDpos
-    if isinstance(cfg.base_stiffness, str):           # 'auto'
+    if isinstance(cfg.base_stiffness, str):
         k_base, source = None, ""
-        if cfg.master:
+        if cfg.base_stiffness != "derived" and cfg.master:
             Q_tot = cfg.n_deep * cfg.weight_per_pallet * nL * len(rail_levels)
             N_est = cfg.gamma_Q * Q_tot / n_up if n_up else 0.0
             try:
@@ -396,7 +399,7 @@ def build_drive_in(cfg) -> RackModel:
                 source = "master tested table"
             except Exception:
                 k_base = None
-        if k_base is None:                            # no tested table -> R899
+        if k_base is None:                            # no/declined table -> R899
             from .base_stiffness import derived_base_stiffness
             E_up = m.materials[up.material].E
             h0 = rail_levels[0] if rail_levels else H
