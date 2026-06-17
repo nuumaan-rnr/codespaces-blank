@@ -612,3 +612,18 @@ def test_unstable_model_stops_run():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_b2b_row_spacer_accepts_bracing_or_beam():
+    # back-to-back row spacer (tie) section is selectable as a bracing OR beam
+    from rack15512.builder import RackConfig, build_rack, LevelSpec
+    from rack15512.library import SectionLibrary
+    lib = SectionLibrary.bundled()
+    br, bm = lib.names("bracing")[0], lib.names("beam")[0]
+    for sec in (br, bm):
+        m = build_rack(RackConfig(module="back-to-back", n_bays=3, b2b_gap=250,
+                                  levels=[LevelSpec(1500.0, bm, 20000.0)],
+                                  spacer_section=sec, base_stiffness=5e8))
+        spac = [mm for mm in m.members.values()
+                if mm.member_set == "frame spacer"]
+        assert spac and all(mm.section == sec for mm in spac)

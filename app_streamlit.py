@@ -246,6 +246,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             bay_width = gn("bay_width", 2700.0, 1000.0, 4500.0)
             depth = gn("depth", 1000.0, 600.0, 2000.0)
             b2b_gap = gn("b2b_gap", 250.0, 50.0, 600.0)
+            spacer_section = None          # drive-in has no row spacers
         else:
             module = c[3].radio(
                 "Module", ["single", "back-to-back"],
@@ -261,6 +262,21 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             b2b_gap = c[3].number_input("Back-to-back gap [mm]", 50.0, 600.0,
                                         gn("b2b_gap", 250.0, 50.0, 600.0), 10.0,
                                         disabled=module == "single")
+            # back-to-back row-spacer (tie) section — any bracing OR beam section
+            _spacer_opts = (["(frame brace)"]
+                            + list(br_names) + list(beam_names))
+            _spacer_opts = list(dict.fromkeys(_spacer_opts))   # dedupe, keep order
+            spacer_sec = st.selectbox(
+                "Row-spacer / tie section (back-to-back)", _spacer_opts,
+                index=_idx(_spacer_opts, g("spacer_section", None)
+                           or "(frame brace)"),
+                disabled=module == "single",
+                help="Section for the row-spacer ties between the two back-to-"
+                     "back racks (a simply-supported truss tie). Any bracing or "
+                     "beam section; default = the frame brace section.")
+        spacer_section = (None if (module == "single"
+                                   or spacer_sec == "(frame brace)")
+                          else spacer_sec)
 
     if is_di:
         with st.container(border=True):
@@ -869,7 +885,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         bracing_start=bstart, bracing_pitch=bpitch,
         bracing_type_zone1=None if zone1 == "same" else zone1,
         upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
-        fy_override=bool(fy_override),
+        fy_override=bool(fy_override), spacer_section=spacer_section,
         base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),
@@ -2122,12 +2138,13 @@ def render_seismic_study():
         pl_levels = _alt
     else:                                       # All levels
         pl_levels = list(blevels)
-    beam_opts = ["(frame brace)"] + list(lib.names("beam") or lib.names())
-    _sp_def = cfg0.spacer_section or (beam_opts[1] if len(beam_opts) > 1
-                                      else "(frame brace)")
+    spacer_opts = list(dict.fromkeys(
+        ["(frame brace)"] + list(lib.names("bracing") or [])
+        + list(lib.names("beam") or lib.names())))
+    _sp_def = cfg0.spacer_section or "(frame brace)"
     sp_sec = st.selectbox(
-        "Frame / row spacer section (beam section; simply-supported truss tie)",
-        beam_opts, index=_idx(beam_opts, _sp_def))
+        "Frame / row spacer section (bracing or beam; simply-supported truss tie)",
+        spacer_opts, index=_idx(spacer_opts, _sp_def))
 
     ca_brace = cfg0.brace_section if ca_sec.startswith("(keep") else ca_sec
     cfg = dataclasses.replace(
