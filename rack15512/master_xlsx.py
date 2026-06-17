@@ -189,6 +189,23 @@ def _persheet_props(ws) -> Dict[str, Tuple]:
     return d
 
 
+# perforated-upright calibration: the gross thin-wall thickness 2A/U (A = area,
+# U = full double-sided perimeter) underestimates the actual sheet gauge by
+# ~18% because the slots/perforations inflate U; this factor recovers the gauge
+# (validated against the known 1.6/2.0/2.5/3.0/3.5 mm gauges of the sample set).
+_UPRIGHT_PERF_FACTOR = 1.18
+
+
+def _wall_thickness(A_mm2: float, U_cm: Optional[float]) -> Optional[float]:
+    """Estimate the upright sheet gauge [mm] from the section area A [mm^2] and
+    the RFEM perimeter U [cm]: t ~ 1.18 * 2A / U (perforation-corrected).  Used
+    only to resolve the beam connector stiffness by upright thickness; it is an
+    estimate and remains editable on the section."""
+    if not (A_mm2 and U_cm and U_cm > 0):
+        return None
+    return round(_UPRIGHT_PERF_FACTOR * A_mm2 / (5.0 * U_cm), 2)
+
+
 def _dist_mm(comment) -> Optional[float]:
     """Extract the fibre distance from an 'in distance 45.0 mm' comment [mm]."""
     import re
@@ -249,11 +266,14 @@ def _load_rfem_persheet(wb, role_hint: Optional[str] = None) -> MasterWorkbook:
         bw = (dist("Sz,max") or 0.0) - (dist("Sz,min") or 0.0) or None
         npl = val("Npl,d")                           # kN
         fy = round((npl * KN / A) / 5.0) * 5.0 if (npl and A > 0) else 350.0
+        # wall thickness (gauge) for uprights, estimated from area and perimeter
+        # so the beam connector stiffness can resolve by the upright thickness
+        t = _wall_thickness(A, val("U")) if role == "upright" else None
 
         sections[name] = CrossSection(
             name=name, material="steel", role=role,
             A=A, Iy=Iy, Iz=Iz, J=J or (A * 4.0),    # tiny J fallback if missing
-            Wely=Wely or 1.0, Welz=Welz or 1.0,
+            Wely=Wely or 1.0, Welz=Welz or 1.0, t=t,
             A_eff=A, Wy_eff=Wely, Wz_eff=Welz,
             buckling_curve_y=curve("BCz/v"), buckling_curve_z=curve("BCy/u"),
             Avy=Avy, Avz=Avz, It_gross=J or None, Iw_gross=Iw, y0=y0,

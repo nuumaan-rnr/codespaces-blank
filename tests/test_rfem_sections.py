@@ -63,6 +63,19 @@ def test_ft_buckling_activates():
 
 
 @needs
+def test_upright_wall_thickness_derived():
+    # the upright sheet has no explicit thickness; it is estimated from A and U
+    # (perforation-corrected) so the beam connector can resolve by UPL
+    mw = load_upright_properties(RFEM)
+    t = {n: mw.library.sections[n].t for n in mw.library.sections}
+    assert all(v and 1.0 < v < 4.0 for v in t.values())   # sensible gauges
+    # known gauges recovered (nearest standard): UP0002~1.6, UP0004~2.0, UP0014~2.5
+    assert abs(t["UP0002"] - 1.6) < 0.15
+    assert abs(t["UP0004"] - 2.0) < 0.15
+    assert abs(t["UP0014"] - 2.5) < 0.15
+
+
+@needs
 def test_fy_recovered_from_npl():
     mw = load_upright_properties(RFEM)
     # fy = Npl,d / A, rounded to 5 MPa -> a sensible steel grade
