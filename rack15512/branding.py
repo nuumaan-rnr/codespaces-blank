@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-17 · drive-in geometry: lane-deep from pallets + n_frames (auto gap), smeared rail UDL, Lcr CA D=2xpitch/X=pitch, rail section dropdown"
+BUILD = "2026-06-17 · RFEM per-sheet upright property importer (full spectrum: shear areas, warping, shear centre, axis-swapped)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

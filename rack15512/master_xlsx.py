@@ -78,6 +78,8 @@ def load_master(path: str) -> MasterWorkbook:
         raise ImportError("reading .xlsx masters requires openpyxl "
                           "(pip install openpyxl)") from None
     wb = openpyxl.load_workbook(path, data_only=True)
+    if _is_rfem_persheet(wb):
+        return _load_rfem_persheet(wb)
     sections: Dict[str, CrossSection] = {}
     fy_map: Dict[str, float] = {}
 
@@ -103,6 +105,117 @@ def load_master(path: str) -> MasterWorkbook:
 
     return MasterWorkbook(library=SectionLibrary(sections),
                           base_tables=base, fy=fy_map)
+
+
+# --------------------------------------------------------------------- RFEM
+# Per-section property export (one upright per sheet) with columns
+# Description | Symbol | Value | Unit | Comment, e.g. RFEM/RSTAB "effective
+# section" sheets.  Carries the FULL property spectrum (shear areas, warping
+# constant, shear centre, section moduli, buckling curves).
+
+def _is_rfem_persheet(wb) -> bool:
+    """True for an RFEM per-section export: no standard *_MASTER sheets and the
+    first sheet uses the Description/Symbol/Value header."""
+    if any(s in wb.sheetnames for s in
+           ("UPRIGHT_MASTER", "BEAM_MASTER", "BRACING_MASTER")):
+        return False
+    if not wb.sheetnames:
+        return False
+    ws = wb[wb.sheetnames[0]]
+    hdr = [str(ws.cell(1, c).value or "").strip().lower() for c in range(1, 4)]
+    return hdr == ["description", "symbol", "value"]
+
+
+def _persheet_props(ws) -> Dict[str, Tuple]:
+    """{symbol: (value, comment)} for the first occurrence of each symbol."""
+    d: Dict[str, Tuple] = {}
+    for r in range(2, ws.max_row + 1):
+        sym = ws.cell(r, 2).value
+        if sym is None:
+            continue
+        sym = str(sym).strip()
+        if sym not in d:
+            d[sym] = (ws.cell(r, 3).value, ws.cell(r, 5).value)
+    return d
+
+
+def _dist_mm(comment) -> Optional[float]:
+    """Extract the fibre distance from an 'in distance 45.0 mm' comment [mm]."""
+    import re
+    m = re.search(r"(-?\d+(?:\.\d+)?)\s*mm", str(comment or ""))
+    return float(m.group(1)) if m else None
+
+
+def _load_rfem_persheet(wb) -> MasterWorkbook:
+    """Build an upright MasterWorkbook from a per-sheet RFEM property export.
+
+    RFEM axes are swapped to the model convention (see module docstring): RFEM
+    Iy (major) -> local Iz; RFEM Iz (minor) -> local Iy.  The shear areas,
+    section moduli and buckling curves follow the same swap.  fy is recovered
+    from the plastic axial force Npl,d / A (rounded to 5 MPa)."""
+    sections: Dict[str, CrossSection] = {}
+    fy_map: Dict[str, float] = {}
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+        p = _persheet_props(ws)
+        if "A" not in p or "Iy" not in p:
+            continue
+        name = sheet.strip()
+        if name.lower().endswith("-eff"):
+            name = name[:-4].strip()
+
+        def val(sym):
+            try:
+                return float(p.get(sym, (None,))[0])
+            except (TypeError, ValueError):
+                return None
+
+        def dist(sym):
+            return _dist_mm(p.get(sym, (None, None))[1])
+
+        def modulus(maxsym, minsym):
+            vals = [abs(x) for x in (val(maxsym), val(minsym)) if x is not None]
+            return min(vals) * CM3 if vals else None
+
+        def curve(sym):
+            x = str(p.get(sym, ("b",))[0] or "b").strip().lower()
+            return x if x in ("a0", "a", "b", "c", "d") else "b"
+
+        A = (val("A") or 0.0) * CM2
+        Iz = (val("Iy") or 0.0) * CM4               # RFEM major -> local z
+        Iy = (val("Iz") or 0.0) * CM4               # RFEM minor -> local y
+        J = (val("J") or 0.0) * CM4
+        Avy = val("Az") * CM2 if val("Az") else None   # swap: local-y shear
+        Avz = val("Ay") * CM2 if val("Ay") else None
+        Iw = val("I@v,M") * 1.0e6 if val("I@v,M") else None   # cm6 -> mm6
+        y0 = val("yM") * 10.0 if val("yM") is not None else None
+        Welz = modulus("Sy,max", "Sy,min")          # about RFEM y -> local z
+        Wely = modulus("Sz,max", "Sz,min")          # about RFEM z -> local y
+        dh = (dist("Sy,max") or 0.0) - (dist("Sy,min") or 0.0) or None
+        bw = (dist("Sz,max") or 0.0) - (dist("Sz,min") or 0.0) or None
+        npl = val("Npl,d")                           # kN
+        fy = round((npl * KN / A) / 5.0) * 5.0 if (npl and A > 0) else 350.0
+
+        sections[name] = CrossSection(
+            name=name, material="steel", role="upright",
+            A=A, Iy=Iy, Iz=Iz, J=J or (A * 4.0),    # tiny J fallback if missing
+            Wely=Wely or 1.0, Welz=Welz or 1.0,
+            A_eff=A, Wy_eff=Wely, Wz_eff=Welz,
+            buckling_curve_y=curve("BCz/v"), buckling_curve_z=curve("BCy/u"),
+            Avy=Avy, Avz=Avz, It_gross=J or None, Iw_gross=Iw, y0=y0,
+            Iy_gross=Iy, Iz_gross=Iz, depth_h=dh, width_b=bw,
+            description=f"RFEM full properties ({sheet})")
+        fy_map[name] = fy
+    if not sections:
+        raise ValueError("no upright property sheets found in the RFEM export")
+    return MasterWorkbook(library=SectionLibrary(sections),
+                          base_tables={}, fy=fy_map)
+
+
+def load_upright_properties(path: str) -> MasterWorkbook:
+    """Public loader for an RFEM per-sheet upright property export."""
+    import openpyxl
+    return _load_rfem_persheet(openpyxl.load_workbook(path, data_only=True))
 
 
 def _rows(ws) -> List[list]:
