@@ -568,13 +568,30 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                    float(g("bracing_start", 150.0)), 10.0)
         bpitch = c[3].number_input("Diagonal pitch [mm]", 200.0, 2000.0,
                                    float(g("bracing_pitch", 600.0)), 50.0)
-        if is_di:
-            zone1 = "same"          # drive-in uses one frame-bracing pattern
-        else:
-            z1 = g("bracing_type_zone1", None)
-            zone1 = st.selectbox("Different pattern below level 1",
-                                 ["same", "X", "D"],
-                                 index={None: 0, "X": 1, "D": 2}.get(z1, 0))
+        # X-bracing up to a chosen level: the lower frames use the X pattern
+        # (up to that elevation), the Pattern above stays as selected.
+        ca_x_height = None
+        if not is_di:
+            elevs, _z = [], 0.0
+            for ls in levels:
+                _z += float(ls.gap or 0.0)
+                elevs.append(_z)
+            x_opts = ["(none)"] + [f"level {i + 1}  ({e:.0f} mm)"
+                                   for i, e in enumerate(elevs)]
+            _cur = g("ca_x_height", None)
+            _idx_x = 0
+            if _cur:
+                _idx_x = next((i + 1 for i, e in enumerate(elevs)
+                               if abs(e - float(_cur)) <= 1.0), 0)
+            x_sel = st.selectbox(
+                "X-brace lower frames up to level", x_opts, index=_idx_x,
+                help="Use the X pattern from the floor up to the selected level "
+                     "(e.g. for accidental / seismic robustness); the Pattern "
+                     "above stays as selected. '(none)' = the Pattern applies "
+                     "the full height.")
+            if x_sel != "(none)":
+                ca_x_height = elevs[x_opts.index(x_sel) - 1]
+        zone1 = "same"             # 'different pattern below level 1' removed
 
     with st.expander("🔩  Material & brace connections" if is_di
                      else "🔩  Connections, base & checks"):
@@ -884,6 +901,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         bracing_first_side=first_side, bracing_type=btype,
         bracing_start=bstart, bracing_pitch=bpitch,
         bracing_type_zone1=None if zone1 == "same" else zone1,
+        ca_x_height=ca_x_height,
         upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
         fy_override=bool(fy_override), spacer_section=spacer_section,
         base_stiffness=base_stiff,
