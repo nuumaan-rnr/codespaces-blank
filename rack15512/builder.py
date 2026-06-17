@@ -277,6 +277,11 @@ class RackConfig:
     n_deep: int = 6                         # pallets deep (Y)
     pallet_depth: float = 1200.0            # pallet depth (Y) [mm]
     deep_clearance: float = 50.0            # clearance per deep position [mm]
+    # number of 2-leg depth frames distributed over the lane depth (the gap
+    # between frames is auto-computed: gap = (lane_deep - n_frames*frame_depth)
+    # / (n_frames-1)).  Independent of n_deep (which sets the storage envelope
+    # lane_deep = pallet_depth*n_deep + (n_deep+1)*deep_clearance and the load).
+    n_frames: int = 2
     weight_per_pallet: float = 10000.0      # N per pallet
     # vertical level spacing is pallet-driven: each bay (rail) level gap =
     # pallet_height + level_clearance; the top beam sits top_beam_gap above the

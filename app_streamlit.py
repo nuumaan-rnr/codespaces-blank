@@ -289,27 +289,43 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             frame_depth = c[0].number_input(
                 "Frame depth (leg spacing) [mm]", 300.0, 2000.0,
                 gn("frame_depth", 1100.0, 300.0, 2000.0), 50.0,
-                help="Depth of one upright frame (its two legs). Frames repeat "
-                     "in the depth with a pallet gap between them.")
-            arm_len = c[1].number_input(
+                help="Depth (Y) of one 2-leg upright frame.")
+            n_frames = c[1].number_input(
+                "Number of frames", 1, 30, int(gn("n_frames", 2, 1, 30)),
+                help="2-leg depth frames distributed over the lane depth; the "
+                     "gap between them is auto-computed. Independent of the "
+                     "pallets-deep count.")
+            arm_len = c[2].number_input(
                 "Rail arm offset [mm]", 0.0, 600.0,
                 gn("arm_length", 200.0, 0.0, 600.0), 10.0,
-                help="Cantilever-arm offset of the rail into the lane from the "
-                     "upright.")
-            rail_sec = c[2].selectbox("Rail section", ["(beam)"] + list(beam_names),
-                                      index=0)
-            plan_every = c[3].checkbox("Plan bracing every level (shuttle)",
-                                       bool(g("plan_every_level", False)))
+                help="Cantilever-arm offset of the rail into the lane.")
+            rail_sec = c[3].selectbox(
+                "Rail section", ["Drivein Rail (default)"] + list(beam_names),
+                index=0,
+                help="Default = the RSTAB drive-in rail profile (with shear "
+                     "areas / It); pick a beam section to override.")
+            plan_every = st.checkbox("Plan bracing every level (shuttle)",
+                                     bool(g("plan_every_level", False)))
             st.caption("Forklift impact (1.25 kN down-aisle / 2.5 kN cross-aisle "
                        "at ~400 mm), placement, pattern loads and per-direction "
                        "imperfections are set in the “Loads, imperfection & "
                        "factors” expander; seismic in the “Seismic” expander.")
-            gap = pallet_depth + deep_clear
-            depth_total = n_deep * (frame_depth + gap) + frame_depth
-            st.caption(f"Deep dimension ≈ {depth_total:.0f} mm "
-                       f"({n_deep + 1} frames + {n_deep} gaps) · "
-                       f"load/level/lane = {n_deep * wt_pallet:.1f} kN · "
-                       f"rails run in the depth.")
+            lane_deep = pallet_depth * n_deep + (n_deep + 1) * deep_clear
+            n_fr = int(n_frames)
+            _gap = ((lane_deep - n_fr * frame_depth) / (n_fr - 1)
+                    if n_fr >= 2 else 0.0)
+            _rail_udl = ((n_deep * wt_pallet / 2.0) / (lane_deep / 1000.0)
+                         if lane_deep > 0 else 0.0)
+            if n_fr >= 2 and _gap < 0:
+                st.warning(f"{n_fr} frames of {frame_depth:.0f} mm exceed the "
+                           f"lane depth {lane_deep:.0f} mm — reduce the frame "
+                           f"count or the frame depth.")
+            st.caption(f"Lane deep = {lane_deep:.0f} mm (pallet "
+                       f"{pallet_depth:.0f}×{n_deep} + {n_deep + 1}×"
+                       f"{deep_clear:.0f} clearance) · {n_fr} frames + "
+                       f"{max(n_fr - 1, 0)} gaps of {_gap:.0f} mm · "
+                       f"load/lane = {n_deep * wt_pallet:.1f} kN · "
+                       f"rail UDL ≈ {_rail_udl:.2f} kN/m.")
             end3 = st.checkbox(
                 "3-upright end frame (only when the deep length can't be met "
                 "with the frame + gaps)", bool(g("end_frame_3upright", False)),
@@ -339,11 +355,13 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 di_variant=di_variant, n_lanes=int(n_lanes), lane_width=lane_width,
                 n_deep=int(n_deep), pallet_depth=pallet_depth,
                 deep_clearance=deep_clear, frame_depth=frame_depth,
+                n_frames=int(n_frames),
                 arm_length=arm_len, weight_per_pallet=wt_pallet * 1e3,
                 spine_position=spine_pos, end_frame_3upright=bool(end3),
                 built_up_end_columns=bool(boxed), built_up_arrangement=bu_arr,
                 built_up_h0=bu_h0, built_up_panel=bu_panel,
-                rail_section=None if rail_sec == "(beam)" else rail_sec,
+                rail_section=(None if rail_sec.startswith("Drivein Rail")
+                              else rail_sec),
                 plan_every_level=bool(plan_every))
 
             # ---- top plan bracing + spine sections (drive-in) ----------------

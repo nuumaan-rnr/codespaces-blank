@@ -92,18 +92,19 @@ def test_gravity_runs_and_checks():
                for c in checks)
 
 
-def test_per_pallet_load_on_deep_bays():
-    # multi-deep load is per pallet: each deep (gap) bay carries one pallet,
-    # shared by its two side rails (weight_per_pallet / 2 on each)
+def test_pallet_load_smeared_over_full_rail():
+    # the per-rail pallet load (n_deep * weight/2) is smeared as a UNIFORM UDL
+    # over the full lane-deep rail length (frames no longer sit one-per-pallet)
     m = build_rack(_cfg("drive_in", n_lanes=2, n_deep=2, weight_per_pallet=8000.0,
-                        frame_depth=1000.0, pallet_depth=900.0,
+                        frame_depth=1000.0, n_frames=2, pallet_depth=900.0,
                         deep_clearance=100.0, beam_levels=[2400.0, 4900.0]))
+    lane_deep = 900.0 * 2 + 3 * 100.0                  # = 2100 mm
+    w_udl = 2 * (8000.0 / 2) / lane_deep               # n_deep * wt/2 / lane_deep
     full = m.load_cases["pallets"].member_loads
-    per_member = {round(abs(ml.qz) * m.member_length(m.members[ml.member]), 1)
-                  for ml in full}
-    assert per_member == {4000.0}                     # weight_per_pallet / 2
-    # only deep bays loaded: 4 rails (2 per lane) x 2 deep x 2 levels
-    assert len(full) == 4 * 2 * 2
+    assert {round(abs(ml.qz), 4) for ml in full} == {round(w_udl, 4)}  # uniform
+    # total applied load = every pallet's weight (n_lanes * n_deep * wt * levels)
+    tot = sum(abs(ml.qz) * m.member_length(m.members[ml.member]) for ml in full)
+    assert abs(tot - 2 * 2 * 8000.0 * 2) < 1.0
 
 
 def test_base_springs_and_connectors():
@@ -215,7 +216,8 @@ def test_per_direction_imperfection():
 
 
 def test_seismic_cases_generated():
-    m = build_rack(_cfg("drive_in", n_lanes=1, n_deep=1, beam_levels=[2000.0],
+    m = build_rack(_cfg("drive_in", n_lanes=1, n_deep=1, n_frames=2,
+                        frame_depth=400.0, beam_levels=[2000.0],
                         frame_height=3000.0, seismic=True, seismic_n_modes=3))
     assert m.seismic is not None and m.seismic.enabled
     cases = run_all(m)
@@ -224,11 +226,22 @@ def test_seismic_cases_generated():
 
 
 def test_deep_dimension():
-    # depth = n_deep*(frame_depth + gap) + frame_depth; frames are 2-leg ladders
-    m = build_rack(_cfg("drive_in", n_deep=3, frame_depth=1100.0,
-                        pallet_depth=1000.0, deep_clearance=100.0))
+    # lane deep = pallet_depth*n_deep + (n_deep+1)*clearance (storage envelope);
+    # n_frames frames of frame_depth fit within it with auto gaps
+    m = build_rack(_cfg("drive_in", n_deep=6, n_frames=4, frame_depth=1100.0,
+                        pallet_depth=1200.0, deep_clearance=50.0))
     ys = [n.y for n in m.nodes.values()]
-    assert max(ys) == 3 * (1100.0 + 1100.0) + 1100.0      # 7700, the RSTAB depth
+    assert max(ys) == 1200.0 * 6 + 7 * 50.0               # 7550, the lane deep
+    # 4 frames -> 3 gaps of (7550 - 4*1100)/3 = 1050 mm; second leg-pair at 2150
+    leg_ys = sorted({round(y) for y in ys})
+    assert leg_ys[:4] == [0, 1100, 2150, 3250]
+
+
+def test_deep_too_many_frames_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        build_rack(_cfg("drive_in", n_deep=2, n_frames=6, frame_depth=1100.0,
+                        pallet_depth=1000.0, deep_clearance=50.0))
 
 
 def test_built_up_end_columns():
@@ -264,7 +277,12 @@ def test_upright_downaisle_effective_length_is_full_height():
     ups = [mm for mm in m.members.values() if mm.member_set == "uprights"]
     assert ups
     assert all(mm.L_buckling_z == H for mm in ups)
-    assert all(mm.L_buckling_y == 600.0 for mm in ups)
+    # cross-aisle: D bracing (default) -> Lcr = 2 x bracing_pitch = 1200
+    assert all(mm.L_buckling_y == 1200.0 for mm in ups)
+    # X bracing -> Lcr = bracing_pitch
+    mx = build_rack(_cfg("drive_in", frame_height=H, bracing_type="X"))
+    upx = [mm for mm in mx.members.values() if mm.member_set == "uprights"]
+    assert all(mm.L_buckling_y == 600.0 for mm in upx)
 
 
 def test_drivein_sections_are_shear_flexible():

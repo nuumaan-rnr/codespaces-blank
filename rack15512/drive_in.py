@@ -110,7 +110,16 @@ def build_drive_in(cfg) -> RackModel:
     # cantilever arm + depth rail default to the RSTAB drive-in profiles unless a
     # specific section is named (so the deflection / forces use real properties)
     arm = pick(cfg.arm_section, "beam") if cfg.arm_section else _rstab_arm()
-    rail = pick(cfg.rail_section, "beam") if cfg.rail_section else _rstab_rail()
+    # the rail defaults to the RSTAB drive-in profile; selecting it by name
+    # ("Drivein Rail" / the built-in name) also resolves to that profile even
+    # when the active master doesn't carry it.
+    _di_rail = {"Drivein Rail", _rstab_rail().name}
+    if cfg.rail_section and cfg.rail_section in lib.sections:
+        rail = lib.get(cfg.rail_section)
+    elif cfg.rail_section and cfg.rail_section not in _di_rail:
+        rail = pick(cfg.rail_section, "beam")
+    else:
+        rail = _rstab_rail()
     top = pick(cfg.portal_section or cfg.top_beam_section or cfg.beam_section,
                "beam")
     # rear (back) down-aisle beams: a separate section so the top beams and the
@@ -157,24 +166,37 @@ def build_drive_in(cfg) -> RackModel:
         return round(z, 3)
 
     # ---- grid --------------------------------------------------------------
-    # depth frames: 2-leg ladders (legs frame_depth apart) repeated with a gap.
-    # n_deep = number of pallet gaps => n_deep+1 frames. dy = leg Y positions;
-    # frame bays (braced) are within-frame leg pairs, gap bays are unbraced.
+    # Lane depth (the storage envelope) packs the pallets with clearances:
+    #   lane_deep = pallet_depth*n_deep + (n_deep+1)*deep_clearance.
+    # A user-set number of 2-leg depth frames (each frame_depth wide) is then
+    # distributed over the lane depth, the gap between frames auto-computed so the
+    # outer frame faces land on the lane ends:
+    #   gap = (lane_deep - n_frames*frame_depth) / (n_frames-1).
+    # dy = leg Y positions; frame_bays are the within-frame (braced) leg pairs.
     lw = cfg.lane_width
     nL, nD = cfg.n_lanes, cfg.n_deep
     fd = cfg.frame_depth
-    gap = cfg.deep_pitch or (cfg.pallet_depth + cfg.deep_clearance)
+    n_frames = max(1, int(getattr(cfg, "n_frames", 2) or 2))
+    lane_deep = cfg.pallet_depth * nD + (nD + 1) * cfg.deep_clearance
+    if n_frames >= 2:
+        gap = (lane_deep - n_frames * fd) / (n_frames - 1)
+        if gap < 0.0:
+            raise ValueError(
+                f"{n_frames} frames of {fd:.0f} mm exceed the lane depth "
+                f"{lane_deep:.0f} mm; reduce the frame count or the frame depth.")
+    else:
+        gap = 0.0
     pitch = fd + gap
     dy: List[float] = []
     frame_bays: List[int] = []                   # bay index i = (dy[i], dy[i+1])
-    for f in range(nD + 1):
+    for f in range(n_frames):
         y0 = f * pitch
         frame_bays.append(len(dy))               # the within-frame bay
         dy.append(y0)
         dy.append(y0 + fd)
     nDpos = len(dy)                              # number of depth positions
     front_open, rear_open = _open_faces(cfg.di_variant)
-    rail_length = dy[-1]
+    rail_length = dy[-1]                          # = lane_deep (n_frames >= 2)
 
     node_of: Dict[tuple, int] = {}
     rail_of: Dict[tuple, int] = {}
@@ -198,12 +220,14 @@ def build_drive_in(cfg) -> RackModel:
     # EN 1993-1-1 §6.4 BUILT_UP check governs them instead of the single-section
     # STRESS/BUCKLING checks.
     end_k = {0, nL} if getattr(cfg, "built_up_end_columns", False) else set()
-    # EN 15512 buckling lengths: cross-aisle (local y) is braced by the frame
-    # ladder at the bracing pitch.  Down-aisle (local z) is the full frame height
-    # (K = 1.0, pinned-pinned) - the conservative worst case; the engine already
-    # runs the second-order sway, and 1.0H gives the highest upright buckling
-    # utilisation.
-    lcr_ca = float(cfg.bracing_pitch or 600.0)
+    # EN 15512 buckling lengths.  Cross-aisle (local y): the frame ladder holds
+    # the upright at its brace nodes - X-bracing restrains every panel
+    # (Lcr = pitch), single-diagonal D restrains alternate panels (Lcr = 2*pitch).
+    # Down-aisle (local z): the full frame height (K = 1.0, pinned-pinned) - the
+    # conservative worst case; the engine already runs the second-order sway, and
+    # 1.0H gives the highest upright buckling utilisation.
+    xbrace = (cfg.bracing_type or "D").upper() == "X"
+    lcr_ca = float(cfg.bracing_pitch or 600.0) * (1.0 if xbrace else 2.0)
     lcr_da = H
     for k in range(nL + 1):
         ms = "end columns" if k in end_k else "uprights"
@@ -218,7 +242,7 @@ def build_drive_in(cfg) -> RackModel:
     # ---- frame bracing — same as the SPR frame (bottom + top horizontal
     # struts and D/X diagonals at bracing_pitch), applied within each frame's
     # two legs; the pallet gaps between frames stay clear.
-    xpat = (cfg.bracing_type or "D").upper() == "X"
+    xpat = xbrace                                # X (every panel) or D (zigzag)
     for k in range(nL + 1):
         for bi in frame_bays:                    # legs (bi, bi+1) of one frame
             la, lb = bi, bi + 1                   # the two legs in depth
@@ -443,6 +467,11 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
     # The deep (pallet) bays are the rail segments between two frames (odd di);
     # the even-di segments span a single 2-leg frame and carry no pallet.
     w_pallet_half = cfg.weight_per_pallet / 2.0
+    # smear the per-rail pallet load (n_deep pallets, half the weight on each of
+    # the lane's two side rails) uniformly over the full lane-deep rail length:
+    #   w = n_deep * weight_per_pallet/2 / lane_deep   [N/mm]
+    lane_deep = rail_length
+    w_udl = (cfg.n_deep * w_pallet_half / lane_deep) if lane_deep > 0 else 0.0
     z_top = rail_levels[-1]
 
     # ---- pallet (pay) load arrangements ----------------------------------
@@ -455,10 +484,8 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
     def pallet_case(name, predicate):
         lc = LoadCase(name, "variable")
         for mid_, lane, z, di in rail_members:
-            if di % 2 == 1 and predicate(lane, z):     # deep (pallet) bay
-                L = m.member_length(m.members[mid_])
-                w = w_pallet_half / L if L > 0 else 0.0
-                lc.member_loads.append(MemberLoad(mid_, qz=-w))
+            if predicate(lane, z):                     # whole rail of the lane
+                lc.member_loads.append(MemberLoad(mid_, qz=-w_udl))
         return lc
 
     m.load_cases["pallets"] = pallet_case("pallets", lambda lane, z: True)
