@@ -75,14 +75,15 @@ def _master_cmd(a) -> int:
     from .master_store import MasterStore
     store = MasterStore(a.root)
     if a.mcmd == "import":
-        m = store.import_xlsx(a.path, name=a.name, description=a.description)
-        print(f"Imported master '{m.name}' (id: {m.id}): "
+        m = store.import_xlsx(a.path, name=a.name, description=a.description,
+                              company=a.company)
+        print(f"Imported master '{m.name}' (id: {m.id}) for '{m.company}': "
               f"{len(m.sections)} sections, {len(m.base_tables)} base tables")
         return 0
     if a.mcmd == "list":
         for m in store.list():
-            print(f"{m.id:24s} {m.name}  [{len(m.sections)} sections; "
-                  f"roles: {', '.join(m.roles())}]")
+            print(f"{m.id:24s} {m.name}  ({m.company or '-'})  "
+                  f"[{len(m.sections)} sections; roles: {', '.join(m.roles())}]")
         return 0
     if a.mcmd == "show":
         m = store.load(a.master_id)
@@ -226,6 +227,9 @@ def main(argv: List[str] | None = None) -> int:
     mimp = msub.add_parser("import", help="import an Excel/CSV master once")
     mimp.add_argument("path")
     mimp.add_argument("--name")
+    mimp.add_argument("--company", required=True,
+                      help="owning company (mandatory; sections are "
+                           "company-specific)")
     mimp.add_argument("--description", default="")
     mls = msub.add_parser("list", help="list stored masters")
     msh = msub.add_parser("show", help="show a master's sections")

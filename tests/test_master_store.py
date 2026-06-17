@@ -19,8 +19,9 @@ needs_master = pytest.mark.skipif(not os.path.exists(MASTER),
 @needs_master
 def test_import_edit_delete_roundtrip(tmp_path):
     store = MasterStore(str(tmp_path / "masters"))
-    m = store.import_xlsx(MASTER, name="Standard Master")
+    m = store.import_xlsx(MASTER, name="Standard Master", company="Acme")
     assert m.id == "standard-master"
+    assert m.company == "Acme" and "Acme" in store.companies()
     assert len(m.sections) == 50 and len(m.base_tables) == 25
     assert set(m.roles()) == {"upright", "beam", "bracing"}
 
@@ -87,7 +88,7 @@ def test_stored_master_builds_a_rack(tmp_path):
         pytest.skip("master not present")
     from rack15512.builder import RackConfig, build_rack
     store = MasterStore(str(tmp_path / "masters"))
-    m = store.import_xlsx(MASTER, name="M")
+    m = store.import_xlsx(MASTER, name="M", company="Acme")
     model = build_rack(RackConfig(
         n_bays=1, beam_levels=[1500.0, 3000.0],
         master=store.load(m.id).to_workbook(),
@@ -115,6 +116,28 @@ def test_builtin_others_master(tmp_path):
     # idempotent: a second call does not duplicate
     store.ensure_builtin()
     assert sum(1 for x in store.list() if x.id == "others") == 1
+
+
+def test_company_is_mandatory_for_import(tmp_path):
+    if not os.path.exists(MASTER):
+        pytest.skip("master not present")
+    store = MasterStore(str(tmp_path / "masters"))
+    with pytest.raises(ValueError):
+        store.import_xlsx(MASTER, name="NoCo")          # no company -> rejected
+    assert store.list() == []                           # nothing stored
+
+
+def test_company_registry_and_grouping(tmp_path):
+    store = MasterStore(str(tmp_path / "masters"))
+    store.add_company("Alpha")
+    store.add_company("Beta")
+    assert store.companies() == ["Alpha", "Beta"]
+    if os.path.exists(MASTER):
+        store.import_xlsx(MASTER, name="A-master", company="Alpha")
+        grouped = store.by_company()
+        assert "Alpha" in grouped and grouped["Alpha"][0].company == "Alpha"
+    store.delete_company("Beta")
+    assert "Beta" not in store.companies()
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ def test_upright_suggester_apply_no_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from rack15512.master_store import MasterStore
     from rack15512.project import ProjectStore
-    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    MasterStore("masters").import_xlsx(MASTER, name="Standard", company="Acme")
     ps = ProjectStore("projects")
     proj = ps.create_project("Job")
     sysm = ps.add_system(proj.id, "Aisle 1")
@@ -69,7 +69,7 @@ def test_new_project_and_configure_shows_first_side(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from rack15512.master_store import MasterStore
     from rack15512.project import ProjectStore
-    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    MasterStore("masters").import_xlsx(MASTER, name="Standard", company="Acme")
     ps = ProjectStore("projects")
     proj = ps.create_project("Job")
     sysm = ps.add_system(proj.id, "Aisle 1")
@@ -94,7 +94,7 @@ def test_drive_in_form_hides_selective_inputs(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from rack15512.master_store import MasterStore
     from rack15512.project import ProjectStore
-    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    MasterStore("masters").import_xlsx(MASTER, name="Standard", company="Acme")
     ps = ProjectStore("projects")
     proj = ps.create_project("Job")
     sysm = ps.add_system(proj.id, "Aisle 1")
@@ -132,7 +132,7 @@ def test_view_saved_config_shows_results(tmp_path, monkeypatch):
     from rack15512.builder import LevelSpec, RackConfig
     from rack15512.master_store import MasterStore
     from rack15512.project import ProjectStore
-    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    MasterStore("masters").import_xlsx(MASTER, name="Standard", company="Acme")
     ps = ProjectStore("projects")
     proj = ps.create_project("Job")
     sysm = ps.add_system(proj.id, "A1")
@@ -173,7 +173,7 @@ def test_compare_view_shows_two_configs(tmp_path, monkeypatch):
     from rack15512.builder import LevelSpec, RackConfig
     from rack15512.master_store import MasterStore
     from rack15512.project import ProjectStore
-    MasterStore("masters").import_xlsx(MASTER, name="Standard")
+    MasterStore("masters").import_xlsx(MASTER, name="Standard", company="Acme")
     ps = ProjectStore("projects")
     proj = ps.create_project("Job")
     sysm = ps.add_system(proj.id, "A1")

@@ -75,6 +75,7 @@ class StoredMaster:
 
     id: str
     name: str
+    company: str = ""                 # owning company (sections are company-specific)
     description: str = ""
     created: str = field(default_factory=_now)
     updated: str = field(default_factory=_now)
@@ -164,6 +165,41 @@ class MasterStore:
     def __init__(self, root: str = "masters"):
         self.root = root
         os.makedirs(self.root, exist_ok=True)
+        self._companies_file = os.path.join(self.root, "_companies.json")
+
+    # ---- companies (the company master) ---------------------------------
+    def companies(self) -> List[str]:
+        """Registered company names, unioned with any referenced by masters."""
+        names = set()
+        if os.path.isfile(self._companies_file):
+            try:
+                with open(self._companies_file, encoding="utf-8") as f:
+                    names.update(json.load(f))
+            except Exception:
+                pass
+        names.update(m.company for m in self.list() if m.company)
+        return sorted(n for n in names if n)
+
+    def add_company(self, name: str) -> None:
+        name = (name or "").strip()
+        if not name:
+            return
+        names = set(self.companies())
+        names.add(name)
+        with open(self._companies_file, "w", encoding="utf-8") as f:
+            json.dump(sorted(names), f, indent=2)
+
+    def delete_company(self, name: str) -> None:
+        names = [n for n in self.companies() if n != name]
+        with open(self._companies_file, "w", encoding="utf-8") as f:
+            json.dump(names, f, indent=2)
+
+    def by_company(self) -> Dict[str, List["StoredMaster"]]:
+        """Stored masters grouped by company (key '' = unassigned)."""
+        out: Dict[str, List["StoredMaster"]] = {}
+        for m in self.list():
+            out.setdefault(m.company or "", []).append(m)
+        return out
 
     def _file(self, mid: str) -> str:
         return os.path.join(self.root, mid, "master.json")
@@ -214,8 +250,12 @@ class MasterStore:
             self.save(builtin_others_master())
 
     def import_xlsx(self, path: str, name: Optional[str] = None,
-                    description: str = "") -> StoredMaster:
-        """Import an Excel (or CSV/JSON) master ONCE into the store."""
+                    description: str = "", company: str = "") -> StoredMaster:
+        """Import an Excel (or CSV/JSON) master ONCE into the store.  A
+        company name is mandatory (sections are company-specific)."""
+        company = (company or "").strip()
+        if not company:
+            raise ValueError("a company name is required to import a master")
         if path.lower().endswith((".xlsx", ".xlsm")):
             from .master_xlsx import _infer_role
             # role hint for RFEM per-sheet exports comes from the import name
@@ -228,5 +268,7 @@ class MasterStore:
         name = name or os.path.splitext(os.path.basename(path))[0]
         m = StoredMaster.from_workbook(mw, self._unique_id(_slug(name)),
                                        name, description)
+        m.company = company
+        self.add_company(company)
         self.save(m)
         return m

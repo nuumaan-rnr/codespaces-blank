@@ -38,8 +38,7 @@ st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
                    initial_sidebar_state="expanded")
 
 PSTORE = ProjectStore("projects")
-MSTORE = MasterStore("masters")
-MSTORE.ensure_builtin()          # seed the 'others' master (drive-in sections)
+MSTORE = MasterStore("masters")  # starts empty; masters are uploaded per company
 
 ss = st.session_state
 ss.setdefault("view", "dashboard")
@@ -144,7 +143,9 @@ def master_selector(default_id=None):
                    "**Section masters** page first (bundled demo used "
                    "meanwhile).")
         return SectionLibrary.bundled(), None, None
-    labels = [f"{m.name} [{m.id}]" for m in stored]
+    stored.sort(key=lambda m: ((m.company or "~").lower(), m.name.lower()))
+    labels = [f"{(m.company or '(no company)')} · {m.name} [{m.id}]"
+              for m in stored]
     idx = next((i for i, m in enumerate(stored) if m.id == default_id), 0)
     sel = st.selectbox("Section master", labels, index=idx)
     sm = stored[labels.index(sel)]
@@ -2343,23 +2344,63 @@ def _save_config(pid, sid, cfg, master_id, notes, silent=False):
 
 # ----------------------------------------------------------------- masters
 def render_masters():
-    ui.hero("Section Masters", "Import a master once, then edit or delete "
-            "sections in place — no need to re-read the spreadsheet.",
+    ui.hero("Section Masters", "Masters are grouped by company — sections are "
+            "company-specific. Add a company, then import its masters.",
             eyebrow="Section library")
-    up = st.file_uploader("Import a master (.xlsx / .csv / .json)",
-                          type=["xlsx", "xlsm", "csv", "json"])
-    nm = st.text_input("Store as", up.name if up else "")
-    if up and st.button("Import"):
-        suffix = os.path.splitext(up.name)[1] or ".xlsx"
-        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-        tmp.write(up.getvalue())
-        tmp.close()
-        m = MSTORE.import_xlsx(tmp.name, name=nm or up.name)
-        st.success(f"Imported '{m.id}' with {len(m.sections)} sections.")
-        st.rerun()
 
-    for sm in MSTORE.list():
-        with st.expander(f"{sm.name}  ({sm.id}) — {len(sm.sections)} sections"):
+    # ---- company master (registry of company names) ----------------------
+    companies = MSTORE.companies()
+    with st.expander("🏢  Company master", expanded=not companies):
+        cc = st.columns([3, 1])
+        new_co = cc[0].text_input("Add company name", key="new_company")
+        if cc[1].button("Add company") and new_co.strip():
+            MSTORE.add_company(new_co)
+            st.success(f"Added company '{new_co.strip()}'.")
+            st.rerun()
+        if companies:
+            st.caption("Registered companies: " + ", ".join(companies))
+            dc = st.columns([3, 1])
+            drop = dc[0].selectbox("Remove company (keeps its masters)",
+                                   companies, key="del_company")
+            if dc[1].button("Remove") and drop:
+                MSTORE.delete_company(drop)
+                st.rerun()
+
+    # ---- import a master (company mandatory) -----------------------------
+    st.subheader("Import a master")
+    up = st.file_uploader("Master file (.xlsx / .csv / .json)",
+                          type=["xlsx", "xlsm", "csv", "json"])
+    ic = st.columns(2)
+    nm = ic[0].text_input("Store as", up.name if up else "")
+    # company is mandatory: pick a registered one (or add via the company master)
+    co_opts = companies or []
+    company = ic[1].selectbox("Company (required)",
+                              ["— select —"] + co_opts, key="imp_company")
+    if up and st.button("Import"):
+        if company == "— select —":
+            st.error("Select a company first (add one in the Company master "
+                     "above). The company name is mandatory.")
+        else:
+            suffix = os.path.splitext(up.name)[1] or ".xlsx"
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp.write(up.getvalue())
+            tmp.close()
+            m = MSTORE.import_xlsx(tmp.name, name=nm or up.name, company=company)
+            st.success(f"Imported '{m.id}' ({len(m.sections)} sections) for "
+                       f"'{company}'.")
+            st.rerun()
+
+    grouped = MSTORE.by_company()
+    if not grouped:
+        st.info("No masters yet — add a company and import its masters above.")
+    for company in sorted(grouped, key=lambda c: (c == "", c.lower())):
+        st.markdown(f"### 🏢 {company or '(no company)'}")
+        for sm in grouped[company]:
+            _render_master(sm)
+
+
+def _render_master(sm):
+    with st.expander(f"{sm.name}  ({sm.id}) — {len(sm.sections)} sections"):
             cc = st.columns([4, 1])
             cc[0].caption(f"roles: {', '.join(sm.roles())} · base tables: "
                           f"{len(sm.base_tables)} · updated {sm.updated}")
