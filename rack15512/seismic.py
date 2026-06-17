@@ -64,11 +64,22 @@ def design_spectrum_sa_g(T: float, soil: str) -> float:
     return num / T
 
 
+def damping_correction(zeta: float) -> float:
+    """EN 1998-1 damping correction factor eta = sqrt(10/(5+xi)), xi in %,
+    floored at 0.55.  zeta is the viscous damping ratio (e.g. 0.05)."""
+    import math
+    xi = max(0.0, zeta) * 100.0
+    return max(0.55, math.sqrt(10.0 / (5.0 + xi)))
+
+
 def horizontal_seismic_coefficient(T: float, s) -> float:
-    """Design horizontal seismic coefficient Ah = (Z/2)(I/R)(Sa/g)."""
+    """Design horizontal seismic coefficient Ah = (Z/2)(I/R)(Sa/g), with the
+    EN 16681 / FEM 10.2.08 spectrum-modification factor E_D2 applied (energy
+    dissipation / damping of the loaded rack; <= 1.0)."""
     Z = ZONE_FACTORS.get(s.zone, 0.16)
+    ed2 = max(0.55, min(1.0, getattr(s, "ed2", 1.0) or 1.0))
     return (Z / 2.0) * (s.importance / s.response_reduction) \
-        * design_spectrum_sa_g(T, s.soil_type)
+        * design_spectrum_sa_g(T, s.soil_type) * ed2
 
 
 # --------------------------------------------------------------------- weights
@@ -570,6 +581,7 @@ def _summary(model, s, modal, envs, method, total_W) -> dict:
         "structure_type": getattr(s, "structure_type", "-"),
         "damping_pct": round(100 * s.damping, 1),
         "imposed_factor": s.imposed_factor,
+        "ed2": round(max(0.55, min(1.0, getattr(s, "ed2", 1.0) or 1.0)), 3),
         "soil": s.soil_type, "I": s.importance, "R": s.response_reduction,
         "seismic_weight_kN": round(total_W / 1e3, 1),
         "Ah_design": round(horizontal_seismic_coefficient(
