@@ -209,6 +209,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     up_names = lib.names("upright") or lib.names()
     br_names = lib.names("bracing") or lib.names()
     beam_names = lib.names("beam") or lib.names()
+    other_names = lib.names("others")          # rails / connectors / shuttle
+    # sections selectable for rails, arms and other drive-in members: the
+    # 'others' products first, then the beams
+    rail_names = list(other_names) + list(beam_names)
 
     # apply a section picked in the upright suggester on the PREVIOUS run, before
     # the Upright selectbox (key 'cfg_upright') is instantiated below
@@ -301,12 +305,21 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 gn("arm_length", 200.0, 0.0, 600.0), 10.0,
                 help="Cantilever-arm offset of the rail into the lane.")
             rail_sec = c[3].selectbox(
-                "Rail section", ["Drivein Rail (default)"] + list(beam_names),
-                index=0,
+                "Rail section", ["Drivein Rail (default)"] + list(rail_names),
+                index=_idx(["Drivein Rail (default)"] + list(rail_names),
+                            g("rail_section", None)),
                 help="Default = the RSTAB drive-in rail profile (with shear "
-                     "areas / It); pick a beam section to override.")
-            plan_every = st.checkbox("Plan bracing every level (shuttle)",
-                                     bool(g("plan_every_level", False)))
+                     "areas / It); pick an 'others' or beam section to override.")
+            ca = st.columns(2)
+            arm_sec = ca[0].selectbox(
+                "Cantilever arm / connector section",
+                ["Arm (default)"] + list(rail_names),
+                index=_idx(["Arm (default)"] + list(rail_names),
+                            g("arm_section", None)),
+                help="Default = the RSTAB cantilever arm; pick an 'others' "
+                     "(e.g. CONN_*) or beam section to override.")
+            plan_every = ca[1].checkbox("Plan bracing every level (shuttle)",
+                                        bool(g("plan_every_level", False)))
             st.caption("Forklift impact (1.25 kN down-aisle / 2.5 kN cross-aisle "
                        "at ~400 mm), placement, pattern loads and per-direction "
                        "imperfections are set in the “Loads, imperfection & "
@@ -363,6 +376,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 built_up_h0=bu_h0, built_up_panel=bu_panel,
                 rail_section=(None if rail_sec.startswith("Drivein Rail")
                               else rail_sec),
+                arm_section=(None if arm_sec.startswith("Arm (default)")
+                             else arm_sec),
                 plan_every_level=bool(plan_every))
 
             # ---- top plan bracing + spine sections (drive-in) ----------------
@@ -2452,8 +2467,10 @@ def _render_master(sm):
                 st.success(f"Added {len(missing)} 1C bracing sections.")
                 st.rerun()
 
-            role = st.selectbox("Role", ["upright", "beam", "bracing"],
-                                key=f"r_{sm.id}")
+            # show every role present in the master (upright / beam / bracing /
+            # others — rails, connectors, shuttle parts, ...)
+            _roles = sm.roles() or ["upright", "beam", "bracing"]
+            role = st.selectbox("Role", _roles, key=f"r_{sm.id}")
             names = sm.names(role)
             if names:
                 # full property spectrum (mm/N units); blank cells = not set

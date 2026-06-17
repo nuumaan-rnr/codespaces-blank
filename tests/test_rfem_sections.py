@@ -9,7 +9,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 
 from rack15512.checks.en15512 import _chi_ft
-from rack15512.master_xlsx import (load_master, load_upright_properties)
+from rack15512.master_xlsx import (_infer_role, load_master,
+                                   load_upright_properties)
 from rack15512.model import Steel
 
 HERE = os.path.dirname(__file__)
@@ -86,10 +87,14 @@ def test_role_inference_per_master():
     assert {s.role for s in
             load_master(BRACES, role_hint="bracing").library.sections.values()} \
         == {"bracing"}
-    # other master (rails + connectors) -> beam-role sections
-    other = load_master(OTHER, role_hint="beam")
-    assert other.library.sections and {s.role for s in
-                                       other.library.sections.values()} == {"beam"}
+    # other master (rails + connectors) -> the catch-all 'others' role, both
+    # via the file-name hint and via auto-detection (per-section heuristic)
+    assert _infer_role("OTHER_MASTER.xlsx") == "others"
+    assert {s.role for s in
+            load_master(OTHER, role_hint="others").library.sections.values()} \
+        == {"others"}
+    assert {s.role for s in
+            load_master(OTHER).library.sections.values()} == {"others"}
 
 
 @needs_all

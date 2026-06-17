@@ -115,24 +115,37 @@ def load_master(path: str, role_hint: Optional[str] = None) -> MasterWorkbook:
 # section" sheets.  Carries the FULL property spectrum (shear areas, warping
 # constant, shear centre, section moduli, buckling curves).
 
+def _persheet_layout(ws):
+    """Locate a Description/Symbol/Value section sheet's header, tolerating a
+    blank leading row and/or a blank leading column; returns a dict of the
+    header row and the Description/Symbol/Value/Comment column indices, or None
+    when the sheet is not in that format."""
+    for r in range(1, min(ws.max_row, 8) + 1):
+        labels = {}
+        for c in range(1, min(ws.max_column, 10) + 1):
+            v = str(ws.cell(r, c).value or "").strip().lower()
+            if v in ("description", "symbol", "value", "unit", "comment"):
+                labels[v] = c
+        if "symbol" in labels and "value" in labels:
+            return {"row": r,
+                    "desc": labels.get("description", labels["symbol"] - 1),
+                    "sym": labels["symbol"], "val": labels["value"],
+                    "comment": labels.get("comment", labels["value"] + 2)}
+    return None
+
+
 def _is_rfem_persheet(wb) -> bool:
-    """True for an RFEM per-section export: no standard *_MASTER sheets and a
-    sheet uses the Description/Symbol/Value header (which may sit on row 1 or,
-    when the sheet has a blank leading row, on row 2)."""
+    """True for an RFEM per-section export: no standard *_MASTER sheets and at
+    least one sheet uses the Description/Symbol/Value layout."""
     if any(s in wb.sheetnames for s in
            ("UPRIGHT_MASTER", "BEAM_MASTER", "BRACING_MASTER")):
         return False
-    for sheet in wb.sheetnames[:3]:
-        ws = wb[sheet]
-        for r in (1, 2):
-            hdr = [str(ws.cell(r, c).value or "").strip().lower()
-                   for c in range(1, 4)]
-            if hdr == ["description", "symbol", "value"]:
-                return True
-    return False
+    return any(_persheet_layout(wb[s]) is not None for s in wb.sheetnames)
 
 
-# role inference: from a master/file name keyword, else from a section name
+# role inference: from a master/file name keyword, else from a section name.
+# 'others' is the catch-all role for products that are not uprights, beams or
+# bracings (rails, connectors, shuttle parts, ...).
 def _infer_role(text) -> Optional[str]:
     t = str(text or "").upper()
     if "UPRIGHT" in t:
@@ -142,7 +155,7 @@ def _infer_role(text) -> Optional[str]:
     if "BEAM" in t:
         return "beam"
     if "OTHER" in t:
-        return "beam"            # rails / connectors are beam-role sections
+        return "others"
     return None
 
 
@@ -150,24 +163,29 @@ def _role_from_section(name) -> str:
     u = str(name or "").upper()
     if u.startswith("UP"):
         return "upright"
-    if (u.startswith("RHS") or u.startswith("CONN") or "DRIVEIN" in u
-            or "SHUTTLE" in u or "RAIL" in u):
+    if u.startswith("RHS"):
         return "beam"
     if u.startswith("1C") or u.startswith("C"):
         return "bracing"
-    return "beam"
+    if ("DRIVEIN" in u or "SHUTTLE" in u or "RAIL" in u or u.startswith("CONN")):
+        return "others"
+    return "others"
 
 
 def _persheet_props(ws) -> Dict[str, Tuple]:
     """{symbol: (value, comment)} for the first occurrence of each symbol."""
+    lay = _persheet_layout(ws)
+    if lay is None:
+        return {}
     d: Dict[str, Tuple] = {}
-    for r in range(2, ws.max_row + 1):
-        sym = ws.cell(r, 2).value
+    for r in range(lay["row"] + 1, ws.max_row + 1):
+        sym = ws.cell(r, lay["sym"]).value
         if sym is None:
             continue
         sym = str(sym).strip()
-        if sym not in d:
-            d[sym] = (ws.cell(r, 3).value, ws.cell(r, 5).value)
+        if sym and sym not in d:
+            d[sym] = (ws.cell(r, lay["val"]).value,
+                      ws.cell(r, lay["comment"]).value)
     return d
 
 
