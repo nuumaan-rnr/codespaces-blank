@@ -1332,6 +1332,95 @@ def _failed_member_sets(checks, case_names):
     return failed, buckling
 
 
+def _load_case_magnitude_rows(lc):
+    """Magnitudes of the loads DEFINED in a load case (not factored): grouped
+    nodal forces/moments and member UDLs.  Units: kN, kNm, kN/m (a member UDL
+    qz in N/mm equals kN/m numerically)."""
+    from collections import Counter
+    rows = []
+    nod = Counter()
+    for nl in lc.nodal_loads:
+        nod[(nl.fx, nl.fy, nl.fz, nl.mx, nl.my, nl.mz)] += 1
+    for vals, cnt in nod.items():
+        for comp, v, unit in (("Fx", vals[0], "kN"), ("Fy", vals[1], "kN"),
+                              ("Fz", vals[2], "kN"), ("Mx", vals[3], "kNm"),
+                              ("My", vals[4], "kNm"), ("Mz", vals[5], "kNm")):
+            if abs(v) > 1e-9:
+                rows.append({"kind": "nodal", "component": comp,
+                             "magnitude": round(v / (1e3 if unit == "kN"
+                                                      else 1e6), 3),
+                             "unit": unit, "count": cnt})
+    mem = Counter()
+    for ml in lc.member_loads:
+        mem[(round(ml.qx, 6), round(ml.qy, 6), round(ml.qz, 6))] += 1
+    for (qx, qy, qz), cnt in mem.items():
+        for comp, v in (("qx", qx), ("qy", qy), ("qz", qz)):
+            if abs(v) > 1e-12:
+                rows.append({"kind": "member UDL", "component": comp,
+                             "magnitude": round(v, 3), "unit": "kN/m",
+                             "count": cnt})
+    return rows
+
+
+def _section_governing_rows(model, checks):
+    """Per SECTION: the max member utilisation for each check type, the
+    governing check / member / case, sorted by the governing utilisation."""
+    import collections
+    order = ["STRESS", "BUCKLING", "SHEAR", "LTB", "BRACE_BUCKLING",
+             "CONNECTOR", "DEFLECTION"]
+    best = collections.defaultdict(dict)        # section -> {check: (u, mid, case)}
+    role = {}
+    for c in checks:
+        if c.informative or not c.target.startswith("member"):
+            continue
+        try:
+            mid = int(c.target.split()[1])
+        except (ValueError, IndexError):
+            continue
+        m = model.members.get(mid)
+        if m is None:
+            continue
+        role[m.section] = m.member_set
+        cur = best[m.section].get(c.check)
+        if cur is None or c.utilization > cur[0]:
+            best[m.section][c.check] = (c.utilization, mid, c.case)
+    rows = []
+    for sec, d in best.items():
+        gov = max(d, key=lambda k: d[k][0])
+        u, mid, case = d[gov]
+        row = {"section": sec, "set": role.get(sec, ""),
+               "gov check": gov, "gov util": round(u, 3),
+               "member": mid, "case": case}
+        for chk in order:
+            if chk in d:
+                row[chk] = round(d[chk][0], 3)
+        rows.append(row)
+    rows.sort(key=lambda r: -r["gov util"])
+    return rows
+
+
+def _case_governing_rows(model, checks):
+    """Per LOAD CASE / combination: the governing (highest-utilisation) member."""
+    best = {}
+    for c in checks:
+        if c.informative or not c.target.startswith("member"):
+            continue
+        cur = best.get(c.case)
+        if cur is None or c.utilization > cur[1]:
+            try:
+                mid = int(c.target.split()[1])
+            except (ValueError, IndexError):
+                mid = None
+            m = model.members.get(mid)
+            best[c.case] = (c.case, c.utilization, c.check, mid,
+                            m.member_set if m else "", m.section if m else "")
+    rows = [{"case": x[0], "util": round(x[1], 3), "check": x[2],
+             "member": x[3], "set": x[4], "section": x[5]}
+            for x in best.values()]
+    rows.sort(key=lambda r: -r["util"])
+    return rows
+
+
 def _load_check_viewer(model, key: str):
     """Interactive 3D view that overlays the applied loads of a selected load
     case / combination, so the user can verify the loads were defined right."""
@@ -1353,6 +1442,14 @@ def _load_check_viewer(model, key: str):
         st.caption("Red arrows are the applied loads (combination factors "
                    "included); hover an arrow for its magnitude. Toggle them "
                    "off to inspect the bare geometry.")
+        # magnitudes of the loads DEFINED — load cases only (not combinations)
+        if sel.startswith("Load case:") and name in model.load_cases:
+            rows = _load_case_magnitude_rows(model.load_cases[name])
+            if rows:
+                st.markdown(f"**Defined load magnitudes — {name}**")
+                st.dataframe(rows, width="stretch", hide_index=True)
+            else:
+                st.caption("This load case defines no loads.")
 
 
 # ------------------------------------------------------- view a saved config
@@ -1539,6 +1636,19 @@ def render_view_config():
                     if mids:
                         msec = {mid: model.members[mid].section for mid in mids}
 
+                        # top 10 members by utilisation (within the set filter)
+                        _u = {mid: max((e.member_util.get(mid, 0.0)
+                                        for e in envs), default=0.0)
+                              for mid in mids}
+                        top = sorted(_u.items(), key=lambda kv: -kv[1])[:10]
+                        st.markdown("**Top 10 members by utilisation**")
+                        st.dataframe(
+                            [{"member": mid, "set": model.members[mid].member_set,
+                              "section": msec[mid], "max util": round(u, 3),
+                              "status": "FAIL" if u > 1.0 + 1e-9 else "ok"}
+                             for mid, u in top],
+                            width="stretch", hide_index=True)
+
                         def _mlbl(mid):
                             mm = model.members[mid]
                             u = max((e.member_util.get(mid, 0.0) for e in envs),
@@ -1570,6 +1680,30 @@ def render_view_config():
                         ec[1].markdown("**SLS envelope**")
                         ec[1].markdown(member_envelope_summary_md(
                             sls_env, checks, mid_sel))
+
+                # ---- governing summary: per section + per load case ----------
+                with st.container(border=True):
+                    ui.section("🏆", "Governing summary — by section & by case")
+                    st.markdown("**Maximum utilisation per section** "
+                                "(governing member, stress / buckling / shear / "
+                                "deflection)")
+                    sec_rows = _section_governing_rows(model, checks)
+                    if sec_rows:
+                        st.dataframe(sec_rows, width="stretch", hide_index=True)
+                    else:
+                        st.caption("No member-level checks available.")
+                    st.markdown("**Governing member per load case / combination**")
+                    case_rows = _case_governing_rows(model, checks)
+                    if case_rows:
+                        st.dataframe(case_rows, width="stretch", hide_index=True)
+                    sway = sorted(
+                        ({"case": c.case, "axis": c.target,
+                          "util": round(c.utilization, 3), "detail": c.detail}
+                         for c in checks if c.check == "SWAY"),
+                        key=lambda r: -r["util"])
+                    if sway:
+                        st.markdown("**Frame sway** (H / limit)")
+                        st.dataframe(sway[:10], width="stretch", hide_index=True)
             else:
                 st.info("Re-run to enable the interactive viewer / envelopes.")
             with st.container(border=True):
