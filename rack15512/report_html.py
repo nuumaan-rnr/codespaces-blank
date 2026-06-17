@@ -145,8 +145,13 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
     a(f'<div class="brandtxt"><div class="company">{_esc(B.COMPANY)}</div>'
       f'<div class="tag">{_esc(B.TAGLINE)} &middot; {_esc(B.WEBSITE)}</div>'
       f'</div></div>')
+    from .report import drivein_summary, is_drive_in
+    di = drivein_summary(model, checks)
+    sys_label = ("Drive-in / multi-deep racking — EN 15512 / EN 15620 / "
+                 "FEM 10.2.07" if is_drive_in(model)
+                 else "Selective pallet racking — EN 15512")
     a(f"<h1>Design Validation Report</h1>")
-    a(f'<p class="sub">Selective pallet racking — EN 15512 '
+    a(f'<p class="sub">{sys_label} '
       f'(second-order elastic, semi-rigid connections)</p>')
     a('<table class="meta">')
     for k in ("project", "system", "configuration", "client", "location",
@@ -312,6 +317,37 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
           f"<td>{c.max_sway_x:.2f}</td><td>{c.max_sway_y:.2f}</td>"
           f"<td>{f'{acr:.1f}' if acr else '—'}</td></tr>")
     a("</tbody></table>")
+
+    # ---- drive-in specific verification summary --------------------------
+    if di is not None:
+        a("<h2>Drive-in verification (EN 15620 / FEM 10.2.07)</h2>")
+        H = di["H"]
+        a("<table class='kv'>")
+        if di["Lcr_z"]:
+            a(f"<tr><th>Down-aisle effective length L<sub>cr,z</sub></th>"
+              f"<td>{di['Lcr_z']:.0f} mm = {di['Lcr_z'] / H:.2f}·H "
+              f"(critical-upright buckling eigenvalue; the second-order sway "
+              f"is already in the analysis, so the upright is not checked over "
+              f"the K=1.0 full height)</td></tr>")
+        if di["Lcr_y"]:
+            a(f"<tr><th>Cross-aisle effective length L<sub>cr,y</sub></th>"
+              f"<td>{di['Lcr_y']:.0f} mm (braced by the depth-frame "
+              f"ladders)</td></tr>")
+        a(f"<tr><th>Frame height H</th><td>{H:.0f} mm</td></tr>")
+        a("</table>")
+        a("<table><thead><tr><th>Verification</th><th>Utilisation</th>"
+          "<th>Status</th><th>Detail</th></tr></thead><tbody>")
+        for label, util, status, detail in di["rows"]:
+            scls = "okrow" if status != "FAIL" else "failrow"
+            a(f"<tr class='{scls}'><td>{_esc(label)}</td>"
+              f"<td>{util:.3f}</td><td>{_esc(status)}</td>"
+              f"<td>{_esc(detail)}</td></tr>")
+        a("</tbody></table>")
+        a("<p class='basis'>Pallet-support rail / cantilever-arm deflections "
+          "include shear deformation (Timoshenko) and are limited to "
+          f"L/{model.checks.beam_defl_limit_ratio:.0f} per EN 15620; the "
+          "down-aisle uprights are vertical cantilevers braced cross-aisle "
+          "only.</p>")
 
     # ---- 6 design checks -------------------------------------------------
     a("<h2>6. EN 15512 design verifications</h2>")

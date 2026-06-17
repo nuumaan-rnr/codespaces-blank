@@ -279,6 +279,27 @@ def test_drivein_sections_are_shear_flexible():
     assert arm.Avy and arm.Avz and arm.It_gross
 
 
+def test_drivein_report_section():
+    # the report carries a drive-in-specific verification section (rail/arm
+    # deflection, down-aisle effective length, sway) that selective racks omit
+    from rack15512.report import drivein_summary, is_drive_in, write_report
+    from rack15512.report_html import design_validation_report
+    m = build_rack(_cfg("drive_in"))
+    cases = run_all(m)
+    checks = run_checks(m, cases)
+    assert is_drive_in(m)
+    d = drivein_summary(m, checks)
+    assert d is not None and d["Lcr_z"] and d["Lcr_z"] < d["H"]
+    labels = {row[0] for row in d["rows"]}
+    assert any("rail deflection" in s for s in labels)
+    assert any("Down-aisle frame sway" in s for s in labels)
+    md = write_report(m, cases, checks)
+    assert "## Drive-in verification" in md
+    html = design_validation_report(m, cases, checks, {})
+    assert "Drive-in verification" in html
+    assert "Drive-in / multi-deep racking" in html
+
+
 def test_frames_have_gaps():
     # frame bracing only within the 2-leg frames, not in the pallet gaps
     m = build_rack(_cfg("drive_in", n_deep=3, frame_depth=1100.0,

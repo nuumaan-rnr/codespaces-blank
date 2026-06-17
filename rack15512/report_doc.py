@@ -47,9 +47,12 @@ def build_report_blocks(model, cases, checks, meta=None) -> List[tuple]:
     logo = B.logo_bytes()
     if logo:
         b.append(("logo", logo, f"{B.COMPANY}  -  {B.TAGLINE}  ({B.WEBSITE})"))
+    from .report import drivein_summary, is_drive_in
+    di = drivein_summary(model, checks)
+    sub = ("Drive-in / multi-deep racking - EN 15512 / EN 15620 / FEM 10.2.07"
+           if is_drive_in(model) else "Selective pallet racking - EN 15512")
     b.append(("title", "Design Validation Report",
-              "Selective pallet racking - EN 15512 (second-order elastic, "
-              "semi-rigid connections)"))
+              sub + " (second-order elastic, semi-rigid connections)"))
     rows = []
     for k in ("project", "system", "configuration", "client", "location",
               "engineer"):
@@ -187,6 +190,34 @@ def build_report_blocks(model, cases, checks, meta=None) -> List[tuple]:
                       f"{c.max_sway_x:.2f}", f"{c.max_sway_y:.2f}",
                       f"{acr:.1f}" if acr else "-"])
     b.append(("table", arows))
+
+    # drive-in specific verification summary
+    if di is not None:
+        H = di["H"]
+        b.append(("h2", "Drive-in verification (EN 15620 / FEM 10.2.07)"))
+        krows = []
+        if di["Lcr_z"]:
+            krows.append(("Down-aisle effective length Lcr,z",
+                          f"{di['Lcr_z']:.0f} mm = {di['Lcr_z'] / H:.2f} x H "
+                          f"(critical-upright buckling eigenvalue; the "
+                          f"second-order sway is already in the analysis, so "
+                          f"the upright is not checked over the K=1.0 full "
+                          f"height)"))
+        if di["Lcr_y"]:
+            krows.append(("Cross-aisle effective length Lcr,y",
+                          f"{di['Lcr_y']:.0f} mm (braced by the depth-frame "
+                          f"ladders)"))
+        krows.append(("Frame height H", f"{H:.0f} mm"))
+        b.append(("kv", krows))
+        trows = [["Verification", "Util.", "Status", "Detail"]]
+        for label, util, status, detail in di["rows"]:
+            trows.append([label, f"{util:.3f}", status, detail])
+        b.append(("table", trows))
+        b.append(("note", "Pallet-support rail / cantilever-arm deflections "
+                          "include shear deformation (Timoshenko) and are "
+                          f"limited to L/{model.checks.beam_defl_limit_ratio:.0f}"
+                          " per EN 15620; the down-aisle uprights are vertical "
+                          "cantilevers braced cross-aisle only."))
 
     # 6 design checks
     b.append(("h2", "6  EN 15512 design verifications"))
