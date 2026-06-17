@@ -131,7 +131,7 @@ def build_drive_in(cfg) -> RackModel:
     plan_sec = pick(cfg.plan_bracing_section or cfg.brace_section, "bracing")
     for sec in {s.name: s for s in (up, brace, arm, rail, top, back, spine_sec,
                                     plan_sec)}.values():
-        fy = cfg.master.fy.get(sec.name) if cfg.master else None
+        fy = (cfg.master.fy.get(sec.name) if (cfg.master and not cfg.fy_override) else None)
         if fy:
             mat = f"steel_fy{fy:.0f}"
             m.materials.setdefault(mat, Steel(mat, fy=fy))

@@ -176,6 +176,9 @@ class RackConfig:
     beam_section: str = "BM-110x50x1.5"
     brace_section: str = "BR-C40x40x2.0"
     steel_fy: float = 355.0            # MPa (sections without their own fy)
+    # when True, use steel_fy for EVERY section (ignore the master's per-section
+    # fy) - lets the material yield be set from the input for any master
+    fy_override: bool = False
     # connections (from EN 15512 Annex A tests)
     connector_stiffness: float = 1.0e8       # N*mm/rad, about local z
     connector_m_rd: Optional[float] = 2.5e6  # N*mm
@@ -409,7 +412,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
                  for name in {s for _, s, _ in specs}}
     specs = [(z, _pick(lib, s, "beam"), w) for z, s, w in specs]
     for sec in (up, br, *beam_secs.values()):
-        fy = cfg.master.fy.get(sec.name) if cfg.master else None
+        fy = (cfg.master.fy.get(sec.name) if (cfg.master and not cfg.fy_override) else None)
         if fy:
             mat_name = f"steel_fy{fy:.0f}"
             m.materials.setdefault(mat_name, Steel(mat_name, fy=fy))
@@ -599,7 +602,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
                 sec = lib.get(_pick(lib, name, role))
             except (KeyError, ValueError):
                 continue
-            fy = cfg.master.fy.get(sec.name) if cfg.master else None
+            fy = (cfg.master.fy.get(sec.name) if (cfg.master and not cfg.fy_override) else None)
             sec.material = (f"steel_fy{fy:.0f}" if fy else "steel")
             if fy:
                 m.materials.setdefault(sec.material, Steel(sec.material, fy=fy))
@@ -626,7 +629,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         if not name:
             return br.name
         sec = _bracing_section(name)
-        fy = cfg.master.fy.get(sec.name) if cfg.master else None
+        fy = (cfg.master.fy.get(sec.name) if (cfg.master and not cfg.fy_override) else None)
         if fy:
             mat_name = f"steel_fy{fy:.0f}"
             m.materials.setdefault(mat_name, Steel(mat_name, fy=fy))

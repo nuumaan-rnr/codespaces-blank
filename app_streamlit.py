@@ -552,6 +552,11 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             c = st.columns(3)
             fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
                                    gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
+            fy_override = c[0].checkbox(
+                "Apply fy to all sections (override master)",
+                bool(g("fy_override", False)),
+                help="Use this fy for every section, ignoring any per-section "
+                     "fy stored in the master (e.g. RFEM-imported masters).")
             _bs = g("base_stiffness", "auto")
             _bmodes = ["Master table (tested)", "Calculated (R899 formula)",
                        "Manual value"]
@@ -598,6 +603,11 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             c = st.columns(3)
             fy = c[0].number_input("Default fy [MPa]", 200.0, 700.0,
                                    gn("steel_fy", 355.0, 200.0, 700.0), 5.0)
+            fy_override = c[0].checkbox(
+                "Apply fy to all sections (override master)",
+                bool(g("fy_override", False)),
+                help="Use this fy for every section, ignoring any per-section "
+                     "fy stored in the master (e.g. RFEM-imported masters).")
             _bs = g("base_stiffness", "auto")
             _bmodes = ["Master table (tested)", "Calculated (R899 formula)",
                        "Manual value"]
@@ -843,6 +853,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         bracing_start=bstart, bracing_pitch=bpitch,
         bracing_type_zone1=None if zone1 == "same" else zone1,
         upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
+        fy_override=bool(fy_override),
         base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),

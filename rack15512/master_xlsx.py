@@ -71,7 +71,7 @@ class MasterWorkbook:
         return table[-1][1], table[-1][2]    # unreachable
 
 
-def load_master(path: str) -> MasterWorkbook:
+def load_master(path: str, role_hint: Optional[str] = None) -> MasterWorkbook:
     try:
         import openpyxl
     except ImportError:
@@ -79,7 +79,9 @@ def load_master(path: str) -> MasterWorkbook:
                           "(pip install openpyxl)") from None
     wb = openpyxl.load_workbook(path, data_only=True)
     if _is_rfem_persheet(wb):
-        return _load_rfem_persheet(wb)
+        import os as _os
+        hint = role_hint or _infer_role(_os.path.basename(path))
+        return _load_rfem_persheet(wb, hint)
     sections: Dict[str, CrossSection] = {}
     fy_map: Dict[str, float] = {}
 
@@ -114,16 +116,46 @@ def load_master(path: str) -> MasterWorkbook:
 # constant, shear centre, section moduli, buckling curves).
 
 def _is_rfem_persheet(wb) -> bool:
-    """True for an RFEM per-section export: no standard *_MASTER sheets and the
-    first sheet uses the Description/Symbol/Value header."""
+    """True for an RFEM per-section export: no standard *_MASTER sheets and a
+    sheet uses the Description/Symbol/Value header (which may sit on row 1 or,
+    when the sheet has a blank leading row, on row 2)."""
     if any(s in wb.sheetnames for s in
            ("UPRIGHT_MASTER", "BEAM_MASTER", "BRACING_MASTER")):
         return False
-    if not wb.sheetnames:
-        return False
-    ws = wb[wb.sheetnames[0]]
-    hdr = [str(ws.cell(1, c).value or "").strip().lower() for c in range(1, 4)]
-    return hdr == ["description", "symbol", "value"]
+    for sheet in wb.sheetnames[:3]:
+        ws = wb[sheet]
+        for r in (1, 2):
+            hdr = [str(ws.cell(r, c).value or "").strip().lower()
+                   for c in range(1, 4)]
+            if hdr == ["description", "symbol", "value"]:
+                return True
+    return False
+
+
+# role inference: from a master/file name keyword, else from a section name
+def _infer_role(text) -> Optional[str]:
+    t = str(text or "").upper()
+    if "UPRIGHT" in t:
+        return "upright"
+    if "BRACING" in t or "BRACE" in t:
+        return "bracing"
+    if "BEAM" in t:
+        return "beam"
+    if "OTHER" in t:
+        return "beam"            # rails / connectors are beam-role sections
+    return None
+
+
+def _role_from_section(name) -> str:
+    u = str(name or "").upper()
+    if u.startswith("UP"):
+        return "upright"
+    if (u.startswith("RHS") or u.startswith("CONN") or "DRIVEIN" in u
+            or "SHUTTLE" in u or "RAIL" in u):
+        return "beam"
+    if u.startswith("1C") or u.startswith("C"):
+        return "bracing"
+    return "beam"
 
 
 def _persheet_props(ws) -> Dict[str, Tuple]:
@@ -146,8 +178,11 @@ def _dist_mm(comment) -> Optional[float]:
     return float(m.group(1)) if m else None
 
 
-def _load_rfem_persheet(wb) -> MasterWorkbook:
-    """Build an upright MasterWorkbook from a per-sheet RFEM property export.
+def _load_rfem_persheet(wb, role_hint: Optional[str] = None) -> MasterWorkbook:
+    """Build a MasterWorkbook from a per-sheet RFEM property export (one section
+    per sheet).  Works for uprights, beams, bracings and other (rail/connector)
+    sections - the role is `role_hint` (from the file/master name) when given,
+    else inferred per section from its name.
 
     RFEM axes are swapped to the model convention (see module docstring): RFEM
     Iy (major) -> local Iz; RFEM Iz (minor) -> local Iy.  The shear areas,
@@ -163,6 +198,7 @@ def _load_rfem_persheet(wb) -> MasterWorkbook:
         name = sheet.strip()
         if name.lower().endswith("-eff"):
             name = name[:-4].strip()
+        role = role_hint or _role_from_section(name)
 
         def val(sym):
             try:
@@ -197,7 +233,7 @@ def _load_rfem_persheet(wb) -> MasterWorkbook:
         fy = round((npl * KN / A) / 5.0) * 5.0 if (npl and A > 0) else 350.0
 
         sections[name] = CrossSection(
-            name=name, material="steel", role="upright",
+            name=name, material="steel", role=role,
             A=A, Iy=Iy, Iz=Iz, J=J or (A * 4.0),    # tiny J fallback if missing
             Wely=Wely or 1.0, Welz=Welz or 1.0,
             A_eff=A, Wy_eff=Wely, Wz_eff=Welz,
@@ -215,7 +251,8 @@ def _load_rfem_persheet(wb) -> MasterWorkbook:
 def load_upright_properties(path: str) -> MasterWorkbook:
     """Public loader for an RFEM per-sheet upright property export."""
     import openpyxl
-    return _load_rfem_persheet(openpyxl.load_workbook(path, data_only=True))
+    return _load_rfem_persheet(openpyxl.load_workbook(path, data_only=True),
+                               role_hint="upright")
 
 
 def _rows(ws) -> List[list]:

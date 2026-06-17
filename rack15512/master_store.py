@@ -217,7 +217,10 @@ class MasterStore:
                     description: str = "") -> StoredMaster:
         """Import an Excel (or CSV/JSON) master ONCE into the store."""
         if path.lower().endswith((".xlsx", ".xlsm")):
-            mw = load_master(path)
+            from .master_xlsx import _infer_role
+            # role hint for RFEM per-sheet exports comes from the import name
+            # (e.g. BEAM_MASTER / BRACING_MASTER / UPRIGHT_PROPERTIES)
+            mw = load_master(path, role_hint=_infer_role(name or path))
         else:
             lib = SectionLibrary.from_file(path)
             fy = {s.name: 250.0 for s in lib.sections.values()}

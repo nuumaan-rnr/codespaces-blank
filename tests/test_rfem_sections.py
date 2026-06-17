@@ -67,3 +67,51 @@ def test_fy_recovered_from_npl():
     # fy = Npl,d / A, rounded to 5 MPa -> a sensible steel grade
     assert all(200.0 <= fy <= 700.0 for fy in mw.fy.values())
     assert abs(mw.fy["UP0002"] - 355.0) < 1e-6
+
+
+BEAMS = os.path.join(HERE, "..", "examples", "Beam_Master.xlsx")
+BRACES = os.path.join(HERE, "..", "examples", "Bracing_Master.xlsx")
+OTHER = os.path.join(HERE, "..", "examples", "Other_Master.xlsx")
+needs_all = pytest.mark.skipif(
+    not all(os.path.exists(p) for p in (BEAMS, BRACES, OTHER)),
+    reason="example beam/bracing/other masters not present")
+
+
+@needs_all
+def test_role_inference_per_master():
+    # the role hint comes from the import/file name; sections take that role
+    assert {s.role for s in
+            load_master(BEAMS, role_hint="beam").library.sections.values()} \
+        == {"beam"}
+    assert {s.role for s in
+            load_master(BRACES, role_hint="bracing").library.sections.values()} \
+        == {"bracing"}
+    # other master (rails + connectors) -> beam-role sections
+    other = load_master(OTHER, role_hint="beam")
+    assert other.library.sections and {s.role for s in
+                                       other.library.sections.values()} == {"beam"}
+
+
+@needs_all
+def test_bracing_blank_header_first_sheet_detected():
+    # the bracing file's first sheet has a blank leading row; detection and
+    # parsing must still pick it up
+    mw = load_master(BRACES)
+    assert len(mw.library.sections) >= 9
+    s = next(iter(mw.library.sections.values()))
+    assert s.A > 0 and s.Iz > 0
+
+
+@needs
+def test_fy_override_uses_input_fy():
+    # fy_override makes every section take the input steel_fy, ignoring master
+    from rack15512.builder import RackConfig, build_rack
+    mw = load_upright_properties(RFEM)
+    base = dict(system_type="drive_in", di_variant="drive_in", n_lanes=2,
+                n_deep=4, n_frames=3, beam_levels=[2400.0, 4900.0],
+                frame_height=6000.0, master=mw, upright_section="UP0016",
+                steel_fy=420.0, mesh_beam=1, mesh_upright=1)
+    m_ov = build_rack(RackConfig(fy_override=True, **base))
+    assert {round(mat.fy) for mat in m_ov.materials.values()} == {420}
+    m_no = build_rack(RackConfig(fy_override=False, **base))
+    assert any(round(mat.fy) != 420 for mat in m_no.materials.values())
