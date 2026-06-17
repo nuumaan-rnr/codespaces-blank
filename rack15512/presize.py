@@ -121,16 +121,13 @@ def static_upright_demand(cfg) -> Dict:
     system = getattr(cfg, "system_type", "selective")
     # down-aisle (local z):
     #  * drive-in / shuttle: the upright is unbraced down-aisle between the
-    #    semi-rigid base and the portal top.  The full-run analysis derives the
-    #    effective length from a critical-upright buckling eigenvalue
-    #    (rack15512.buckling_eig); for this pre-run suggester we use the FEM
-    #    10.2.07 curvature value K = 0.7 (contra-flexure between the semi-rigid
-    #    base and the level/top restraints), NOT the conservative K = 1.0 full
-    #    height which double-counts the second-order sway the engine resolves;
+    #    semi-rigid base and the portal top, so the down-aisle buckling length is
+    #    the full frame height (K = 1.0, pinned-pinned) - the conservative worst
+    #    case, matching the full-run analysis;
     #  * selective: restrained at every beam level by the moment frame -> the
     #    largest beam-level gap.
     if system != "selective":
-        Lcr_da = 0.7 * H
+        Lcr_da = H
     else:
         top_seg = max(H - sum(gaps), 0.0)
         Lcr_da = max(gaps + [top_seg]) if (gaps or top_seg) else 2000.0

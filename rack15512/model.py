@@ -564,9 +564,11 @@ class RackModel:
     base_plate: Optional[BasePlate] = None
     splices: List[Splice] = field(default_factory=list)
     built_up: Optional[BuiltUpColumn] = None
-    # drive-in / shuttle: compute the upright down-aisle buckling length from a
-    # geometric buckling eigenvalue before the design combinations (run_all)
-    auto_buckling: bool = False
+    # drive-in: how the down-aisle base rotational stiffness was obtained
+    # ('master tested table' / 'calculated (R899)' / 'explicit') and its value
+    # [N*mm/rad], for the report; set by the drive-in builder.
+    base_stiffness_source: str = ""
+    base_stiffness_value: float = 0.0
 
     # ---- convenience builders -------------------------------------------
     def add_node(self, nid: int, x: float, y: float, z: float) -> Node:

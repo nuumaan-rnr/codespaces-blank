@@ -20,7 +20,9 @@ The geometry reproduces the client RSTAB model (decoded from the export):
     lanes (drive-in / LIFO; absent for drive-through / FIFO), with down-aisle
     beams at each level between the braced bays;
   * PLAN BRACING (X-Y) at the top;
-  * pinned bases at every upright; semi-rigid rail/beam connectors.
+  * semi-rigid down-aisle floor connections (from the master's tested base
+    table, else calculated from the R899 formulas); semi-rigid rail/beam
+    connectors.
 
 Load on each rail = lane-level total halved onto the two side rails, spread as
 a UDL over the rail length (mirrors the SPR beam rule).
@@ -197,9 +199,10 @@ def build_drive_in(cfg) -> RackModel:
     # STRESS/BUCKLING checks.
     end_k = {0, nL} if getattr(cfg, "built_up_end_columns", False) else set()
     # EN 15512 buckling lengths: cross-aisle (local y) is braced by the frame
-    # ladder at the bracing pitch.  Down-aisle (local z) is refined below from a
-    # geometric buckling eigenvalue (FEM 10.2.07 critical upright); the full
-    # frame height is only the conservative fallback.
+    # ladder at the bracing pitch.  Down-aisle (local z) is the full frame height
+    # (K = 1.0, pinned-pinned) - the conservative worst case; the engine already
+    # runs the second-order sway, and 1.0H gives the highest upright buckling
+    # utilisation.
     lcr_ca = float(cfg.bracing_pitch or 600.0)
     lcr_da = H
     for k in range(nL + 1):
@@ -373,46 +376,44 @@ def build_drive_in(cfg) -> RackModel:
                 mid += 1
 
     # ---- supports (semi-rigid floor connection) ---------------------------
-    # rotational base stiffness from the master base-stiffness table (like the
-    # selective rack); rz free.  Without a master (or base_stiffness <= 0) the
-    # base is pinned (rotations free).
+    # Down-aisle rotational base stiffness (applied to ry; cross-aisle rx is held
+    # by the braced depth frames, rz free).  Source order:
+    #   1. the master's EN 15512 tested BASE_STIFFNESS table, interpolated at the
+    #      estimated factored upright axial load; otherwise
+    #   2. CALCULATED from the R899 (Gilbert & Rasmussen 2009) formulas - the
+    #      concrete-floor term (Eq 43) in series with the upright term (Eq 46),
+    #      which need only upright properties, so a value is always available
+    #      (there is no pinned fallback).
+    # An explicit numeric base_stiffness overrides both.
     n_up = (nL + 1) * nDpos
-    if cfg.base_stiffness == "auto" and cfg.master:
-        Q_tot = cfg.n_deep * cfg.weight_per_pallet * nL * len(rail_levels)
-        N_est = cfg.gamma_Q * Q_tot / n_up if n_up else 0.0
-        try:
-            k_base, _ = cfg.master.base_stiffness(up.name, N_est)
-        except Exception:
-            k_base = 0.0
-    elif cfg.base_stiffness == "auto":
-        k_base = 0.0                              # no master -> pinned base
+    if isinstance(cfg.base_stiffness, str):           # 'auto'
+        k_base, source = None, ""
+        if cfg.master:
+            Q_tot = cfg.n_deep * cfg.weight_per_pallet * nL * len(rail_levels)
+            N_est = cfg.gamma_Q * Q_tot / n_up if n_up else 0.0
+            try:
+                k_base, _ = cfg.master.base_stiffness(up.name, N_est)
+                source = "master tested table"
+            except Exception:
+                k_base = None
+        if k_base is None:                            # no tested table -> R899
+            from .base_stiffness import derived_base_stiffness
+            E_up = m.materials[up.material].E
+            h0 = rail_levels[0] if rail_levels else H
+            k_base = derived_base_stiffness(up, E_up, h0,
+                                            f_ck=getattr(cfg, "concrete_fck", 25.0))
+            source = "calculated (R899)"
     else:
         k_base = float(cfg.base_stiffness)
-    # the floor-connection stiffness is a DOWN-AISLE value (bending in the X-Z
-    # plane -> M_y -> ry); cross-aisle (rx) is held by the braced depth frames,
-    # so the base spring is applied in the down-aisle direction (ry) only.
+        source = "explicit"
+    m.base_stiffness_source = source
+    m.base_stiffness_value = float(k_base) if k_base else 0.0
     for k in range(nL + 1):
         for di in range(nDpos):
-            kk = k_base if k_base > 0 else False
+            kk = k_base if k_base and k_base > 0 else False
             m.supports.append(Support(node_of[(k, di, rz(0.0))], ux=True,
                                       uy=True, uz=True, rx=False, ry=kk,
                                       rz=False))
-
-    # down-aisle (local z) upright effective length from a geometric buckling
-    # eigenvalue of the FEM 10.2.07 critical upright (base spring k_base, top held
-    # against down-aisle sway, loads at the rail levels); falls back to the full
-    # height set above if the eigensolve is unavailable.
-    try:
-        from .buckling_eig import column_effective_length
-        E_up = m.materials[up.material].E
-        lcr_eig = column_effective_length(rail_levels, H, E_up, up.Iz,
-                                          A=up.area_eff, k_base=k_base)
-        if lcr_eig:
-            for mm in m.members.values():
-                if mm.member_set in ("uprights", "end columns"):
-                    mm.L_buckling_z = lcr_eig
-    except Exception:
-        pass
 
     _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
            rail_members, acc_h)

@@ -73,10 +73,9 @@ def test_static_demand_selective_and_drive_in():
         frame_height=6200.0, bracing_pitch=600.0))
     assert di["N_design"] > 0
     assert di["Lcr_ca"] == 600.0                   # cross-aisle = bracing pitch
-    # down-aisle: FEM 10.2.07 curvature factor K = 0.7 of the frame height
-    # (the full run refines this from a critical-upright buckling eigenvalue);
-    # K = 1.0 full height would double-count the second-order sway
-    assert di["Lcr_da"] == 0.7 * 6200.0
+    # down-aisle: full frame height (K = 1.0, pinned-pinned) - conservative worst
+    # case, matching the full-run analysis
+    assert di["Lcr_da"] == 6200.0
     # down-aisle (Iz) buckling is much longer than cross-aisle (Iy)
     assert di["Lcr_z"] > di["Lcr_y"]
     assert di["n_levels"] == 3

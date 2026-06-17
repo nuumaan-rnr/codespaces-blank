@@ -326,14 +326,17 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
         if di["Lcr_z"]:
             a(f"<tr><th>Down-aisle effective length L<sub>cr,z</sub></th>"
               f"<td>{di['Lcr_z']:.0f} mm = {di['Lcr_z'] / H:.2f}·H "
-              f"(critical-upright buckling eigenvalue; the second-order sway "
-              f"is already in the analysis, so the upright is not checked over "
-              f"the K=1.0 full height)</td></tr>")
+              f"(K=1.0 full frame height, the conservative worst case)"
+              f"</td></tr>")
         if di["Lcr_y"]:
             a(f"<tr><th>Cross-aisle effective length L<sub>cr,y</sub></th>"
               f"<td>{di['Lcr_y']:.0f} mm (braced by the depth-frame "
               f"ladders)</td></tr>")
         a(f"<tr><th>Frame height H</th><td>{H:.0f} mm</td></tr>")
+        if di.get("base_source"):
+            a(f"<tr><th>Down-aisle base stiffness</th>"
+              f"<td>{di['base_value'] / 1e6:.0f} kNm/rad "
+              f"(source: {_esc(di['base_source'])})</td></tr>")
         a("</table>")
         a("<table><thead><tr><th>Verification</th><th>Utilisation</th>"
           "<th>Status</th><th>Detail</th></tr></thead><tbody>")

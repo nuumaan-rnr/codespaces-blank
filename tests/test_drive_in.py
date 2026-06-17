@@ -122,6 +122,30 @@ def test_base_springs_and_connectors():
                       for b in pb)
 
 
+def test_default_base_stiffness_calculated_from_r899():
+    # with no master the drive-in floor connection is CALCULATED from the R899
+    # formulas (concrete Eq43 in series with upright Eq46), applied down-aisle
+    # (ry); cross-aisle (rx) stays braced.  No pinned fallback, no over-stiff
+    # 5.0e8 default.  An explicit value still overrides.
+    from rack15512.base_stiffness import derived_base_stiffness
+    m = build_rack(_cfg("drive_in"))                 # default base_stiffness
+    assert m.supports
+    assert m.base_stiffness_source == "calculated (R899)"
+    ups = [mm for mm in m.members.values() if mm.member_set == "uprights"]
+    up = m.sections[ups[0].section]
+    E = m.materials[up.material].E
+    expect = derived_base_stiffness(up, E, 2400.0)   # first beam level of _cfg
+    assert all(abs(s.ry - expect) < 1.0 and s.rx is False and s.rz is False
+               for s in m.supports)
+    assert 1.6e7 <= expect <= 2.4e8                  # in the measured band
+    cases = run_all(m)
+    assert all(c.converged for c in cases)           # still stable
+    # an explicit numeric base stiffness is still honoured
+    m2 = build_rack(_cfg("drive_in", base_stiffness=3.0e8))
+    assert all(s.ry == 3.0e8 for s in m2.supports)
+    assert m2.base_stiffness_source == "explicit"
+
+
 def test_top_and_back_beams_independent():
     # the top (frame-top) and back (rear, per-level) beams are separate member
     # sets and can take different connector stiffness
@@ -231,42 +255,16 @@ def test_no_built_up_by_default():
     assert _sets(m)["end columns"] == 0
 
 
-def test_upright_downaisle_effective_length_from_eigenvalue():
-    # the down-aisle (local z) upright effective length is taken from the
-    # critical-upright buckling eigenvalue (FEM 10.2.07), NOT the full frame
-    # height - the engine already runs the 2nd-order sway, so K=1.0 full height
-    # would double-count it (over-conservative).
+def test_upright_downaisle_effective_length_is_full_height():
+    # the down-aisle (local z) upright effective length is the full frame height
+    # (K=1.0, pinned-pinned) - the conservative worst case; cross-aisle (local y)
+    # stays the braced bracing pitch.
     H = 6000.0
-    m = build_rack(_cfg("drive_in", frame_height=H, base_stiffness=5.0e8))
+    m = build_rack(_cfg("drive_in", frame_height=H))
     ups = [mm for mm in m.members.values() if mm.member_set == "uprights"]
     assert ups
-    lz = {round(mm.L_buckling_z) for mm in ups}
-    assert len(lz) == 1                       # all uprights share one length
-    lcr = lz.pop()
-    assert 0 < lcr < H                         # below full height (less conservative)
-    # cross-aisle stays the braced bracing pitch
+    assert all(mm.L_buckling_z == H for mm in ups)
     assert all(mm.L_buckling_y == 600.0 for mm in ups)
-
-
-def test_eigenvalue_effective_length_responds_to_base_spring():
-    from rack15512.buckling_eig import column_effective_length
-    H, E, Iz = 6000.0, 210000.0, 1.2e6
-    free = column_effective_length([2400.0, 4900.0], H, E, Iz, A=2000.0,
-                                   k_base=0.0)
-    stiff = column_effective_length([2400.0, 4900.0], H, E, Iz, A=2000.0,
-                                    k_base=5.0e8)
-    assert free and stiff
-    assert 0 < free <= H and 0 < stiff <= H
-    assert stiff < free                        # a stiffer base shortens L_cr
-
-
-def test_eigenvalue_recovers_euler_pinned_pinned():
-    # a single top load on a pinned base / sway-held top is the Euler
-    # pinned-pinned column: L_cr -> H (within a few percent on a meshed model)
-    from rack15512.buckling_eig import column_effective_length
-    H, E, Iz = 4000.0, 210000.0, 1.0e6
-    lcr = column_effective_length([H], H, E, Iz, A=2000.0, k_base=0.0, mesh=10)
-    assert lcr and abs(lcr - H) / H < 0.05
 
 
 def test_drivein_sections_are_shear_flexible():
@@ -289,7 +287,8 @@ def test_drivein_report_section():
     checks = run_checks(m, cases)
     assert is_drive_in(m)
     d = drivein_summary(m, checks)
-    assert d is not None and d["Lcr_z"] and d["Lcr_z"] < d["H"]
+    assert d is not None and d["Lcr_z"] == d["H"]   # down-aisle = 1.0H
+    assert d["base_source"] == "calculated (R899)"
     labels = {row[0] for row in d["rows"]}
     assert any("rail deflection" in s for s in labels)
     assert any("Down-aisle frame sway" in s for s in labels)

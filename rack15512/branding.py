@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-17 · drive-in report section: rail/arm deflection, down-aisle effective length & sway (EN 15620 / FEM 10.2.07)"
+BUILD = "2026-06-17 · drive-in: down-aisle Lcr = 1.0H (worst case) + base stiffness from master table, else calculated (R899)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

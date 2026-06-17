@@ -62,7 +62,7 @@ def drivein_summary(model: RackModel, checks: List[CheckResult]):
         worst("DEFLECTION", "rail beams"))
     add("Cantilever arm deflection (EN 15620)",
         worst("DEFLECTION", "rail arms"))
-    add("Down-aisle upright buckling (FEM 10.2.07)",
+    add("Down-aisle upright buckling (L_cr,z = 1.0H)",
         worst("BUCKLING", "uprights"))
     # sway checks: targets read 'frame X (down-aisle)' / 'frame Y (cross-aisle)'
     sway = sorted((c for c in checks if c.check == "SWAY"),
@@ -72,7 +72,9 @@ def drivein_summary(model: RackModel, checks: List[CheckResult]):
     add("Down-aisle frame sway", da)
     add("Cross-aisle frame sway", ca)
 
-    return {"H": H, "Lcr_z": Lcr_z, "Lcr_y": Lcr_y, "rows": rows}
+    return {"H": H, "Lcr_z": Lcr_z, "Lcr_y": Lcr_y, "rows": rows,
+            "base_source": getattr(model, "base_stiffness_source", ""),
+            "base_value": getattr(model, "base_stiffness_value", 0.0)}
 
 
 def write_report(model: RackModel, cases: List[CaseResult],
@@ -172,13 +174,14 @@ def _drivein_section(model: RackModel,
     if d["Lcr_z"]:
         out.append(f"- Down-aisle upright effective length L_cr,z = "
                    f"{d['Lcr_z']:.0f} mm = {d['Lcr_z'] / H:.2f}*H "
-                   f"(critical-upright buckling eigenvalue; the full "
-                   f"second-order sway is already in the analysis, so the "
-                   f"member check does **not** use the K=1.0 full height).")
+                   f"(K=1.0 full frame height, the conservative worst case).")
     if d["Lcr_y"]:
         out.append(f"- Cross-aisle upright effective length L_cr,y = "
                    f"{d['Lcr_y']:.0f} mm (braced by the depth-frame ladders).")
     out.append(f"- Frame height H = {H:.0f} mm.")
+    if d.get("base_source"):
+        out.append(f"- Down-aisle base stiffness: {d['base_value'] / 1e6:.0f} "
+                   f"kNm/rad, source: {d['base_source']}.")
     out += ["",
             "| verification | utilization | status | detail |",
             "|---|---|---|---|"]

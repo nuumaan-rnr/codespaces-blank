@@ -199,15 +199,17 @@ def build_report_blocks(model, cases, checks, meta=None) -> List[tuple]:
         if di["Lcr_z"]:
             krows.append(("Down-aisle effective length Lcr,z",
                           f"{di['Lcr_z']:.0f} mm = {di['Lcr_z'] / H:.2f} x H "
-                          f"(critical-upright buckling eigenvalue; the "
-                          f"second-order sway is already in the analysis, so "
-                          f"the upright is not checked over the K=1.0 full "
-                          f"height)"))
+                          f"(K=1.0 full frame height, the conservative worst "
+                          f"case)"))
         if di["Lcr_y"]:
             krows.append(("Cross-aisle effective length Lcr,y",
                           f"{di['Lcr_y']:.0f} mm (braced by the depth-frame "
                           f"ladders)"))
         krows.append(("Frame height H", f"{H:.0f} mm"))
+        if di.get("base_source"):
+            krows.append(("Down-aisle base stiffness",
+                          f"{di['base_value'] / 1e6:.0f} kNm/rad "
+                          f"(source: {di['base_source']})"))
         b.append(("kv", krows))
         trows = [["Verification", "Util.", "Status", "Detail"]]
         for label, util, status, detail in di["rows"]:

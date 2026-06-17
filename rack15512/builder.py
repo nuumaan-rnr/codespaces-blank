@@ -180,10 +180,12 @@ class RackConfig:
     connector_stiffness: float = 1.0e8       # N*mm/rad, about local z
     connector_m_rd: Optional[float] = 2.5e6  # N*mm
     connector_looseness: float = 0.0         # rad (phi_l)
-    # floor connection: stiffness [N*mm/rad], 0 = pinned, or 'auto' =
-    # interpolate the master's BASE_STIFFNESS table at the estimated
-    # upright axial load (requires `master`)
-    base_stiffness: Union[float, str] = 5.0e8
+    # floor connection: explicit stiffness [N*mm/rad] (0 = pinned), or the
+    # default 'auto' = interpolate the master's tested BASE_STIFFNESS table at
+    # the estimated upright axial load (EN 15512).  With no master 'auto' falls
+    # back to: selective -> 5.0e8; drive-in -> calculated from the R899 formulas
+    # (rack15512.base_stiffness).
+    base_stiffness: Union[float, str] = "auto"
     # bracing: analysis-stiffness modification (bolted end-connection
     # flexibility) - strength checks use the full section
     brace_area_factor: float = 0.15
@@ -767,14 +769,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # ---- semi-rigid floor connections ---------------------------------------
     n_uprights = len(sides) * n_lines
     if cfg.base_stiffness == "auto":
-        if not cfg.master:
-            raise ValueError("base_stiffness='auto' needs an .xlsx master "
-                             "with a BASE_STIFFNESS sheet")
-        n_modules = len(rack_pairs)
-        total_pallets = sum(load for _, _, load in specs)
-        N_est = (cfg.gamma_Q * total_pallets * cfg.n_bays
-                 * n_modules) / n_uprights
-        k_base, _ = cfg.master.base_stiffness(up.name, N_est)
+        if cfg.master:
+            n_modules = len(rack_pairs)
+            total_pallets = sum(load for _, _, load in specs)
+            N_est = (cfg.gamma_Q * total_pallets * cfg.n_bays
+                     * n_modules) / n_uprights
+            k_base, _ = cfg.master.base_stiffness(up.name, N_est)
+        else:
+            # no test data: keep the historical selective default
+            k_base = 5.0e8
     else:
         k_base = float(cfg.base_stiffness)
     # The EN 15512 floor-connection test gives the DOWN-AISLE rotational
