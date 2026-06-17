@@ -2415,16 +2415,29 @@ def render_masters():
                                 key=f"r_{sm.id}")
             names = sm.names(role)
             if names:
-                st.dataframe([{"name": n, "A": sm.sections[n].get("A"),
-                               "Iy": sm.sections[n].get("Iy"),
-                               "Iz": sm.sections[n].get("Iz"),
-                               "fy": sm.fy.get(n)} for n in names],
-                             width="stretch")
+                # full property spectrum (mm/N units); blank cells = not set
+                _cols = ["A", "A_eff", "Iy", "Iz", "J", "Wely", "Welz",
+                         "Avy", "Avz", "It_gross", "Iw_gross", "y0",
+                         "depth_h", "width_b", "t",
+                         "buckling_curve_y", "buckling_curve_z", "connector_k"]
+                rows = []
+                for n in names:
+                    d = sm.sections[n]
+                    row = {"name": n, "fy": sm.fy.get(n)}
+                    row.update({c: d.get(c) for c in _cols})
+                    rows.append(row)
+                st.dataframe(rows, width="stretch")
+                st.caption("Units: mm, mm² (A), mm⁴ (I, J/It), mm³ (W), mm⁶ "
+                           "(Iw), MPa (fy), N·mm/rad (connector_k). Scroll the "
+                           "table sideways to see every column.")
                 e = st.columns([2, 1.5, 1.5, 1])
                 edit = e[0].selectbox("Section", names, key=f"s_{sm.id}")
-                fld = e[1].selectbox("Field", ["A", "Iy", "Iz", "J", "Wely",
-                                               "Welz", "fy", "e1", "e2", "t"],
-                                     key=f"f_{sm.id}")
+                fld = e[1].selectbox(
+                    "Field",
+                    ["A", "A_eff", "Iy", "Iz", "J", "Wely", "Welz", "fy",
+                     "Avy", "Avz", "It_gross", "Iw_gross", "y0",
+                     "depth_h", "width_b", "t", "e1", "e2", "connector_k"],
+                    key=f"f_{sm.id}")
                 cur = (sm.fy.get(edit) if fld == "fy"
                        else sm.sections[edit].get(fld))
                 nv = e[2].number_input("Value", value=float(cur or 0.0),
