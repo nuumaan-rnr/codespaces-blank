@@ -195,6 +195,31 @@ def test_geometry_parse_and_merge_thickness(tmp_path):
     assert up.t == 2.0 and up.e1 and up.e2
 
 
+def test_build_fixes_zero_torsion_constant():
+    # an imported section with J = 0 (sheet blank / rounded) must not crash the
+    # build: the solver needs J > 0, so it falls back to A*t^2/3
+    from rack15512.builder import RackConfig, build_rack, LevelSpec
+    from rack15512.library import SectionLibrary
+    from rack15512.master_xlsx import MasterWorkbook
+    from rack15512.model import CrossSection
+    secs = {
+        "UP": CrossSection("UP", "steel", A=400, Iy=1e5, Iz=3e5, J=200,
+                           Wely=2e3, Welz=6e3, role="upright", t=2.0),
+        "BM": CrossSection("BM", "steel", A=300, Iy=8e4, Iz=1.5e5, J=1e5,
+                           Wely=4e3, Welz=5e3, role="beam", t=1.6),
+        "1C26X21X1.2": CrossSection("1C26X21X1.2", "steel", A=65, Iy=4700,
+                                    Iz=7100, J=0.0, Wely=410, Welz=540,
+                                    role="bracing", t=1.2),
+    }
+    mw = MasterWorkbook(library=SectionLibrary(secs), base_tables={}, fy={})
+    m = build_rack(RackConfig(
+        n_bays=2, levels=[LevelSpec(1500.0, "BM", 20000.0)],
+        upright_section="UP", beam_section="BM", brace_section="1C26X21X1.2",
+        master=mw, base_stiffness=5e8))
+    assert m.validate() == []
+    assert m.sections["1C26X21X1.2"].J > 0
+
+
 def test_consolidated_template_roundtrips(tmp_path):
     # the generated template imports as ONE master: all roles + base + beam
     # stiffness, with the labelled units converted to the model's N/mm

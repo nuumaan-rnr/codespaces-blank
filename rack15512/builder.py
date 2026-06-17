@@ -932,4 +932,11 @@ def build_rack(cfg: RackConfig) -> RackModel:
             apply_base_shear_scaling=cfg.seismic_scale_base_shear,
             pallet_sliding=cfg.pallet_sliding, pallet_mu=cfg.pallet_mu)
 
+    # the solver needs J > 0 on every section; an imported section may carry
+    # J = 0 (sheet blank / rounded to zero) - fall back to the open thin-wall
+    # estimate A*t^2/3 so the model validates and runs
+    for sec in m.sections.values():
+        if not sec.J or sec.J <= 0:
+            sec.J = max(sec.A * (sec.t or 2.0) ** 2 / 3.0, 1.0)
+
     return m

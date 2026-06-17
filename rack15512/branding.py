@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-17 · consolidated section-master template (all roles + base & beam stiffness in one importable file)"
+BUILD = "2026-06-17 · fix J=0 imported sections (estimate A*t^2/3) so the model validates and runs"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

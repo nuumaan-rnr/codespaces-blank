@@ -138,6 +138,10 @@ def build_drive_in(cfg) -> RackModel:
             sec.material = mat
         else:
             sec.material = "steel"
+        # the solver needs J > 0; an imported section may carry J = 0 (sheet
+        # blank / rounded) - fall back to the open thin-wall estimate A*t^2/3
+        if not sec.J or sec.J <= 0:
+            sec.J = max(sec.A * (sec.t or 2.0) ** 2 / 3.0, 1.0)
         m.sections[sec.name] = sec
 
     # ---- elevations --------------------------------------------------------

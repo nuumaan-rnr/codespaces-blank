@@ -366,7 +366,12 @@ def _load_template(wb) -> MasterWorkbook:
         kw.setdefault("A", 0.0)
         kw.setdefault("Iy", 0.0)
         kw.setdefault("Iz", 0.0)
-        kw.setdefault("J", kw["A"] * 4.0 or 1.0)
+        # torsion constant must be > 0 for the solver; when the sheet leaves it
+        # blank OR zero, estimate the open thin-wall value J ~ A*t^2/3
+        if not kw.get("J") or kw["J"] <= 0:
+            t = kw.get("t") or 2.0
+            kw["J"] = max(kw["A"] * t * t / 3.0, 1.0)
+        kw.setdefault("It_gross", kw["J"])
         kw.setdefault("Wely", 1.0)
         kw.setdefault("Welz", 1.0)
         sections[name] = CrossSection(name=name, material="steel",
