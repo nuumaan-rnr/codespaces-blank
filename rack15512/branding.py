@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-18 · Bracing & bracing-bolt checks per the attached strut workbook (FT buckling Nb,Rd,FT + net-section tension; bolt shear/bearing with d0=d+1, As=0.78·πd²/4, αv=0.6); upright continuous member-sets with per-set Lcr,DA buckling"
+BUILD = "2026-06-18 · Bolted upright stiffeners (parallel shared-node members over a reinforce height); per-set upright buckling table adds Lcr,CA + N/My/Mz columns and PASS status; upright splice gated off by default (only > 11500 mm, member-only check)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

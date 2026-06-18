@@ -420,6 +420,10 @@ class CheckSettings:
     # the LTB check records that assumption (informative) instead of computing
     # chi_LT (EN 15512 9.4)
     beam_laterally_restrained: bool = True
+    # upright splice connection verification: off by default (the upright is
+    # still checked as a continuous member); the splice geometry only appears
+    # for very tall frames (cfg.splice_above)
+    check_splice: bool = False
     sway_limit_ratio: float = 200.0       # max sway <= H / ratio (SLS)
     beam_defl_limit_ratio: float = 200.0  # beam deflection <= L / ratio (SLS)
     alpha_cr_warn: float = 10.0

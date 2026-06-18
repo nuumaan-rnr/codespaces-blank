@@ -30,8 +30,10 @@ def test_upright_set_buckling_rows_aggregate_per_set():
                               depth=1000.0, frame_height=3600.0))
     rows = upright_set_buckling_rows(m, run_checks(m, run_all(m)))
     assert rows
-    assert all(r["Lcr_DA_mm"] > 0 for r in rows)
-    assert all(r["status"] in ("ok", "FAIL") for r in rows)
+    assert all(r["Lcr_DA_mm"] > 0 and r["Lcr_CA_mm"] > 0 for r in rows)
+    assert all(r["status"] in ("PASS", "FAIL") for r in rows)
+    # the demand columns are present and numeric (N, My, Mz)
+    assert all({"N_kN", "My_kNm", "Mz_kNm"} <= r.keys() for r in rows)
     assert all(r["util"] == max(r2["util"] for r2 in rows
                                 if r2["set"] == r["set"]) for r in rows)
     # one row per distinct set; rows sorted worst-first

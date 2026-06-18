@@ -247,6 +247,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             depth = gn("depth", 1000.0, 600.0, 2000.0)
             b2b_gap = gn("b2b_gap", 250.0, 50.0, 600.0)
             spacer_section = None          # drive-in has no row spacers
+            stiffener_section, reinforce_height = None, 0.0
         else:
             module = c[3].radio(
                 "Module", ["single", "back-to-back"],
@@ -277,6 +278,20 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         spacer_section = (None if (module == "single"
                                    or spacer_sec == "(frame brace)")
                           else spacer_sec)
+        # upright stiffener: bolted parallel reinforcement over a lower zone
+        _stiff_opts = ["(none)"] + list(up_names)
+        _stiff_cur = g("stiffener_section", None) or "(none)"
+        stiff_sel = st.selectbox(
+            "Upright stiffener section (lower-zone reinforcement)", _stiff_opts,
+            index=_idx(_stiff_opts, _stiff_cur),
+            help="A bolted parallel member added alongside each upright segment "
+                 "up to the reinforce height; shares the upright end nodes "
+                 "(stiffnesses add). '(none)' disables.")
+        reinforce_height = st.number_input(
+            "Reinforce height [mm] (stiffener up to this elevation)",
+            0.0, 30000.0, float(g("reinforce_height", 0.0)), 50.0,
+            disabled=(stiff_sel == "(none)"))
+        stiffener_section = None if stiff_sel == "(none)" else stiff_sel
 
     if is_di:
         with st.container(border=True):
@@ -904,6 +919,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         ca_x_height=ca_x_height,
         upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
         fy_override=bool(fy_override), spacer_section=spacer_section,
+        stiffener_section=stiffener_section,
+        reinforce_height=float(reinforce_height),
         base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),
@@ -1741,6 +1758,9 @@ def render_view_config():
                             "direction; the governing element represents the set")
                         st.dataframe(
                             [{"set": r["set"], "Lcr,DA (mm)": r["Lcr_DA_mm"],
+                              "Lcr,CA (mm)": r["Lcr_CA_mm"],
+                              "N (kN)": r["N_kN"], "My (kNm)": r["My_kNm"],
+                              "Mz (kNm)": r["Mz_kNm"],
                               "gov elem": f"member {r['member']}",
                               "util": r["util"], "case": r["case"],
                               "status": r["status"]}

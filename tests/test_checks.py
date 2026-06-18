@@ -343,9 +343,10 @@ def test_ca_buckling_length_per_level_from_model():
     assert band2[0].L_buckling_z == pytest.approx(1800.0)
 
 
-def test_upright_splice_auto_and_check():
-    """Frame height > 11 m: a splice is added automatically at H/2 and the
-    bolt-group connection is verified per EN 1993-1-8."""
+def test_upright_splice_geometry_above_11500_and_check_gated():
+    """Frame height > 11.5 m: a splice is added automatically at H/2.  The
+    connection check is OFF by default (member-only); enabling check_splice
+    re-runs the EN 1993-1-8 bolt-group verification."""
     master = __import__("rack15512.master_xlsx",
                         fromlist=["load_master"]).load_master(
         os.path.join(os.path.dirname(__file__), "..", "examples",
@@ -358,18 +359,31 @@ def test_upright_splice_auto_and_check():
                      splice_rows=2, splice_cols=2, splice_p1=60.0,
                      splice_p2=40.0, splice_e1=30.0, splice_e2=20.0)
     model = build_rack(cfg)
-    assert len(model.splices) == 1
+    assert len(model.splices) == 1                      # geometry > 11500 mm
     assert model.splices[0].z == pytest.approx(6000.0)
-    # the splice elevation exists as a node line
     assert any(abs(n.z - 6000.0) < 1 for n in model.nodes.values())
     model.combinations = model.combinations[:1]
     model.imperfection.directions = ["+x"]
     cases = run_all(model)
-    checks = run_checks(model, cases)
-    sp = [c for c in checks if c.check == "SPLICE" and not c.informative]
+    # default: the splice connection check is removed (member-only)
+    assert not [c for c in run_checks(model, cases) if c.check == "SPLICE"]
+    # re-enabling restores the EN 1993-1-8 bolt-group check
+    model.checks.check_splice = True
+    sp = [c for c in run_checks(model, cases)
+          if c.check == "SPLICE" and not c.informative]
     assert sp
     assert all("Fv=" in c.detail and "Fb=" in c.detail for c in sp)
     assert all(0.0 < c.utilization < 50.0 for c in sp)
+
+
+def test_splice_not_added_below_11500():
+    """No splice (or splice check) for frames at/below 11.5 m."""
+    model = build_rack(RackConfig(n_bays=1, levels=[
+        __import__("rack15512.builder", fromlist=["LevelSpec"]).LevelSpec(
+            gap=1000.0) for _ in range(11)], frame_height=11000.0))
+    assert not model.splices
+    assert not [c for c in run_checks(model, run_all(model))
+                if c.check == "SPLICE"]
 
 
 def test_per_level_gap_section_and_load():

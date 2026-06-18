@@ -90,6 +90,7 @@ class CheckResult:
     utilization: float         # demand / capacity (<= 1 passes)
     detail: str = ""
     informative: bool = False  # reported but not part of the verdict
+    extra: Optional[dict] = None   # structured numbers (e.g. N, My, Mz, Lcr)
 
     @property
     def ok(self) -> bool:
@@ -283,7 +284,10 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
                   f"chi_min={chi_min:.3f} (gov {gov}){ft_txt}, "
                   f"Nb_Rd={Nb_rd/1e3:.1f} kN")
         res.append(CheckResult("BUCKLING", case.name, f"member {mid}",
-                               m.member_set, eta, detail))
+                               m.member_set, eta, detail,
+                               extra={"N": Nc, "My": mr.My_absmax,
+                                      "Mz": mr.Mz_absmax,
+                                      "Lcr_y": Lcr_y, "Lcr_z": Lcr_z}))
     return res
 
 
@@ -775,7 +779,12 @@ def _splice_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     """Upright splice connection per EN 1993-1-8: elastic bolt-group method
     for the concurrent N, V (resultant) and M (resultant) at the splice
     elevation; per-bolt resistance = min(shear, bearing) with bearing on
-    the lesser of the upright wall and the sleeve thickness."""
+    the lesser of the upright wall and the sleeve thickness.
+
+    Disabled by default (model.checks.check_splice = False): the upright at the
+    splice is still verified as a continuous member by STRESS / BUCKLING."""
+    if not model.checks.check_splice:
+        return []
     res: List[CheckResult] = []
     for sp in model.splices:
         if int(sp.bolt_d) not in BOLTS or sp.bolt_grade not in BOLT_GRADES:
@@ -1093,9 +1102,11 @@ def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
     """Aggregate the per-element BUCKLING checks into one row per upright
     member-set (the continuous storey segment between beam levels, RSTAB-style).
 
-    Each set's down-aisle buckling length Lcr,DA is the segment length; the
-    governing (worst-utilisation) element represents the set.  Returns rows
-    sorted worst-first: {set, Lcr_DA_mm, member, util, case, status}."""
+    Each set's down-aisle buckling length Lcr,DA is the segment length and
+    Lcr,CA is the cross-aisle (minor-axis) length; the governing (worst-
+    utilisation) element represents the set, with its N, My, Mz.  Returns rows
+    sorted worst-first: {set, Lcr_DA_mm, Lcr_CA_mm, N_kN, My_kNm, Mz_kNm,
+    member, util, case, status}."""
     best: dict = {}
     for c in checks:
         if c.check != "BUCKLING" or c.informative:
@@ -1109,12 +1120,19 @@ def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
             continue
         cur = best.get(lbl)
         if cur is None or c.utilization > cur["util"]:
+            x = c.extra or {}
+            lcr_da = x.get("Lcr_z") or (m.L_buckling_z or 0.0)
+            lcr_ca = x.get("Lcr_y") or (m.L_buckling_y or 0.0)
             best[lbl] = {"set": lbl,
-                         "Lcr_DA_mm": int(round(m.L_buckling_z or 0.0)),
+                         "Lcr_DA_mm": int(round(lcr_da)),
+                         "Lcr_CA_mm": int(round(lcr_ca)),
+                         "N_kN": round((x.get("N") or 0.0) / 1e3, 2),
+                         "My_kNm": round((x.get("My") or 0.0) / 1e6, 2),
+                         "Mz_kNm": round((x.get("Mz") or 0.0) / 1e6, 2),
                          "member": mid, "util": round(c.utilization, 3),
                          "case": c.case}
     rows = list(best.values())
     for r in rows:
-        r["status"] = "FAIL" if r["util"] > 1.0 + 1e-9 else "ok"
+        r["status"] = "FAIL" if r["util"] > 1.0 + 1e-9 else "PASS"
     rows.sort(key=lambda r: (-r["util"], r["set"]))
     return rows
