@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-18 · Upright stiffener as a PARTIAL-COMPOSITE built-up member: separate offset member tied to the upright at bolt rows by interface links (transverse stiff + vertical bolt-shear k); own N/My/Mz, realistic <50% shear-lag axial split, buckling drops with no moment spike (types 1/2)"
+BUILD = "2026-06-18 · Stiffener partial-composite built-up member: interface bolt-shear stiffness auto-derived (EN 1993-1-8 component method) governs the <50% split; type 1 (closing C) credited with closed-section torsion (Bredt It) for the flexural-torsional benefit"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

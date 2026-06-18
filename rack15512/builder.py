@@ -75,6 +75,41 @@ def standard_footplate(depth_h: Optional[float]):
     return None
 
 
+def _bolt_slip_stiffness(d: float, fub: float, fu: float,
+                         t_up: Optional[float], t_st: Optional[float],
+                         e1: Optional[float]) -> float:
+    """Per-bolt shear-connection (slip) stiffness [N/mm] for the upright<->
+    stiffener interface, EN 1993-1-8 component method (the E cancels): bolt
+    shear in series with bearing on each connected ply."""
+    d_m16 = 16.0
+    k_shear = 16.0 * d * d * fub / d_m16             # bolt shear
+
+    def k_bear(t: float) -> float:
+        kb = min(0.25 * e1 / d + 0.5, 1.25) if e1 else 1.0
+        kt = min(1.5 * t / d_m16, 2.5)
+        return 24.0 * kb * kt * d * fu
+
+    parts = [k_shear]
+    if t_up:
+        parts.append(k_bear(t_up))
+    if t_st:
+        parts.append(k_bear(t_st))
+    return 1.0 / sum(1.0 / p for p in parts if p > 0)
+
+
+def _closed_upright_section(name, up):
+    """Type-1 stiffener closes the upright's open face -> a closed cell.  Credit
+    the much larger St-Venant torsion (Bredt: It = 4*Am^2 / (perimeter/t)) so the
+    flexural-torsional buckling resistance reflects the closed section."""
+    from dataclasses import replace
+    h = up.depth_h or 100.0
+    b = up.width_b or 100.0
+    t = up.t or 2.0
+    it_closed = 4.0 * (h * b) ** 2 / (2.0 * (h + b) / t)
+    it = max(it_closed, up.It_gross or up.J or 1.0)
+    return replace(up, name=name, It_gross=it, J=max(it, up.J))
+
+
 @dataclass
 class LevelSpec:
     """One beam level: its own beam gap, beam section and pallet load.
@@ -192,7 +227,12 @@ class RackConfig:
     reinforce_height: float = 0.0      # [mm]; reinforce segments with top <= this
     stiffener_offset: float = 30.0     # [mm]; upright<->stiffener centroid gap
     stiffener_type: int = 1            # 1 = closing/inside, 2 = outer face
-    stiffener_shear_k: float = 50000.0  # [N/mm] per bolt-row interface (vertical)
+    # interface (bolt) shear stiffness: auto-derived from the bolt by the
+    # EN 1993-1-8 component method when None; a number overrides it [N/mm]
+    stiffener_shear_k: Optional[float] = None
+    stiffener_bolt_d: float = 12.0     # interface bolt diameter [mm]
+    stiffener_bolt_grade: str = "8.8"
+    stiffener_bolts_per_row: int = 1   # bolts per bolt row (per link)
     steel_fy: float = 355.0            # MPa (sections without their own fy)
     # when True, use steel_fy for EVERY section (ignore the master's per-section
     # fy) - lets the material yield be set from the input for any master
@@ -852,13 +892,37 @@ def build_rack(cfg: RackConfig) -> RackModel:
         rh = min(cfg.reinforce_height, H)
         SNID = 8_000_000
         K_TRANS = 1.0e8                       # stiff transverse tie [N/mm]
-        kz = max(cfg.stiffener_shear_k, 1.0)  # bolt shear stiffness [N/mm]
+        st_sec = m.sections[stiff_name]
+        # interface bolt shear stiffness: explicit override or auto-derived from
+        # the bolt (EN 1993-1-8 component method)
+        if cfg.stiffener_shear_k is not None:
+            kz = max(cfg.stiffener_shear_k, 1.0)
+        else:
+            fub = 100.0 * int(str(cfg.stiffener_bolt_grade).split(".")[0])
+            fu_up = up.fu or 1.25 * cfg.steel_fy
+            kz = max(int(cfg.stiffener_bolts_per_row), 1) * _bolt_slip_stiffness(
+                cfg.stiffener_bolt_d, fub, fu_up, up.t or 2.0,
+                st_sec.t or 2.0, up.e1 or 1.5 * cfg.stiffener_bolt_d)
+        # type 1 closes the open face -> a closed-section torsion credit on the
+        # reinforced upright segments (improves flexural-torsional buckling)
+        up_zone_section = up.name
+        if cfg.stiffener_type == 1:
+            closed = _closed_upright_section(f"{up.name}~closed", up)
+            m.sections[closed.name] = closed
+            up_zone_section = closed.name
         partner: Dict[int, int] = {}
         for _sa, _sb, _o in rack_pairs:
             partner[_sa] = _sb
             partner[_sb] = _sa
         zone_js = [j for j, z in enumerate(zs) if z <= rh + _TOL]
         for (i, s), ids in upright_members.items():
+            # closed-section torsion credit (type 1) on the reinforced segments
+            if up_zone_section != up.name:
+                for u in ids:
+                    um0 = m.members[u]
+                    if max(m.nodes[um0.node_i].z,
+                           m.nodes[um0.node_j].z) <= rh + _TOL:
+                        um0.section = up_zone_section
             ps = partner.get(s, s)
             interior = 1.0 if y_of_side[ps] >= y_of_side[s] else -1.0
             dy = (interior if cfg.stiffener_type == 1 else -interior) \

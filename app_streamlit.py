@@ -253,7 +253,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             b2b_gap = gn("b2b_gap", 250.0, 50.0, 600.0)
             spacer_section = None          # drive-in has no row spacers
             stiffener_section, reinforce_height, stiffener_offset = None, 0.0, 30.0
-            stiffener_type, stiffener_shear_k = 1, 50000.0
+            stiffener_type, stiffener_shear_k = 1, None
+            stiffener_bolt_d, stiffener_bolt_grade = 12.0, "8.8"
         else:
             module = c[3].radio(
                 "Module", ["single", "back-to-back"],
@@ -303,7 +304,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Reinforce height [mm] (stiffener up to this elevation)",
             0.0, 30000.0, float(g("reinforce_height", 0.0)), 50.0,
             disabled=(stiff_sel == "(none)"))
-        _sc = st.columns(3)
+        _sc = st.columns(4)
         stiffener_offset = _sc[0].number_input(
             "Stiffener offset [mm]", 0.0, 200.0,
             float(g("stiffener_offset", 30.0)), 5.0,
@@ -314,13 +315,24 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Stiffener type", [1, 2],
             index=0 if int(g("stiffener_type", 1)) == 1 else 1,
             disabled=(stiff_sel == "(none)"),
-            help="1 = C closing the open face (inside); 2 = C on the outer face.")
-        stiffener_shear_k = _sc[2].number_input(
-            "Bolt shear stiffness [N/mm]", 1000.0, 1.0e7,
-            float(g("stiffener_shear_k", 50000.0)), 5000.0,
+            help="1 = C closing the open face (inside, closed-section torsion "
+                 "credit); 2 = C on the outer face.")
+        _bolts = ["M8", "M10", "M12", "M16", "M20"]
+        _bd = _sc[2].selectbox(
+            "Interface bolt", _bolts,
+            index=_idx(_bolts, f"M{int(g('stiffener_bolt_d', 12.0))}"),
             disabled=(stiff_sel == "(none)"),
-            help="Per bolt-row interface stiffness. Higher = more composite "
-                 "(more axial into the stiffener); governs the (non-50%) split.")
+            help="Bolt connecting the stiffener to the upright; the interface "
+                 "shear stiffness is auto-derived (EN 1993-1-8 component method) "
+                 "and governs the (non-50%) axial split.")
+        _grades = ["4.6", "4.8", "5.6", "8.8", "10.9"]
+        _bg = _sc[3].selectbox(
+            "Bolt grade", _grades,
+            index=_idx(_grades, str(g("stiffener_bolt_grade", "8.8"))),
+            disabled=(stiff_sel == "(none)"))
+        stiffener_bolt_d = float(_bd[1:])
+        stiffener_bolt_grade = _bg
+        stiffener_shear_k = None       # auto-derive from the bolt
         stiffener_section = None if stiff_sel == "(none)" else stiff_sel
 
     if is_di:
@@ -979,7 +991,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         reinforce_height=float(reinforce_height),
         stiffener_offset=float(stiffener_offset),
         stiffener_type=int(stiffener_type),
-        stiffener_shear_k=float(stiffener_shear_k),
+        stiffener_shear_k=(None if stiffener_shear_k is None
+                           else float(stiffener_shear_k)),
+        stiffener_bolt_d=float(stiffener_bolt_d),
+        stiffener_bolt_grade=str(stiffener_bolt_grade),
         base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),
