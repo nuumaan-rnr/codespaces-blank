@@ -268,11 +268,6 @@ class RackConfig:
     # Off = use the (lower) modal-period base shear directly (departs from the
     # strict clause; sometimes used for flexible long-period racks).
     seismic_scale_base_shear: bool = True
-    # EN 16681 / FEM 10.2.08 spectrum-modification factor E_D2 (<= 1.0): the
-    # extra damping / energy dissipation of the loaded rack reduces the design
-    # spectral acceleration.  1.0 = no reduction; ~0.8 typical.  Driven by the
-    # loaded-rack damping via eta = sqrt(10/(5+xi%)).
-    seismic_ed2: float = 1.0
 
     # ---- multi-deep (drive-in / drive-through / radio-shuttle) --------------
     # system_type "selective" keeps the SPR builder; anything else dispatches to
@@ -935,8 +930,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             drift_limit_ratio=cfg.seismic_drift_limit,
             theta_max=cfg.seismic_theta_max,
             apply_base_shear_scaling=cfg.seismic_scale_base_shear,
-            pallet_sliding=cfg.pallet_sliding, pallet_mu=cfg.pallet_mu,
-            ed2=cfg.seismic_ed2)
+            pallet_sliding=cfg.pallet_sliding, pallet_mu=cfg.pallet_mu)
 
     # the solver needs J > 0 on every section; an imported section may carry
     # J = 0 (sheet blank / rounded to zero) - fall back to the open thin-wall

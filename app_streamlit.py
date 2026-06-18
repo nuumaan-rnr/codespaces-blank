@@ -823,20 +823,6 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             gn("pallet_mu", 0.37, 0.05, 1.0), 0.01,
             help="Design pallet-to-beam friction coefficient (wood-on-steel "
                  "≈0.37; verify per EN 16681 Annex B).")
-        from rack15512.seismic import damping_correction
-        s_ed2 = st.number_input(
-            "E_D2 spectrum-modification factor (EN 16681 / FEM 10.2.08)",
-            0.55, 1.0, gn("seismic_ed2", 1.0, 0.55, 1.0), 0.01,
-            help="Reduces the design spectral acceleration for the extra "
-                 "damping / energy dissipation of the LOADED rack. 1.0 = no "
-                 "reduction. Governed by the loaded-rack damping ξ via "
-                 "η = √(10/(5+ξ%)); set it to that η for your product/unit-load "
-                 "and connection type.")
-        st.caption(f"Damping-based suggestion: at ξ = {s_damp*100:.0f}%, "
-                   f"η = E_D2 ≈ {damping_correction(s_damp):.2f} "
-                   f"(8% → {damping_correction(0.08):.2f}, "
-                   f"10% → {damping_correction(0.10):.2f}). Lower ξ-driven E_D2 "
-                   "= more reduction; floored at 0.55.")
         s_struct = st.selectbox(
             "Structure type (lateral system → R)", list(STRUCTURE_TYPES),
             index=_idx(list(STRUCTURE_TYPES),
@@ -941,7 +927,6 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_structure_type=s_struct,
         seismic_damping=s_damp, seismic_imposed_factor=s_kappa,
-        seismic_ed2=s_ed2,
         seismic_n_modes=int(s_modes),
         spine_bracing=sp_on,
         spine_bracing_section=None if sp_sec == "(frame brace)" else sp_sec,

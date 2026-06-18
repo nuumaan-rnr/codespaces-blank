@@ -395,12 +395,6 @@ class SeismicSettings:
     pallet_sliding: bool = False
     pallet_mu: float = 0.37                  # wood-on-steel typical (verify)
     c_mu_h: float = 1.5                      # EN 16681 amplification on friction
-    # EN 16681 / FEM 10.2.08 design-spectrum modification factor E_D2 (<= 1.0):
-    # the extra energy dissipation / damping of the loaded rack (the moving unit
-    # loads) reduces the design spectral acceleration.  Driven by the damping
-    # ratio via the EN 1998-1 correction eta = sqrt(10/(5+xi%)) >= 0.55; 1.0 = no
-    # reduction (conservative).  Multiplies Ah.
-    ed2: float = 1.0
     # IS 800 LSD seismic combination rows: (label, f_dead, f_imposed, f_seismic)
     combos: Tuple[Tuple[str, float, float, float], ...] = (
         ("1.2(DL+IL+EL)", 1.2, 1.2, 1.2),

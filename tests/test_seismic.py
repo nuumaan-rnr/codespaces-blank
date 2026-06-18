@@ -142,25 +142,5 @@ def test_steel_weight_and_selected_bays():
     assert steel_weight(m) > 0
 
 
-def test_ed2_spectrum_modification_reduces_forces():
-    # EN 16681 / FEM E_D2 multiplies the design spectral acceleration; <1.0
-    # reduces base shear proportionally, 1.0 = no change
-    from rack15512.analysis import run_all
-
-    def vb(ed2):
-        m = build_rack(RackConfig(n_bays=2, beam_levels=[1500.0, 3000.0],
-                                  depth=1000.0))
-        m.seismic = SeismicSettings(enabled=True, zone="IV", soil_type="II",
-                                    response_reduction=4.0, ed2=ed2)
-        m.combinations = []
-        run_all(m)
-        return m.seismic_summary["base_shear_x_kN"]
-    full, red = vb(1.0), vb(0.8)
-    assert red < full
-    assert abs(red - 0.8 * full) < 0.05 * full          # ~proportional
-    # the damping correction eta is floored at 0.55
-    assert seismic.damping_correction(0.50) == pytest.approx(0.55)
-
-
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
