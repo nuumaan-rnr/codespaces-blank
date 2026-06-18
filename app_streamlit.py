@@ -235,9 +235,14 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         up_sec = c[1].selectbox(
             "Upright", up_names, key="cfg_upright",
             index=_idx(up_names, g("upright_section", "UP0010")))
+        # default bracing: the saved value when editing, else the last-used
+        # bracing (remembered across new configs in this session), else fallback
+        _brace_default = (g("brace_section", None)
+                          or st.session_state.get("_last_brace")
+                          or "C 36X21X1.2")
         br_sec = c[2].selectbox(
-            "Bracing", br_names,
-            index=_idx(br_names, g("brace_section", "C 36X21X1.2")))
+            "Bracing", br_names, index=_idx(br_names, _brace_default))
+        st.session_state["_last_brace"] = br_sec     # remember for next new cfg
         if is_di:
             # drive-in plan geometry (lanes / depth) is set in the Multi-deep
             # section below; these selective-rack fields are not used.
