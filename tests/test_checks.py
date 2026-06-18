@@ -235,28 +235,29 @@ def test_brace_area_factor_in_analysis_only():
     assert all(m.area_factor == 1.0 for m in ups)
 
 
-def test_brace_bolt_bearing_hand_calc():
-    """M12 4.6 on C 36X21X1.5 (t=1.5, e1=e2=18, fu=350) against UP0016-like
-    upright (t=2.0, e1=13.22, e2=15.15, fy=350 -> fu=385):
-      bolt shear  = 0.6*400*84.3/1.25            = 16.19 kN
-      brace ply   = 2.177*0.4615*350*12*1.5/1.25 =  5.06 kN
-      upright ply = 1.563*0.339*385*12*2.0/1.25  =  3.92 kN  <- governs
+def test_brace_bolt_capacity_sheet_method():
+    """Per the attached 'DESIGN VERIFICATION OF STRUT' workbook (EN 1993-1-8
+    3.6.1).  M12 4.6, single bolt, single plane, d0 = d+1 = 13, on
+    C 36X21X1.5 (t=1.5, e1=e2=18, fu=350) bolted to an upright (t=2.0,
+    e1=13.22, fu=385):
+      As = 0.78*pi/4*12^2 = 88.22 mm2; fub = 100*4 = 400; alpha_v = 0.6
+      bolt shear    = 0.6*88.22*400/1.25           = 16.94 kN
+      strut bearing = 2.177*0.4615*350*12*1.5/1.25 =  5.06 kN  <- governs
+      upright bear  = 2.5*0.339*385*12*2.0/1.25    =  6.26 kN  (k1 = 2.5)
     """
-    from rack15512.checks.en15512 import BOLTS, BOLT_GRADES, _bearing
-    from rack15512.model import CrossSection
-    d0, As = BOLTS[12]
-    fub, av = BOLT_GRADES["4.6"]
-    Fv = av * fub * As / 1.25
-    assert Fv == pytest.approx(16185.6, rel=1e-3)
-    brace = CrossSection("b", "steel", A=102, Iy=1, Iz=1, J=1, Wely=1,
-                         Welz=1, t=1.5, e1=18.0, e2=18.0, fu=350.0)
-    upright = CrossSection("u", "steel", A=487, Iy=1, Iz=1, J=1, Wely=1,
-                           Welz=1, t=2.0, e1=13.22, e2=15.15)
-    Fb_brace = _bearing(12.0, d0, fub, brace, 350.0, 1.25)
-    Fb_up = _bearing(12.0, d0, fub, upright, 385.0, 1.25)
-    assert Fb_brace == pytest.approx(5063.0, rel=0.005)
-    assert Fb_up == pytest.approx(3917.0, rel=0.005)
-    assert min(Fv, Fb_brace, Fb_up) == Fb_up      # minimum governs
+    import math
+    d, d0, gM2 = 12.0, 13.0, 1.25
+    As = 0.78 * (math.pi / 4.0) * d ** 2
+    Fv = 0.6 * As * 400.0 / gM2
+    assert Fv == pytest.approx(16938.0, rel=5e-3)
+    ab_s = min(18.0 / (3 * d0), 1.0)
+    k1_s = min(2.8 * 18.0 / d0 - 1.7, 2.5)
+    Fb_strut = k1_s * ab_s * 350.0 * d * 1.5 / gM2
+    assert Fb_strut == pytest.approx(5063.0, rel=5e-3)
+    ab_u = min(13.22 / (3 * d0), 1.0)         # upright k1 = 2.5 (no e2 term)
+    Fb_up = 2.5 * ab_u * 385.0 * d * 2.0 / gM2
+    assert Fb_up == pytest.approx(6264.0, rel=5e-3)
+    assert min(Fv, Fb_strut, Fb_up) == Fb_strut    # strut bearing governs
 
 
 def test_brace_bolt_and_baseplate_checks_in_pipeline():

@@ -13,14 +13,21 @@ partial factors and limits are configurable in CheckSettings):
                                          + kM*|Mz|/(Wz_eff*fy/gM1) <= 1
   CONNECTOR  hinge end moments vs the connector resistances M_Rd,z / M_Rd,y
              from tests.
-  BRACE_BOLT bracing end connection (EN 1993-1-8): brace axial force vs
-             n_bolts x min( bolt shear Fv,Rd,
-                            bearing on the brace ply,
-                            bearing on the upright ply ),
-             bearing Fb,Rd = k1 * alpha_b * fu * d * t / gamma_M2 with
-             alpha_b = min(e1/(3*d0), fub/fu, 1) and
-             k1 = min(2.8*e2/d0 - 1.7, 2.5), using e1/e2/t/fu of each ply
-             from the section master.  Enabled by CheckSettings.bolt_d.
+  BRACE_BUCKLING bracing-strut member capacity per the attached "DESIGN
+             VERIFICATION OF STRUT" workbook: compression by flexural-
+             torsional buckling (EN 15512 9.7.4.1 / 9.7.5.2) on the gross
+             section with Ly = Lz = strut length, and tension by the net
+             section (EN 1993-1-1 6.2.3): Nt,Rd = 0.9*Anet*fu/gM1,
+             Anet = A - t*d0.
+  BRACE_BOLT bracing end connection per the same workbook (EN 1993-1-8
+             3.6.1): brace axial force vs n_bolts x min( bolt shear,
+             bearing on the strut plies, bearing on the upright ), with
+             bolt shear Fv = n*planes*alpha_v*As*fub/gM2 (As = 0.78*pi/4*d^2,
+             alpha_v = 0.6, fub = 100*grade-lead) and bearing
+             Fb = k1*alpha_b*fu*d*t/gM2 with alpha_b = min(e1/(3*d0), 1),
+             k1 = min(2.8*e2/d0 - 1.7, 2.5) (strut) or 2.5 (upright),
+             d0 = d + 1.  e1/e2/t/fu from the section master.  Enabled by
+             CheckSettings.bolt_d.
   BASEPLATE  footplate per EN 1993-1-8 6.2.5 (T-stub in compression): the
              plate bears on strips of width c = t*sqrt(fy/(3*f_jd*gM0))
              around the upright walls, A_eff = L_p*(t_wall + 2c) with
@@ -351,43 +358,85 @@ def _chi_ft(sec: CrossSection, mat, length: float, Ncr_y: float,
     return buckling.chi(lam, sec.buckling_curve_y)
 
 
+# bracing member sets verified by the strut workbook (compression + tension)
+_BRACE_SETS = ("bracing", "row spacers", "plan bracing", "spine bracing",
+               "frame spacer")
+
+
 def _brace_buckling_checks(model: RackModel,
                            case: CaseResult) -> List[CheckResult]:
-    """Compression buckling of the frame-bracing members (EN 15512 10.4):
-    flexural about both axes plus flexural-torsional, buckling curve from
-    the bracing master (typically 'c'), system length = member length.
-    Uses the FULL brace area (the 0.15 analysis factor models connection
-    flexibility only, not a strength reduction)."""
+    """Bracing-strut axial capacity per the attached "DESIGN VERIFICATION OF
+    STRUT" workbook.  Compression: flexural-torsional buckling design
+    resistance Nb,Rd,FT (EN 15512 9.7.4.1 / 9.7.5.2) on the GROSS section
+    with Ly = Lz = the strut (member) length.  Tension: net-section
+    resistance Nt,Rd = 0.9*Anet*fu/gM1 (EN 1993-1-1 6.2.3), Anet = A - t*d0.
+    The 0.15 analysis area-factor models connection flexibility only."""
     res = []
     g = model.checks.gamma_M1
+    bolt_d = model.checks.bolt_d
     for mid, mr in case.members.items():
         m = model.members[mid]
-        if m.member_set not in ("bracing", "row spacers", "plan bracing",
-                                "spine bracing", "frame spacer"):
+        if m.member_set not in _BRACE_SETS:
             continue
-        if mr.N_min >= 0.0:
+        if mr.N_min >= 0.0 and mr.N_max <= 0.0:
             continue
         sec = model.section_of(m)
         mat = model.material_of(m)
+        A, fy, E = sec.A, mat.fy, mat.E
+        G = getattr(mat, "G", None) or E / 2.6
         L = mr.length
-        Ncr_y = buckling.n_cr(mat.E, sec.Iy, L)
-        Ncr_z = buckling.n_cr(mat.E, sec.Iz, L)
-        chi_y = buckling.chi(buckling.lambda_bar(sec.A, mat.fy, Ncr_y),
-                             sec.buckling_curve_y)
-        chi_z = buckling.chi(buckling.lambda_bar(sec.A, mat.fy, Ncr_z),
-                             sec.buckling_curve_z)
-        chi_min, gov = (chi_y, "y") if chi_y <= chi_z else (chi_z, "z")
-        chi_ft = _chi_ft(sec, mat, L, Ncr_y, beta_T=1.0)   # brace: betaT=1
-        if chi_ft is not None and chi_ft < chi_min:
-            chi_min, gov = chi_ft, "FT"
-        Nb_rd = chi_min * sec.A * mat.fy / g
-        Nc = abs(mr.N_min)
-        res.append(CheckResult(
-            "BRACE_BUCKLING", case.name, f"member {mid}", m.member_set,
-            Nc / Nb_rd,
-            f"Nc={Nc/1e3:.2f} kN, L={L:.0f} mm, chi_min={chi_min:.3f} "
-            f"(gov {gov}, curve {sec.buckling_curve_z}), "
-            f"Nb_Rd={Nb_rd/1e3:.2f} kN"))
+        Iy = sec.Iy_gross if sec.Iy_gross is not None else sec.Iy
+        Iz = sec.Iz_gross if sec.Iz_gross is not None else sec.Iz
+        ry, rz = math.sqrt(Iy / A), math.sqrt(Iz / A)
+
+        def _nb_rd(r: float, curve: str) -> float:
+            # EN 15512 9.7.4.1: fcd = (fy/gM1)/(phi+sqrt(phi^2-lam^2)), N=fcd*A
+            lam = math.sqrt(fy * (L / r) ** 2 / (math.pi ** 2 * E))
+            a = buckling.ALPHA.get(curve, 0.34)
+            phi = 0.5 * (1.0 + a * (lam - 0.2) + lam ** 2)
+            fcd = (fy / g) / (phi + math.sqrt(max(phi ** 2 - lam ** 2, 1e-12)))
+            return fcd * A
+
+        nb_y = _nb_rd(ry, sec.buckling_curve_y)
+        nb_z = _nb_rd(rz, sec.buckling_curve_z)
+        It = sec.It_gross if sec.It_gross is not None else sec.J
+        Iw = sec.Iw_gross if sec.Iw_gross is not None else 0.0
+        y0 = sec.y0
+        if y0 is not None and It and Iw:
+            # flexural-torsional interaction on the design resistances
+            r0_sq = ry ** 2 + rz ** 2 + y0 ** 2
+            ncr_t = (G * It + math.pi ** 2 * E * Iw / L ** 2) / r0_sq
+            beta = 1.0 - y0 ** 2 / r0_sq
+            if beta > 1e-9:
+                rr = ncr_t / nb_y
+                disc = (1.0 - rr) ** 2 + 4.0 * (y0 ** 2 / r0_sq) * rr
+                nb_c = nb_y / (2.0 * beta) * (1.0 + rr
+                                              - math.sqrt(max(disc, 0.0)))
+            else:
+                nb_c = min(nb_y, ncr_t)
+            gov = "Nb,Rd,FT"
+        else:
+            nb_c = min(nb_y, nb_z)
+            gov = "min(Nb,Rdy,Nb,Rdz) [no FT data]"
+
+        util, detail = 0.0, ""
+        if mr.N_min < 0.0 and nb_c > 0.0:
+            util = abs(mr.N_min) / nb_c
+            detail = (f"Nc={abs(mr.N_min)/1e3:.2f} kN / Nb,Rd={nb_c/1e3:.2f} kN "
+                      f"({gov}; Nb,Rdy={nb_y/1e3:.1f}, Nb,Rdz={nb_z/1e3:.1f} kN, "
+                      f"L={L:.0f} mm)")
+        if mr.N_max > 0.0:
+            fu = _fu_of(model, sec)
+            d0 = float(bolt_d) + 1.0 if bolt_d else 0.0
+            anet = A - (sec.t * d0 if sec.t and d0 else 0.0)
+            nt_rd = 0.9 * anet * fu / g
+            ut = mr.N_max / nt_rd if nt_rd > 0 else 99.0
+            if ut >= util:
+                util, detail = ut, (
+                    f"Nt={mr.N_max/1e3:.2f} kN / Nt,Rd={nt_rd/1e3:.2f} kN "
+                    f"(net section, Anet={anet:.0f} mm2, fu={fu:.0f} MPa)")
+        res.append(CheckResult("BRACE_BUCKLING", case.name, f"member {mid}",
+                               m.member_set, util, detail))
     return res
 
 
@@ -451,25 +500,36 @@ def _fu_of(model: RackModel, sec: CrossSection) -> float:
     return model.checks.fu_over_fy * model.materials[sec.material].fy
 
 
-def _bearing(d: float, d0: float, fub: float, sec: CrossSection,
-             fu: float, gamma_M2: float) -> float:
-    """EN 1993-1-8 Table 3.4 bearing resistance of one ply [N]."""
-    alpha_b = min(sec.e1 / (3.0 * d0), fub / fu, 1.0)
-    k1 = min(2.8 * sec.e2 / d0 - 1.7, 2.5)
-    return k1 * alpha_b * fu * d * sec.t / gamma_M2
-
-
 def _brace_bolt_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
+    """Bracing bolt connection per the attached "DESIGN VERIFICATION OF STRUT"
+    workbook (EN 1993-1-8 3.6.1).  Bolt shear uses As = 0.78*(pi/4)*d^2,
+    alpha_v = 0.6, fub = 100*grade-lead, d0 = d + 1; bearing uses
+    alpha_b = min(e1/(3*d0), 1) and k1 = min(2.8*e2/d0 - 1.7, 2.5) on the
+    strut and k1 = 2.5 on the upright, each Fb = k1*alpha_b*fu*d*t/gM2.
+    Resistance = min( shear, bearing strut x strut-plies, bearing upright )."""
     st = model.checks
     if st.bolt_d is None:
         return []
     d = float(st.bolt_d)
-    if int(d) not in BOLTS or st.bolt_grade not in BOLT_GRADES:
+    try:
+        grade_lead = int(str(st.bolt_grade).split(".")[0])
+    except (ValueError, AttributeError, IndexError):
         return [CheckResult("BRACE_BOLT", case.name, "settings", "-", 99.0,
-                            f"unknown bolt M{d:.0f} grade {st.bolt_grade}")]
-    d0, As = BOLTS[int(d)]
-    fub, alpha_v = BOLT_GRADES[st.bolt_grade]
-    Fv = alpha_v * fub * As / st.gamma_M2
+                            f"unknown bolt grade {st.bolt_grade}")]
+    d0 = d + 1.0
+    As = 0.78 * (math.pi / 4.0) * d ** 2
+    fub = 100.0 * grade_lead
+    alpha_v = 0.6
+    gM2 = st.gamma_M2
+    n_bolts = max(int(st.bolts_per_connection or 1), 1)
+    planes = max(int(getattr(st, "brace_planes", 1) or 1), 1)
+    Fv = n_bolts * planes * alpha_v * As * fub / gM2
+
+    def _bearing(sec: CrossSection, plies: int, use_e2: bool) -> float:
+        fu = _fu_of(model, sec)
+        alpha_b = min(sec.e1 / (3.0 * d0), 1.0)
+        k1 = min(2.8 * sec.e2 / d0 - 1.7, 2.5) if (use_e2 and sec.e2) else 2.5
+        return n_bolts * plies * k1 * alpha_b * fu * d * sec.t / gM2
 
     # node -> upright section, for the bearing on the connected upright
     upright_at: Dict[int, CrossSection] = {}
@@ -483,31 +543,23 @@ def _brace_bolt_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     missing = set()
     for mid, mr in case.members.items():
         m = model.members[mid]
-        if m.member_set not in ("bracing", "row spacers", "plan bracing",
-                                "spine bracing", "frame spacer"):
+        if m.member_set not in _BRACE_SETS:
             continue
         brace = model.section_of(m)
-        upright = upright_at.get(m.node_i) or upright_at.get(m.node_j)
-        plies = [("brace", brace)] + ([("upright", upright)] if upright else [])
-        if any(s.e1 is None or s.e2 is None or s.t is None for _, s in plies):
-            missing.add(brace.name if brace.e1 is None or brace.t is None
-                        else (upright.name if upright else "?"))
+        if brace.e1 is None or brace.e2 is None or brace.t is None:
+            missing.add(brace.name)
             continue
-        planes = max(int(getattr(st, "brace_planes", 1) or 1), 1)
-        # n shear planes -> bolt shear x n; n brace plies -> brace bearing x n;
-        # the upright (single wall) bearing is unchanged
-        parts = {"bolt shear": st.bolts_per_connection * planes * Fv}
-        for label, sec in plies:
-            fu = _fu_of(model, sec)
-            factor = planes if label == "brace" else 1
-            parts[f"bearing {label}"] = st.bolts_per_connection * factor \
-                * _bearing(d, d0, fub, sec, fu, st.gamma_M2)
+        parts = {"bolt shear": Fv,
+                 "bearing strut": _bearing(brace, planes, True)}
+        upright = upright_at.get(m.node_i) or upright_at.get(m.node_j)
+        if upright and upright.e1 is not None and upright.t is not None:
+            parts["bearing upright"] = _bearing(upright, 1, False)
         gov_label, R = min(parts.items(), key=lambda kv: kv[1])
         N = max(abs(mr.N_min), abs(mr.N_max))
         res.append(CheckResult(
             "BRACE_BOLT", case.name, f"member {mid}", m.member_set, N / R,
-            f"N={N/1e3:.2f} kN vs {st.bolts_per_connection}x M{d:.0f} "
-            f"{st.bolt_grade}: " +
+            f"N={N/1e3:.2f} kN vs {n_bolts}x M{d:.0f} {st.bolt_grade} "
+            f"({planes} plane/s): " +
             ", ".join(f"{k}={v/1e3:.2f}" for k, v in parts.items()) +
             f" kN -> R={R/1e3:.2f} kN ({gov_label} governs)"))
     for name in sorted(missing):

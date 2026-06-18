@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-18 · Upright continuous member-sets (RSTAB-style storey segments) with per-set down-aisle buckling reporting (Lcr,DA); IS 1893:2016 spectrum at the basic 5% damping; EN E_D1 pallet-sliding cap retained"
+BUILD = "2026-06-18 · Bracing & bracing-bolt checks per the attached strut workbook (FT buckling Nb,Rd,FT + net-section tension; bolt shear/bearing with d0=d+1, As=0.78·πd²/4, αv=0.6); upright continuous member-sets with per-set Lcr,DA buckling"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
