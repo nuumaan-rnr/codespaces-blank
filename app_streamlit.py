@@ -1730,6 +1730,22 @@ def render_view_config():
                     case_rows = _case_governing_rows(model, checks)
                     if case_rows:
                         st.dataframe(case_rows, width="stretch", hide_index=True)
+                    from rack15512.checks.en15512 import (
+                        upright_set_buckling_rows)
+                    uset_rows = upright_set_buckling_rows(model, checks)
+                    if uset_rows:
+                        st.markdown(
+                            "**Upright buckling by member-set** — each "
+                            "continuous upright as storey segments (base→L1, "
+                            "L1→L2, …); the set length is Lcr in the down-aisle "
+                            "direction; the governing element represents the set")
+                        st.dataframe(
+                            [{"set": r["set"], "Lcr,DA (mm)": r["Lcr_DA_mm"],
+                              "gov elem": f"member {r['member']}",
+                              "util": r["util"], "case": r["case"],
+                              "status": r["status"]}
+                             for r in uset_rows],
+                            width="stretch", hide_index=True)
                     sway = sorted(
                         ({"case": c.case, "axis": c.target,
                           "util": round(c.utilization, 3), "detail": c.detail}

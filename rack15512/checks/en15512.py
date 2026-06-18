@@ -1035,3 +1035,34 @@ def governing(checks: List[CheckResult]) -> Optional[CheckResult]:
 
 def all_ok(checks: List[CheckResult]) -> bool:
     return all(c.ok for c in checks)
+
+
+def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
+    """Aggregate the per-element BUCKLING checks into one row per upright
+    member-set (the continuous storey segment between beam levels, RSTAB-style).
+
+    Each set's down-aisle buckling length Lcr,DA is the segment length; the
+    governing (worst-utilisation) element represents the set.  Returns rows
+    sorted worst-first: {set, Lcr_DA_mm, member, util, case, status}."""
+    best: dict = {}
+    for c in checks:
+        if c.check != "BUCKLING" or c.informative:
+            continue
+        if not c.target.startswith("member"):
+            continue
+        mid = int(c.target.split()[1])
+        m = model.members.get(mid)
+        lbl = getattr(m, "set_label", None) if m else None
+        if not lbl:
+            continue
+        cur = best.get(lbl)
+        if cur is None or c.utilization > cur["util"]:
+            best[lbl] = {"set": lbl,
+                         "Lcr_DA_mm": int(round(m.L_buckling_z or 0.0)),
+                         "member": mid, "util": round(c.utilization, 3),
+                         "case": c.case}
+    rows = list(best.values())
+    for r in rows:
+        r["status"] = "FAIL" if r["util"] > 1.0 + 1e-9 else "ok"
+    rows.sort(key=lambda r: (-r["util"], r["set"]))
+    return rows

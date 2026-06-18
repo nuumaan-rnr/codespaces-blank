@@ -235,12 +235,17 @@ def build_drive_in(cfg) -> RackModel:
     lcr_da = H
     for k in range(nL + 1):
         ms = "end columns" if k in end_k else "uprights"
+        col = chr(65 + k) if k < 26 else f"C{k + 1}"
         for di in range(nDpos):
+            # one continuous member-set per upright column: down-aisle is
+            # unbraced, so Lcr,DA = full height (base->top) is the whole set.
+            slabel = f"Upright {col}{di + 1} · base→top"
             for a, b in zip(zz, zz[1:]):
                 m.add_member(mid, node_of[(k, di, rz(a))],
                              node_of[(k, di, rz(b))], up.name,
                              member_set=ms, mesh=cfg.mesh_upright,
-                             L_buckling_y=lcr_ca, L_buckling_z=lcr_da)
+                             L_buckling_y=lcr_ca, L_buckling_z=lcr_da,
+                             set_label=slabel)
                 mid += 1
 
     # ---- frame bracing — same as the SPR frame (bottom + top horizontal

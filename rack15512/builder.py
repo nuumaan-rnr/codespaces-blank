@@ -710,6 +710,22 @@ def build_rack(cfg: RackConfig) -> RackModel:
                 return lo, hi
         return bands[-2], bands[-1]
 
+    # RSTAB-style member-set names: one continuous set per upright line per
+    # storey segment (base->L1, L1->L2, ..., topbeam->top); the set length is
+    # the down-aisle buckling length Lcr,DA assigned just below.
+    def _seg_name(lo: float, hi: float) -> str:
+        bi = bands.index(lo)
+        lo_name = "base" if bi == 0 else f"L{bi}"
+        if abs(hi - H) < _TOL and (not beam_levels or hi - beam_levels[-1] > _TOL):
+            hi_name = "top"
+        else:
+            hi_name = f"L{bi + 1}"
+        return f"{lo_name}→{hi_name}"
+
+    def _line_label(i: int, s: int) -> str:
+        col = chr(65 + i) if i < 26 else f"C{i + 1}"
+        return f"{col}{s + 1}"
+
     # minor axis (local y, cross-aisle): taken FROM THE MODEL per level
     # band - the largest gap between bracing connection points on that
     # upright among the gaps that overlap the band (so e.g. X bracing up
@@ -723,6 +739,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
             z_mid = (m.nodes[mem.node_i].z + m.nodes[mem.node_j].z) / 2.0
             lo, hi = band_of(z_mid)
             mem.L_buckling_z = hi - lo
+            mem.set_label = f"Upright {_line_label(i, s)} · {_seg_name(lo, hi)}"
             overlapping = [b - a for a, b in gaps
                            if b > lo + _TOL and a < hi - _TOL]
             mem.L_buckling_y = max(overlapping) if overlapping else hi - lo

@@ -191,6 +191,11 @@ class Member:
                      deflected shapes.
     member_set     : group label for reporting ('uprights', 'pallet beams',
                      'bracing', ...).
+    set_label      : RSTAB-style continuous-member-set name for an upright
+                     storey segment (e.g. 'Upright A1 . base->L1'); the set
+                     length is the down-aisle buckling length Lcr,DA.  Used to
+                     group/report upright buckling per set.  None for members
+                     that are not part of a named set.
     area_factor    : stiffness modification on the section area used in the
                      ANALYSIS only (e.g. 0.15 on bracing to represent the
                      flexibility of the bolted end connections); strength
@@ -212,6 +217,7 @@ class Member:
     mesh: int = 2
     member_set: str = "default"
     area_factor: float = 1.0
+    set_label: Optional[str] = None
 
 
 @dataclass
