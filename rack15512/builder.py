@@ -230,9 +230,10 @@ class RackConfig:
     # interface (bolt) shear stiffness: auto-derived from the bolt by the
     # EN 1993-1-8 component method when None; a number overrides it [N/mm]
     stiffener_shear_k: Optional[float] = None
-    stiffener_bolt_d: float = 12.0     # interface bolt diameter [mm]
+    stiffener_bolt_d: float = 8.0      # interface bolt diameter [mm] (M8)
     stiffener_bolt_grade: str = "8.8"
-    stiffener_bolts_per_row: int = 1   # bolts per bolt row (per link)
+    stiffener_bolts_per_row: int = 1   # bolts per bolt row
+    stiffener_bolt_pitch: float = 600.0  # [mm] bolt interval up the height
     steel_fy: float = 355.0            # MPa (sections without their own fy)
     # when True, use steel_fy for EVERY section (ignore the master's per-section
     # fy) - lets the material yield be set from the input for any master
@@ -893,16 +894,20 @@ def build_rack(cfg: RackConfig) -> RackModel:
         SNID = 8_000_000
         K_TRANS = 1.0e8                       # stiff transverse tie [N/mm]
         st_sec = m.sections[stiff_name]
-        # interface bolt shear stiffness: explicit override or auto-derived from
-        # the bolt (EN 1993-1-8 component method)
+        # interface bolt shear stiffness: explicit per-link override, else
+        # auto-derived per bolt (EN 1993-1-8 component method) and spread along
+        # the height by the BOLT PITCH (closer bolts -> stiffer -> more composite)
         if cfg.stiffener_shear_k is not None:
-            kz = max(cfg.stiffener_shear_k, 1.0)
+            kz_fixed, kz_per_mm = max(cfg.stiffener_shear_k, 1.0), None
         else:
             fub = 100.0 * int(str(cfg.stiffener_bolt_grade).split(".")[0])
             fu_up = up.fu or 1.25 * cfg.steel_fy
-            kz = max(int(cfg.stiffener_bolts_per_row), 1) * _bolt_slip_stiffness(
+            k_single = _bolt_slip_stiffness(
                 cfg.stiffener_bolt_d, fub, fu_up, up.t or 2.0,
                 st_sec.t or 2.0, up.e1 or 1.5 * cfg.stiffener_bolt_d)
+            kz_fixed = None
+            kz_per_mm = (max(int(cfg.stiffener_bolts_per_row), 1) * k_single
+                         / max(cfg.stiffener_bolt_pitch, 1.0))
         # type 1 closes the open face -> a closed-section torsion credit on the
         # reinforced upright segments (improves flexural-torsional buckling)
         up_zone_section = up.name
@@ -943,7 +948,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
                              L_buckling_z=(um.L_buckling_z if um else seg),
                              area_factor=1.0, set_label=um.set_label if um else None)
                 mid += 1
-            for j in zone_js:                 # bolt-row interface links
+            zz = [zs[j] for j in zone_js]     # interface links at each node,
+            for p, j in enumerate(zone_js):   # kz spread by tributary length
+                lo = 0.5 * (zz[p] - zz[p - 1]) if p > 0 else 0.0
+                hi = 0.5 * (zz[p + 1] - zz[p]) if p < len(zz) - 1 else 0.0
+                # floor the tributary at half a bolt pitch so the end links keep
+                # a realistic (>= ~half a bolt) stiffness and stay well-conditioned
+                trib = max(lo + hi, 0.5 * cfg.stiffener_bolt_pitch)
+                kz = (kz_fixed if kz_fixed is not None
+                      else max(kz_per_mm * trib, 1.0))
                 m.links.append(Link(node_i=nid(i, s, j),
                                     node_j=SNID + nid(i, s, j),
                                     kx=K_TRANS, ky=K_TRANS, kz=kz))
