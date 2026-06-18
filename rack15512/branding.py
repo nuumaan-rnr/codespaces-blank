@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-18 · New configs remember the last-used bracing section (popup & edit form); cross-aisle 'X-brace up to level' extends one panel above the level; bolted upright stiffeners; per-set buckling table with Lcr,CA + N/My/Mz + PASS"
+BUILD = "2026-06-18 · CA bracing zones (seismic): per-zone number of cross-aisle diagonals per panel, extras as real members offset 100 mm (lower zones denser); upright stiffeners also list 'other' sections; new configs remember last-used bracing"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

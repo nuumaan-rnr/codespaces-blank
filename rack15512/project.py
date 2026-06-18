@@ -37,6 +37,14 @@ _CFG_SKIP = {"library", "master"}     # not serialised (rebuilt from master_path
 
 
 # --------------------------------------------------------------- RackConfig IO
+def _jsonable(v):
+    """Normalise tuples to lists so a config compares equal before and after a
+    JSON round-trip (the change-detector in update_configuration relies on it)."""
+    if isinstance(v, (tuple, list)):
+        return [_jsonable(x) for x in v]
+    return v
+
+
 def rackconfig_to_dict(cfg: RackConfig) -> Dict[str, Any]:
     """Serialisable parameters of a RackConfig (without the live library /
     master objects, which are referenced separately by path)."""
@@ -47,7 +55,7 @@ def rackconfig_to_dict(cfg: RackConfig) -> Dict[str, Any]:
         v = getattr(cfg, f.name)
         if f.name == "levels" and v is not None:
             v = [asdict(ls) for ls in v]
-        out[f.name] = v
+        out[f.name] = _jsonable(v)
     return out
 
 

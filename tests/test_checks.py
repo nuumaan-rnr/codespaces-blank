@@ -368,6 +368,34 @@ def test_ca_x_brace_extends_one_panel_above_level():
     assert diag[(2550, 3150)] == base // 2        # above -> D (single diagonal)
 
 
+def test_ca_brace_zones_more_diagonals_in_lower_zones():
+    """CA bracing zones (seismic): lower zones carry more parallel diagonals per
+    panel, the extras as real members offset 100 mm; above all zones the base
+    pattern applies and the model still validates (no floating nodes)."""
+    import collections
+    model = build_rack(RackConfig(
+        n_bays=1, beam_levels=[1500.0, 3000.0, 4500.0], frame_height=5000.0,
+        bracing_type="D", bracing_start=150.0, bracing_pitch=600.0,
+        ca_brace_zones=((1500.0, 4), (3000.0, 2))))
+    assert model.validate() == []                       # no floating nodes
+    zs = {round(n.z) for n in model.nodes.values()}
+    assert {250, 850} <= zs                             # 150+100, 750+100 nodes
+    diag = collections.Counter()
+    for m in model.members.values():
+        if m.member_set != "bracing":
+            continue
+        za, zb = model.nodes[m.node_i].z, model.nodes[m.node_j].z
+        if abs(za - zb) < 1e-6:
+            continue                                    # horizontal strut
+        diag[(round(min(za, zb)), round(max(za, zb)))] += 1
+    nl = 2                                              # 1 bay -> 2 frame lines
+    assert diag[(150, 750)] == 2 * nl                  # zone1: X at offset 0
+    assert diag[(250, 850)] == 2 * nl                  # zone1: X at offset 100
+    assert diag[(1350, 1950)] == 2 * nl                # zone2: X only (no offset)
+    assert (1450, 2050) not in diag                    # no offset in zone2
+    assert diag[(2550, 3150)] == 1 * nl                # above zones: base D
+
+
 def test_upright_splice_geometry_above_11500_and_check_gated():
     """Frame height > 11.5 m: a splice is added automatically at H/2.  The
     connection check is OFF by default (member-only); enabling check_splice

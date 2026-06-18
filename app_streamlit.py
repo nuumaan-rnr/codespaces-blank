@@ -597,6 +597,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         # X-bracing up to a chosen level: the lower frames use the X pattern
         # (up to that elevation), the Pattern above stays as selected.
         ca_x_height = None
+        ca_brace_zones: tuple = ()
         if not is_di:
             elevs, _z = [], 0.0
             for ls in levels:
@@ -617,6 +618,31 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                      "'(none)' = the Pattern applies the full height.")
             if x_sel != "(none)":
                 ca_x_height = elevs[x_opts.index(x_sel) - 1]
+            # CA bracing zones (seismic): more cross-aisle diagonals per panel
+            # in the lower frames; extras are real members offset 100 mm
+            import pandas as pd
+            st.caption("CA bracing zones (seismic) — extra cross-aisle "
+                       "diagonals per panel up to a height; the base X is at "
+                       "offset 0 and each extra pair is a real X offset 100 mm. "
+                       "Leave empty to use the single Pattern / X setting above.")
+            _zrows = [{"Up to height [mm]": float(z),
+                       "Diagonals per panel": int(c)}
+                      for z, c in (g("ca_brace_zones", ()) or ())]
+            _zedit = st.data_editor(
+                pd.DataFrame(_zrows, columns=["Up to height [mm]",
+                                              "Diagonals per panel"]),
+                num_rows="dynamic", hide_index=True, width="stretch",
+                key="ca_zones_editor")
+            _zones = []
+            for _, _row in _zedit.iterrows():
+                try:
+                    _h = float(_row["Up to height [mm]"])
+                    _c = int(_row["Diagonals per panel"])
+                except (TypeError, ValueError):
+                    continue
+                if _h > 0 and _c >= 1:
+                    _zones.append((_h, _c))
+            ca_brace_zones = tuple(sorted(_zones))
         zone1 = "same"             # 'different pattern below level 1' removed
 
     with st.expander("🔩  Material & brace connections" if is_di
@@ -927,7 +953,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         bracing_first_side=first_side, bracing_type=btype,
         bracing_start=bstart, bracing_pitch=bpitch,
         bracing_type_zone1=None if zone1 == "same" else zone1,
-        ca_x_height=ca_x_height,
+        ca_x_height=ca_x_height, ca_brace_zones=ca_brace_zones,
         upright_section=up_sec, brace_section=br_sec, steel_fy=fy,
         fy_override=bool(fy_override), spacer_section=spacer_section,
         stiffener_section=stiffener_section,

@@ -123,6 +123,12 @@ class RackConfig:
     # cross-aisle X up to a height (seismic): force the CA frame bracing to the
     # X pattern for panels at/below this elevation (None = leave bracing_type)
     ca_x_height: Optional[float] = None
+    # CA bracing zones (seismic): list of (up_to_height_mm, n_diagonals) so the
+    # lower frame zones can carry MORE cross-aisle diagonals per panel.  The
+    # base X is at offset 0; each extra pair is a real X offset +100 mm (new
+    # upright nodes).  A panel uses the first zone whose up_to_height >= its top;
+    # panels above every zone keep the normal D/X pattern.  () = disabled.
+    ca_brace_zones: Tuple[Tuple[float, int], ...] = ()
     # ---- seismic bracing (truss members; IS 1893 lateral system) ----------
     # plan bracing: horizontal X across each bay cell, at selected levels;
     # placed only in the spine modules, at most alternate beam levels
@@ -476,8 +482,35 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # level (used only when the module has a back-to-back spacer pair)
     spacer_zs = frame_spacer_levels(cfg, H) if spacer_pair is not None else []
 
+    # CA bracing zones: number of cross-aisle diagonals per panel, and the extra
+    # nodes for the +100 mm offset diagonals (real geometry).
+    CA_BRACE_OFFSET = 100.0
+
+    def _ca_zone_count(z_top: float) -> Optional[int]:
+        for up_to, cnt in sorted(cfg.ca_brace_zones):
+            if z_top <= up_to + _TOL:
+                return max(int(cnt), 1)
+        return None
+
+    ca_extra: set = set()
+    if cfg.ca_brace_zones:
+        for k in range(len(brace_zs) - 1):
+            n = _ca_zone_count(brace_zs[k + 1])
+            if not n or n < 2:
+                continue
+            for d in range(n):
+                o = (d // 2) * CA_BRACE_OFFSET
+                if o == 0:
+                    continue
+                zt = brace_zs[k + 1] + o
+                if zt > H + _TOL:
+                    continue
+                ca_extra.add(brace_zs[k] + o)
+                ca_extra.add(zt)
+
     zs: List[float] = [0.0]
     extra = {splice_z} if splice_z else set()
+    extra |= ca_extra
     if (cfg.accidental_load_x or cfg.accidental_load_y) \
             and 0.0 < acc_h < H:
         extra.add(acc_h)
@@ -578,6 +611,28 @@ def build_rack(cfg: RackConfig) -> RackModel:
                     for s in (sa, sb):
                         brace_points[(i, s)].append(brace_zs[-1])
                 for k in range(len(brace_zs) - 1):
+                    # CA bracing zone override: n_z diagonals per panel, an X at
+                    # offset 0 and each extra pair a real X offset +100 mm
+                    n_z = _ca_zone_count(brace_zs[k + 1])
+                    if n_z is not None:
+                        for d in range(n_z):
+                            o = (d // 2) * CA_BRACE_OFFSET
+                            zb, zt = brace_zs[k] + o, brace_zs[k + 1] + o
+                            if zt > H + _TOL:
+                                break
+                            jb_, jt_ = j_of(zb), j_of(zt)
+                            if d % 2 == 0:
+                                m.add_member(mid, nid(i, sa, jb_),
+                                             nid(i, sb, jt_), br.name,
+                                             mtype="truss", member_set="bracing")
+                            else:
+                                m.add_member(mid, nid(i, sb, jb_),
+                                             nid(i, sa, jt_), br.name,
+                                             mtype="truss", member_set="bracing")
+                            mid += 1
+                            brace_points[(i, sa)] += [zb, zt]
+                            brace_points[(i, sb)] += [zb, zt]
+                        continue
                     ja, jb = j_of(brace_zs[k]), j_of(brace_zs[k + 1])
                     ptype = cfg.bracing_type
                     if cfg.bracing_type_zone1 and \
