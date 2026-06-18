@@ -283,15 +283,21 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         spacer_section = (None if (module == "single"
                                    or spacer_sec == "(frame brace)")
                           else spacer_sec)
-        # upright stiffener: bolted parallel reinforcement over a lower zone
-        _stiff_opts = ["(none)"] + list(up_names)
+        # upright stiffener: bolted parallel reinforcement over a lower zone.
+        # offer the uprights plus the "other" category (every section that is
+        # not an upright, beam or bracing - rails / connectors / shuttle / RHS)
+        _stiff_excl = set(up_names) | set(beam_names) | set(br_names)
+        _stiff_other = [n for n in lib.names() if n not in _stiff_excl]
+        _stiff_opts = list(dict.fromkeys(["(none)"] + list(up_names)
+                                         + _stiff_other))
         _stiff_cur = g("stiffener_section", None) or "(none)"
         stiff_sel = st.selectbox(
             "Upright stiffener section (lower-zone reinforcement)", _stiff_opts,
             index=_idx(_stiff_opts, _stiff_cur),
             help="A bolted parallel member added alongside each upright segment "
                  "up to the reinforce height; shares the upright end nodes "
-                 "(stiffnesses add). '(none)' disables.")
+                 "(stiffnesses add). Uprights and other (non-beam/bracing) "
+                 "sections are selectable. '(none)' disables.")
         reinforce_height = st.number_input(
             "Reinforce height [mm] (stiffener up to this elevation)",
             0.0, 30000.0, float(g("reinforce_height", 0.0)), 50.0,
