@@ -252,7 +252,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             depth = gn("depth", 1000.0, 600.0, 2000.0)
             b2b_gap = gn("b2b_gap", 250.0, 50.0, 600.0)
             spacer_section = None          # drive-in has no row spacers
-            stiffener_section, reinforce_height = None, 0.0
+            stiffener_section, reinforce_height, stiffener_offset = None, 0.0, 30.0
         else:
             module = c[3].radio(
                 "Module", ["single", "back-to-back"],
@@ -302,6 +302,13 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Reinforce height [mm] (stiffener up to this elevation)",
             0.0, 30000.0, float(g("reinforce_height", 0.0)), 50.0,
             disabled=(stiff_sel == "(none)"))
+        stiffener_offset = st.number_input(
+            "Stiffener offset [mm] (upright↔stiffener centroid gap, cross-aisle)",
+            0.0, 200.0, float(g("stiffener_offset", 30.0)), 5.0,
+            disabled=(stiff_sel == "(none)"),
+            help="Centroid separation used for the monolithic combined section "
+                 "(parallel-axis). Larger offset raises the cross-aisle inertia; "
+                 "set it to the real centroid gap of the upright + reinforcement.")
         stiffener_section = None if stiff_sel == "(none)" else stiff_sel
 
     if is_di:
@@ -958,6 +965,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         fy_override=bool(fy_override), spacer_section=spacer_section,
         stiffener_section=stiffener_section,
         reinforce_height=float(reinforce_height),
+        stiffener_offset=float(stiffener_offset),
         base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),

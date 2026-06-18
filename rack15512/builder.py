@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
+from .composite import combined_section
 from .library import SectionLibrary
 from .master_xlsx import MasterWorkbook
 from .model import (BasePlate, Combination, Hinge, Imperfection, LoadCase,
@@ -181,13 +182,16 @@ class RackConfig:
     upright_section: str = "UP-100x100x2.0"
     beam_section: str = "BM-110x50x1.5"
     brace_section: str = "BR-C40x40x2.0"
-    # upright stiffener: a bolted reinforcing member added alongside every upright
-    # segment whose TOP is <= reinforce_height.  Modelled as a separate parallel
-    # beam on the SAME end-node pair (composite via shared nodes - stiffnesses add,
-    # demand splits by relative EA/EI; conservative vs a monolithic compound
-    # section).  None / reinforce_height = 0 disables.
+    # upright stiffener: a bolted reinforcement that acts COMPOSITELY with the
+    # upright over the lower zone.  Modelled as a MONOLITHIC combined section
+    # (parallel-axis about the combined centroid) assigned to the reinforced
+    # upright segments - load and moments flow through the combined centroid, so
+    # area and cross-aisle inertia rise and buckling drops with no spurious
+    # moment.  stiffener_offset = centroid separation (cross-aisle).  None /
+    # reinforce_height = 0 disables.
     stiffener_section: Optional[str] = None
     reinforce_height: float = 0.0      # [mm]; reinforce segments with top <= this
+    stiffener_offset: float = 30.0     # [mm]; upright<->stiffener centroid gap
     steel_fy: float = 355.0            # MPa (sections without their own fy)
     # when True, use steel_fy for EVERY section (ignore the master's per-section
     # fy) - lets the material yield be set from the input for any master
@@ -694,25 +698,20 @@ def build_rack(cfg: RackConfig) -> RackModel:
                              mtype="beam", member_set="frame spacer")
                 mid += 1
 
-    # upright stiffener: register the reinforcing section (role 'upright'); the
-    # parallel members are added after the buckling-length loop below
+    # upright stiffener: build the MONOLITHIC combined section (upright +
+    # stiffener, parallel-axis about the combined centroid) and register it; it
+    # is assigned to the reinforced upright segments after the buckling loop.
     def _register_stiffener():
         name = cfg.stiffener_section
         if not name or cfg.reinforce_height <= _TOL:
             return None
-        sec = lib.get(_pick(lib, name, "upright"))
-        fy = (cfg.master.fy.get(sec.name)
-              if (cfg.master and not cfg.fy_override) else None)
-        if fy:
-            mat_name = f"steel_fy{fy:.0f}"
-            m.materials.setdefault(mat_name, Steel(mat_name, fy=fy))
-            sec.material = mat_name
-        else:
-            sec.material = "steel"
-        m.sections[sec.name] = sec
-        return sec.name
+        st = lib.get(_pick(lib, name, "upright"))
+        cname = f"{up.name}+{st.name}@{cfg.stiffener_offset:.0f}"
+        csec = combined_section(cname, up, st, cfg.stiffener_offset, up.material)
+        m.sections[csec.name] = csec
+        return csec.name
 
-    stiff_name = _register_stiffener()
+    combined_name = _register_stiffener()
 
     # ---- seismic bracing: plan (horizontal) and spine (vertical X) ---------
     def _register_brace(name: Optional[str]):
@@ -836,32 +835,24 @@ def build_rack(cfg: RackConfig) -> RackModel:
                            if b > lo + _TOL and a < hi - _TOL]
             mem.L_buckling_y = max(overlapping) if overlapping else hi - lo
 
-    # upright stiffeners: a parallel beam alongside every upright segment whose
-    # top is <= reinforce_height, on the SAME end-node pair (stiffnesses add).
-    # Copies the sibling upright's local axes, buckling lengths and set label.
-    if stiff_name:
+    # upright stiffener: assign the MONOLITHIC combined section (upright +
+    # stiffener, parallel-axis) to every upright segment whose top is <=
+    # reinforce_height.  One member per segment, at the upright line; the larger
+    # combined area/inertia raises the buckling resistance with no spurious
+    # moment (load flows through the combined centroid).
+    if combined_name:
         rh = min(cfg.reinforce_height, H)
         for (i, s), ids in upright_members.items():
             for up_mid in ids:
                 up_mem = m.members[up_mid]
                 z_top = max(m.nodes[up_mem.node_i].z, m.nodes[up_mem.node_j].z)
-                if z_top > rh + _TOL:
-                    continue
-                m.add_member(mid, up_mem.node_i, up_mem.node_j, stiff_name,
-                             member_set="upright stiffeners",
-                             mesh=cfg.mesh_upright, vecxz=up_mem.vecxz,
-                             L_buckling_y=up_mem.L_buckling_y,
-                             L_buckling_z=up_mem.L_buckling_z,
-                             k_buckling_y=up_mem.k_buckling_y,
-                             k_buckling_z=up_mem.k_buckling_z,
-                             area_factor=1.0, set_label=up_mem.set_label)
-                mid += 1
+                if z_top <= rh + _TOL:
+                    up_mem.section = combined_name
 
     # buckling is verified on the uprights only (EN 15512); beams are
-    # checked for stress / moments / deflection
+    # checked for stress / moments / deflection.  The reinforced segments keep
+    # member_set "uprights" (with the combined section) so they are checked here.
     m.checks.buckling_sets = ["uprights"]
-    if stiff_name:
-        m.checks.buckling_sets.append("upright stiffeners")
 
     # bracing connection-flexibility modification: only this fraction of
     # the brace area acts in the ANALYSIS (strength checks use full A).

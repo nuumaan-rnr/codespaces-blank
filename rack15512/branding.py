@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-18 · Footplate eccentricity/uplift + plate-bending & anchor pry-out (EN 1993-1-8/EN 1992-4); splice 2nd-order strut moment + 25% robustness (EN 1993-1-8 6.2.7.1); suggested upright splice positions from ground (contraflexure / above beam level)"
+BUILD = "2026-06-18 · Upright stiffener as a MONOLITHIC combined section (parallel-axis about the combined centroid, stiffener_offset) on the reinforced lower segments — buckling drops with no spurious moment; replaces the offset/rigid-link model"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
