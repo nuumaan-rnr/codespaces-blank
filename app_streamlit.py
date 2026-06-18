@@ -600,10 +600,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                if abs(e - float(_cur)) <= 1.0), 0)
             x_sel = st.selectbox(
                 "X-brace lower frames up to level", x_opts, index=_idx_x,
-                help="Use the X pattern from the floor up to the selected level "
-                     "(e.g. for accidental / seismic robustness); the Pattern "
-                     "above stays as selected. '(none)' = the Pattern applies "
-                     "the full height.")
+                help="Use the X pattern from the floor up to ONE full bracing "
+                     "panel above the selected level (so the level is fully "
+                     "X-braced); the Pattern above stays as selected. "
+                     "'(none)' = the Pattern applies the full height.")
             if x_sel != "(none)":
                 ca_x_height = elevs[x_opts.index(x_sel) - 1]
         zone1 = "same"             # 'different pattern below level 1' removed

@@ -556,6 +556,13 @@ def build_rack(cfg: RackConfig) -> RackModel:
     brace_points: Dict[Tuple[int, int], List[float]] = {
         (i, s): [0.0, H] for i in range(n_lines) for s in sides}
     if brace_zs:
+        # X-brace "up to a level" extends one full panel above the panel that
+        # crosses the chosen elevation: x_top = first bracing node at/above the
+        # level; a panel is X when its BOTTOM node is <= x_top.
+        x_top = None
+        if cfg.ca_x_height:
+            _above = [z for z in brace_zs if z >= cfg.ca_x_height - _TOL]
+            x_top = _above[0] if _above else brace_zs[-1]
         for i in range(n_lines):
             for sa, sb, outer in rack_pairs:
                 j0, j1 = j_of(brace_zs[0]), j_of(brace_zs[-1])
@@ -576,9 +583,8 @@ def build_rack(cfg: RackConfig) -> RackModel:
                     if cfg.bracing_type_zone1 and \
                             brace_zs[k + 1] <= beam_levels[0] + _TOL:
                         ptype = cfg.bracing_type_zone1
-                    if cfg.ca_x_height and \
-                            brace_zs[k + 1] <= cfg.ca_x_height + _TOL:
-                        ptype = "X"          # seismic CA X up to a height
+                    if x_top is not None and brace_zs[k] <= x_top + _TOL:
+                        ptype = "X"          # X up to one panel above the level
                     if ptype.upper() == "X":
                         m.add_member(mid, nid(i, sa, ja), nid(i, sb, jb),
                                      br.name, mtype="truss",

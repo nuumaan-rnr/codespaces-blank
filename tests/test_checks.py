@@ -343,6 +343,31 @@ def test_ca_buckling_length_per_level_from_model():
     assert band2[0].L_buckling_z == pytest.approx(1800.0)
 
 
+def test_ca_x_brace_extends_one_panel_above_level():
+    """'X-brace up to level' covers the panel that crosses the chosen level
+    PLUS one full bracing panel above it; the Pattern resumes above that.
+    Level at 1500 mm, nodes 150/750/1350/1950/2550/3150 -> X up to (1950,2550),
+    D from (2550,3150)."""
+    import collections
+    model = build_rack(RackConfig(
+        n_bays=1, beam_levels=[1500.0, 3000.0], frame_height=3600.0,
+        bracing_type="D", bracing_start=150.0, bracing_pitch=600.0,
+        ca_x_height=1500.0))
+    diag = collections.Counter()
+    for m in model.members.values():
+        if m.member_set != "bracing":
+            continue
+        za, zb = model.nodes[m.node_i].z, model.nodes[m.node_j].z
+        if abs(za - zb) < 1e-6:
+            continue                              # horizontal strut
+        diag[(round(min(za, zb)), round(max(za, zb)))] += 1
+    base = diag[(150, 750)]                       # below level -> X
+    assert base and base % 2 == 0                 # X = two crossed diagonals
+    assert diag[(1350, 1950)] == base             # crossing panel -> X
+    assert diag[(1950, 2550)] == base             # one full panel beyond -> X
+    assert diag[(2550, 3150)] == base // 2        # above -> D (single diagonal)
+
+
 def test_upright_splice_geometry_above_11500_and_check_gated():
     """Frame height > 11.5 m: a splice is added automatically at H/2.  The
     connection check is OFF by default (member-only); enabling check_splice

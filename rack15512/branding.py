@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-18 · Bolted upright stiffeners (parallel shared-node members over a reinforce height); per-set upright buckling table adds Lcr,CA + N/My/Mz columns and PASS status; upright splice gated off by default (only > 11500 mm, member-only check)"
+BUILD = "2026-06-18 · Cross-aisle 'X-brace up to level' now extends one full bracing panel above the chosen level (fully X-braces the level); bolted upright stiffeners; per-set buckling table with Lcr,CA + N/My/Mz + PASS; splice gated off (> 11500 mm)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
