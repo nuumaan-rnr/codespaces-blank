@@ -253,6 +253,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             b2b_gap = gn("b2b_gap", 250.0, 50.0, 600.0)
             spacer_section = None          # drive-in has no row spacers
             stiffener_section, reinforce_height, stiffener_offset = None, 0.0, 30.0
+            stiffener_type, stiffener_shear_k = 1, 50000.0
         else:
             module = c[3].radio(
                 "Module", ["single", "back-to-back"],
@@ -302,13 +303,24 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Reinforce height [mm] (stiffener up to this elevation)",
             0.0, 30000.0, float(g("reinforce_height", 0.0)), 50.0,
             disabled=(stiff_sel == "(none)"))
-        stiffener_offset = st.number_input(
-            "Stiffener offset [mm] (upright↔stiffener centroid gap, cross-aisle)",
-            0.0, 200.0, float(g("stiffener_offset", 30.0)), 5.0,
+        _sc = st.columns(3)
+        stiffener_offset = _sc[0].number_input(
+            "Stiffener offset [mm]", 0.0, 200.0,
+            float(g("stiffener_offset", 30.0)), 5.0,
             disabled=(stiff_sel == "(none)"),
-            help="Centroid separation used for the monolithic combined section "
-                 "(parallel-axis). Larger offset raises the cross-aisle inertia; "
-                 "set it to the real centroid gap of the upright + reinforcement.")
+            help="Upright↔stiffener centroid gap (cross-aisle); captures the CG "
+                 "shift. Set to the real centroid separation of the assembly.")
+        stiffener_type = _sc[1].selectbox(
+            "Stiffener type", [1, 2],
+            index=0 if int(g("stiffener_type", 1)) == 1 else 1,
+            disabled=(stiff_sel == "(none)"),
+            help="1 = C closing the open face (inside); 2 = C on the outer face.")
+        stiffener_shear_k = _sc[2].number_input(
+            "Bolt shear stiffness [N/mm]", 1000.0, 1.0e7,
+            float(g("stiffener_shear_k", 50000.0)), 5000.0,
+            disabled=(stiff_sel == "(none)"),
+            help="Per bolt-row interface stiffness. Higher = more composite "
+                 "(more axial into the stiffener); governs the (non-50%) split.")
         stiffener_section = None if stiff_sel == "(none)" else stiff_sel
 
     if is_di:
@@ -966,6 +978,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         stiffener_section=stiffener_section,
         reinforce_height=float(reinforce_height),
         stiffener_offset=float(stiffener_offset),
+        stiffener_type=int(stiffener_type),
+        stiffener_shear_k=float(stiffener_shear_k),
         base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),

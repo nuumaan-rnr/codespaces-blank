@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-18 · Upright stiffener as a MONOLITHIC combined section (parallel-axis about the combined centroid, stiffener_offset) on the reinforced lower segments — buckling drops with no spurious moment; replaces the offset/rigid-link model"
+BUILD = "2026-06-18 · Upright stiffener as a PARTIAL-COMPOSITE built-up member: separate offset member tied to the upright at bolt rows by interface links (transverse stiff + vertical bolt-shear k); own N/My/Mz, realistic <50% shear-lag axial split, buckling drops with no moment spike (types 1/2)"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

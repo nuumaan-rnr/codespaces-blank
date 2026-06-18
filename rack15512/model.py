@@ -536,6 +536,21 @@ class Splice:
 
 
 @dataclass
+class Link:
+    """Interface connection between two (offset) nodes via translational springs
+    in the GLOBAL axes (rotations free).  Models the upright<->stiffener bolt
+    interface: stiff transverse (kx, ky) so the two members deflect together and
+    share bending, and a finite vertical bolt-shear stiffness (kz) so the axial
+    transfers by shear flow (partial composite, not a forced 50% split)."""
+
+    node_i: int
+    node_j: int
+    kx: float
+    ky: float
+    kz: float
+
+
+@dataclass
 class BuiltUpColumn:
     """Built-up (battened or laced) end / anchor column per EN 1993-1-1 6.4.
 
@@ -590,6 +605,7 @@ class RackModel:
     seismic_summary: Optional[dict] = None     # filled by run_seismic for reports
     base_plate: Optional[BasePlate] = None
     splices: List[Splice] = field(default_factory=list)
+    links: List[Link] = field(default_factory=list)
     built_up: Optional[BuiltUpColumn] = None
     # drive-in: how the down-aisle base rotational stiffness was obtained
     # ('master tested table' / 'calculated (R899)' / 'explicit') and its value
@@ -664,6 +680,9 @@ class RackModel:
                 errors.append(f"Member {m.id}: truss members cannot have hinges")
             if self.member_length(m) < 1.0e-6:
                 errors.append(f"Member {m.id}: zero length")
+        for lk in self.links:
+            if lk.node_i not in self.nodes or lk.node_j not in self.nodes:
+                errors.append(f"Link {lk.node_i}-{lk.node_j}: unknown node")
         sup_nodes = set()
         for s in self.supports:
             if s.node not in self.nodes:

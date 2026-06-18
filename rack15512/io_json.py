@@ -7,7 +7,7 @@ from dataclasses import asdict
 from typing import Any, Dict
 
 from .model import (AnalysisSettings, BasePlate, CheckSettings, Combination,
-                    CrossSection, Hinge, Imperfection, LoadCase, Member,
+                    CrossSection, Hinge, Imperfection, Link, LoadCase, Member,
                     MemberLoad, NodalLoad, Node, RackModel, Splice, Steel,
                     Support)
 
@@ -27,6 +27,7 @@ def model_to_dict(m: RackModel) -> Dict[str, Any]:
         "checks": asdict(m.checks),
         "base_plate": asdict(m.base_plate) if m.base_plate else None,
         "splices": [asdict(s) for s in m.splices],
+        "links": [asdict(x) for x in m.links],
     }
 
 
@@ -65,6 +66,8 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
         m.base_plate = BasePlate(**d["base_plate"])
     for x in d.get("splices", []):
         m.splices.append(Splice(**x))
+    for x in d.get("links", []):
+        m.links.append(Link(**x))
     return m
 
 

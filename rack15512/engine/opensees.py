@@ -155,6 +155,15 @@ class OpenSeesEngine:
     def _reset_state(self) -> None:
         ops.wipe()
         ops.model("basic", "-ndm", 3, "-ndf", 6)
+        # quiet the engine console (e.g. twoNodeLink orientation notices); the
+        # engine reports convergence via the result flag, not console parsing
+        try:
+            import os
+            import tempfile
+            ops.logFile(os.path.join(tempfile.gettempdir(),
+                                     "rackfea_opensees.log"), "-noEcho")
+        except Exception:
+            pass
         self._next_tag = 1
         self._node_tag: Dict[int, int] = {}          # model node id -> ops tag
         self._coords: Dict[int, Tuple[float, float, float]] = {}
@@ -168,6 +177,7 @@ class OpenSeesEngine:
         self._reset_state()
         self._build_nodes(model, geom_sway)
         self._build_members(model, order)
+        self._build_links(model)
         self._build_supports(model)
         self._fix_spinning_nodes(model)
 
@@ -280,6 +290,21 @@ class OpenSeesEngine:
                 mmap.segments.append(_Segment(
                     ele_tag=ele, tag_i=tags[k], tag_j=tags[k + 1],
                     x_start=L * k / nseg, length=L / nseg))
+
+    def _build_links(self, model: RackModel) -> None:
+        """Interface links (upright<->stiffener bolt connection): a zeroLength
+        with translational springs in the global axes (kx, ky stiff = transverse
+        tie; kz = vertical bolt-shear stiffness for partial composite); rotations
+        free, so no battened-chord moment artifact."""
+        for lk in getattr(model, "links", []):
+            ni, nj = self._node_tag[lk.node_i], self._node_tag[lk.node_j]
+            mats = [self._elastic_mat(lk.kx), self._elastic_mat(lk.ky),
+                    self._elastic_mat(lk.kz)]
+            # twoNodeLink (proper for the finite offset): translational springs
+            # in the GLOBAL axes (orient local = global), rotations free
+            ops.element("twoNodeLink", self._new_tag(), ni, nj,
+                        "-mat", *mats, "-dir", 1, 2, 3,
+                        "-orient", 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
 
     def _build_supports(self, model: RackModel) -> None:
         for sup in model.supports:
