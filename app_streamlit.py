@@ -1803,6 +1803,26 @@ def render_view_config():
                               "status": r["status"]}
                              for r in uset_rows],
                             width="stretch", hide_index=True)
+                    from rack15512.checks.en15512 import (
+                        suggest_splice_positions)
+                    sug = suggest_splice_positions(model, cases)
+                    if sug["n_needed"] > 0 and sug["candidates"]:
+                        st.markdown(
+                            f"**Suggested upright splice positions** — frame "
+                            f"{sug['H']:.0f} mm needs ≥ {sug['n_needed']} splice"
+                            f"(s) for a {sug['max_length']:.0f} mm max length; "
+                            "place just above a beam level near low down-aisle "
+                            "moment (EN 1993-1-8 §6.2.7.1)")
+                        st.dataframe(
+                            [{"elevation (mm)": c["z"], "Mz (kNm)": c["Mz_kNm"],
+                              "suggest": "✓" if c["recommended"] else "",
+                              "note": c["note"]}
+                             for c in sug["candidates"]],
+                            width="stretch", hide_index=True)
+                    elif sug["candidates"]:
+                        st.caption(
+                            f"No upright splice required — frame {sug['H']:.0f} "
+                            f"mm ≤ {sug['max_length']:.0f} mm max length.")
                     sway = sorted(
                         ({"case": c.case, "axis": c.target,
                           "util": round(c.utilization, 3), "detail": c.detail}

@@ -396,6 +396,27 @@ def test_ca_brace_zones_more_diagonals_in_lower_zones():
     assert diag[(2550, 3150)] == 1 * nl                # above zones: base D
 
 
+def test_suggest_splice_positions():
+    """Probable splice elevations: just above a beam level, within the max
+    manufacturable length, one needed for an 8 m frame at 6 m max length."""
+    from rack15512.checks.en15512 import suggest_splice_positions
+    m = build_rack(RackConfig(n_bays=1, frame_height=8000.0, levels=[
+        __import__("rack15512.builder", fromlist=["LevelSpec"]).LevelSpec(
+            gap=1500.0) for _ in range(5)]))
+    sug = suggest_splice_positions(m, run_all(m), max_length=6000.0)
+    assert abs(sug["H"] - 8000.0) < 1.0
+    assert sug["n_needed"] == 1
+    recs = [c for c in sug["candidates"] if c["recommended"]]
+    assert len(recs) == 1
+    assert 1500.0 <= recs[0]["z"] <= 6000.0 + 1.0    # above 1.5 m, within reach
+    # a frame within the max length needs no splice
+    m2 = build_rack(RackConfig(n_bays=1, frame_height=4000.0, levels=[
+        __import__("rack15512.builder", fromlist=["LevelSpec"]).LevelSpec(
+            gap=1500.0) for _ in range(2)]))
+    sug2 = suggest_splice_positions(m2, run_all(m2), max_length=6000.0)
+    assert sug2["n_needed"] == 0
+
+
 def test_upright_splice_geometry_above_11500_and_check_gated():
     """Frame height > 11.5 m: a splice is added automatically at H/2.  The
     connection check is OFF by default (member-only); enabling check_splice

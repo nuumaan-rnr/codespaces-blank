@@ -597,6 +597,7 @@ def _base_plate_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
 
     node, r = max(case.reactions.items(), key=lambda kv: kv[1][2])
     N = max(r[2], 0.0)
+    M_base = math.hypot(r[3], r[4])          # concurrent base moment
     sec = _upright_at(model, node)
     note = ""
     if sec is None or not sec.t:
@@ -618,16 +619,27 @@ def _base_plate_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         e_eff = min(e, e_cap) if e_cap > 0 else e
         Abas = min(L_p * (sec_t + 2.0 * e_eff), bp.b * bp.d)
         util = A_req / Abas if Abas > 0 else 99.0
-        # thickness needed so the strip reaches the plate edge (full Abas)
-        t_min = (foot_w * 0.0)  # placeholder, computed from e_cap below
-        t_for_edge = (e_cap / math.sqrt(bp.fy_plate / (3.0 * fj))
-                      if e_cap > 0 else bp.t)
-        detail = (f"N={N/1e3:.1f} kN at node {node}; fj=2.5*fck/gc="
-                  f"{fj:.1f} MPa, plate {bp.b:.0f}x{bp.d:.0f}x{bp.t:.1f}, "
-                  f"e={e:.1f} mm (cap {e_cap:.1f}), Abas={Abas:.0f} mm2, "
-                  f"fj*Abas={fj*Abas/1e3:.1f} kN >= N? "
-                  f"util={util:.3f}; t to fill plate ~{t_for_edge:.1f} mm"
-                  f"{note}")
+        sig_c = N / Abas if Abas > 0 else 0.0          # bearing pressure
+        # eccentric bearing (M/N): sig_max = N/A_plate + M/W_plate <= fj; uplift
+        # when sig_min < 0 (EN 1993-1-8 6.2.8 - tension then goes to the anchors)
+        A_plate = bp.b * bp.d
+        W_plate = bp.b * bp.d * bp.d / 6.0
+        e_load = M_base / N if N > 0 else 0.0
+        sig_max = N / A_plate + (M_base / W_plate if W_plate else 0.0)
+        sig_min = N / A_plate - (M_base / W_plate if W_plate else 0.0)
+        util = max(util, sig_max / fj if fj else 99.0)
+        uplift = " UPLIFT (sig_min<0 -> anchors carry tension)" \
+            if sig_min < -1e-6 else ""
+        # plate bending: the pressure cantilevers off the wall over c=e;
+        # t_p,req >= c*sqrt(2*sig_c/fy) (EN 1993-1-8 6.2.5)
+        t_req = e * math.sqrt(2.0 * sig_c / bp.fy_plate) if sig_c > 0 else 0.0
+        util = max(util, t_req / bp.t if bp.t else 99.0)
+        detail = (f"N={N/1e3:.1f} kN, M={M_base/1e6:.2f} kNm (e={e_load:.0f} mm) "
+                  f"at node {node}; fj=2.5*fck/gc={fj:.1f} MPa, plate "
+                  f"{bp.b:.0f}x{bp.d:.0f}x{bp.t:.1f}, c={e:.1f} mm (cap "
+                  f"{e_cap:.1f}), Abas={Abas:.0f} mm2; sig_max={sig_max:.1f}"
+                  f"<=fj? sig_min={sig_min:.1f}{uplift}; t_req(bending)="
+                  f"{t_req:.1f} mm vs t={bp.t:.1f}; util={util:.3f}{note}")
         return [CheckResult("BASEPLATE", case.name, f"node {node}", "-",
                             util, detail)]
     # no plate given: report the minimum bearing area needed
@@ -711,11 +723,14 @@ def _anchor_capacities(bp) -> Optional[dict]:
     v_rd_s = 0.5 * As * fuk / g_v                             # steel (k6=0.5)
     v_rk_c = bp.anchor_shear_rk or ANCHOR_SHEAR_RK_C.get(
         d, ANCHOR_SHEAR_RK_C[12])
-    v_rd_c = v_rk_c / gc                                      # concrete
+    v_rd_c = v_rk_c / gc                                      # concrete edge
+    # pry-out (EN 1992-4 7.2.2.4): V_Rk,cp = k8 * N_Rk,c (k8=1 if hef<60, else 2)
+    k_cp = 2.0 if hef >= 60.0 else 1.0
+    v_rd_cp = k_cp * n_rk_c0 * grp * psi_ed / gc             # pry-out
     return {"n_rd_s": n_rd_s, "n_rd_p": n_rd_p, "n_rd_c": n_rd_c,
-            "v_rd_s": v_rd_s, "v_rd_c": v_rd_c,
+            "v_rd_s": v_rd_s, "v_rd_c": v_rd_c, "v_rd_cp": v_rd_cp,
             "n_rd": min(n_rd_s, n_rd_p, n_rd_c),
-            "v_rd": min(v_rd_s, v_rd_c), "s": s}
+            "v_rd": min(v_rd_s, v_rd_c, v_rd_cp), "s": s}
 
 
 def _anchorage_checks(model: RackModel,
@@ -820,6 +835,20 @@ def _splice_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
                 continue
             N, V = abs(st.N), math.hypot(st.Vy, st.Vz)
             M = math.hypot(st.My, st.Mz)
+            # EN 1993-1-8 6.2.7.1(15): a splice away from a restraint picks up a
+            # second-order strut moment (member bow amplified by axial),
+            # considered one axis at a time -> down-aisle (local z) governs.
+            mat = model.material_of(m)
+            Lcr = m.L_buckling_z or mr.length
+            m_fb = 0.0
+            if Lcr > 0 and N > 0:
+                Ncr = math.pi ** 2 * mat.E * sec.Iz / Lcr ** 2
+                if Ncr > N:
+                    lam = math.sqrt(sec.area_eff * mat.fy / Ncr)
+                    a = buckling.ALPHA.get(sec.buckling_curve_z, 0.34)
+                    e0 = (sec.Welz / sec.A) * a * max(lam - 0.2, 0.0)
+                    m_fb = N * e0 / (1.0 - N / Ncr)
+            M += m_fb
 
             if sum_r2 > 1.0e-9:
                 F = max(math.hypot(N / n + M * abs(y) / sum_r2,
@@ -853,11 +882,19 @@ def _splice_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             R = min(Fv, Fb)
             gov = "bolt shear" if Fv <= Fb else f"bearing (t={t_eff:.1f} mm)"
             util = F / R
+            # EN 1993-1-8 6.2.7.1(14): the splice must transmit >= 25% of the
+            # max compressive force in the member (robustness floor)
+            rob = ""
+            if N > 0 and n * R < 0.25 * N:
+                util = max(util, 0.25 * N / (n * R))
+                rob = (f"; robustness: splice axial cap {n*R/1e3:.1f} kN "
+                       f"< 25% N = {0.25*N/1e3:.1f} kN")
+            fb_note = f", incl 2nd-order M_FB={m_fb/1e6:.2f} kNm" if m_fb else ""
             detail = (f"N={N/1e3:.1f} kN, V={V/1e3:.2f} kN, "
-                      f"M={M/1e6:.2f} kNm -> F_bolt={F/1e3:.2f} kN vs "
+                      f"M={M/1e6:.2f} kNm{fb_note} -> F_bolt={F/1e3:.2f} kN vs "
                       f"{sp.rows}x{sp.cols} M{sp.bolt_d:.0f} "
                       f"{sp.bolt_grade}/side: Fv={Fv/1e3:.2f}, "
-                      f"Fb={Fb/1e3:.2f} kN ({gov} governs){m_note}")
+                      f"Fb={Fb/1e3:.2f} kN ({gov} governs){m_note}{rob}")
             if worst is None or util > worst[0]:
                 worst = (util, detail, mid)
         if worst is not None:
@@ -1136,3 +1173,65 @@ def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
         r["status"] = "FAIL" if r["util"] > 1.0 + 1e-9 else "PASS"
     rows.sort(key=lambda r: (-r["util"], r["set"]))
     return rows
+
+
+def suggest_splice_positions(model, cases, max_length: float = 6000.0,
+                             min_above_floor: float = 1500.0) -> dict:
+    """Suggest probable upright-splice elevations from the ground.
+
+    Per EN 1993-1-8 6.2.7.1 + racking practice (SCI AD 471/393): place splices
+    just above a beam level (a restraint, where the down-aisle moment and the
+    second-order strut moment are low), above the first beam level and
+    >= min_above_floor, not in the lowest panel, one per inter-beam zone, and
+    spaced <= max_length (manufacture / transport).  Returns
+    {H, max_length, n_needed, candidates:[{z, Mz_kNm, recommended, note}]}.
+    """
+    blevels = sorted({round(model.nodes[m.node_i].z, 1)
+                      for m in model.members.values()
+                      if m.member_set == "pallet beams"})
+    H = max((nd.z for nd in model.nodes.values()), default=0.0)
+    if H <= 0 or not blevels:
+        return {"H": H, "max_length": max_length, "n_needed": 0,
+                "candidates": []}
+    # down-aisle (local z) moment envelope along the uprights: [(z, |Mz|)]
+    prof: List[Tuple[float, float]] = []
+    for case in cases:
+        for mid, mr in case.members.items():
+            m = model.members.get(mid)
+            if not m or m.member_set != "uprights":
+                continue
+            zi, zj = model.nodes[m.node_i].z, model.nodes[m.node_j].z
+            lo, hi = (zi, zj) if zi <= zj else (zj, zi)
+            asc = zi <= zj
+            for s in mr.stations:
+                prof.append((lo + s.x if asc else hi - s.x, abs(s.Mz)))
+
+    def mz_at(z: float) -> float:
+        near = [mz for zz, mz in prof if abs(zz - z) <= 75.0]
+        return max(near) if near else 0.0
+
+    first_beam = blevels[0]
+    cands = [{"z": round(b, 0), "Mz_kNm": round(mz_at(b) / 1e6, 2)}
+             for b in blevels
+             if b > first_beam + 1.0 and b >= min_above_floor - 1.0]
+    n_needed = max(int(math.ceil(H / max_length)) - 1, 0)
+    # spacing-aware bottom-up pick: each segment <= max_length, prefer the
+    # lowest-moment candidate within reach of the last cut
+    chosen, last = [], 0.0
+    while H - last > max_length + 1.0:
+        reach = [c for c in cands if last < c["z"] <= last + max_length + 1.0
+                 and c["z"] not in chosen]
+        if not reach:
+            break
+        pick = min(reach, key=lambda c: (c["Mz_kNm"], -c["z"]))
+        chosen.append(pick["z"])
+        last = pick["z"]
+    for c in cands:
+        c["recommended"] = c["z"] in chosen
+        c["note"] = ("recommended: low down-aisle moment, just above a beam "
+                     "restraint, within max length"
+                     if c["recommended"]
+                     else "candidate (above a beam level)")
+    cands.sort(key=lambda c: c["z"])
+    return {"H": round(H, 0), "max_length": max_length, "n_needed": n_needed,
+            "candidates": cands}
