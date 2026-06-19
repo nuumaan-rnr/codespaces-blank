@@ -844,11 +844,16 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                  "loading that maximises differential column moments and sway.")
         c = st.columns(3)
         lf_max = int(n_lanes) if is_di else int(n_bays)
+        _lf_default = lf_max // 2 if lf_max >= 2 else 0   # governing interior line
+        _lf = g("load_frame", _lf_default)
+        if _lf is None:                                   # None -> auto interior
+            _lf = _lf_default
         load_frame = c[0].number_input(
             f"Load frame (upright line 0..{'n_lanes' if is_di else 'n_bays'})",
-            0, lf_max, int(min(max(g("load_frame", 0), 0), lf_max)),
+            0, lf_max, int(min(max(_lf, 0), lf_max)),
             help="Upright line (front face for drive-in) carrying the placement "
-                 "& accidental loads. 0 = end frame.")
+                 "& accidental loads. Default = the governing INTERIOR frame "
+                 "(shared between two bays); 0 = end/corner frame.")
         beam_restrained = c[1].checkbox(
             "Rails/beams laterally restrained by the unit load" if is_di
             else "Beams laterally restrained by the unit load",

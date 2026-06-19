@@ -514,7 +514,13 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
             m.load_cases[lc.name] = lc
 
     # ---- placement (0.5 kN) at the front-face top-level upright -----------
-    k_load = max(0, min(int(cfg.load_frame), nL))
+    # default (load_frame None) -> a governing INTERIOR lane line (carries two
+    # lanes of load), matching the inner-frame loading used for the SPR model;
+    # a single-lane run has no interior line -> use line 0.
+    if cfg.load_frame is None:
+        k_load = nL // 2 if nL >= 2 else 0
+    else:
+        k_load = max(0, min(int(cfg.load_frame), nL))
     front = node_of[(k_load, nDpos - 1, rz(z_top))]
     placement = cfg.include_placement and cfg.placement_load > 0
     if placement:

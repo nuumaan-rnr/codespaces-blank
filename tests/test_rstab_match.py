@@ -41,6 +41,32 @@ if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
 
 
+def test_placement_accidental_on_interior_frame_by_default():
+    """RSTAB/EN 15512 load the governing INTERIOR upright line (shared between two
+    bays), not the corner/edge.  Default load_frame -> an interior line; an
+    explicit 0 still pins the end frame; single-bay falls back to the end."""
+    m = build_rack(RackConfig(module="single", n_bays=3, levels=[LevelSpec(gap=2000.0)],
+                              frame_height=2200.0))
+    xs = [nd.x for nd in m.nodes.values()]
+    xmin, xmax = min(xs), max(xs)
+    pl = m.nodes[m.load_cases["placement"].nodal_loads[0].node]
+    ac = m.nodes[m.load_cases["accidental_x"].nodal_loads[0].node]
+    assert xmin < pl.x < xmax              # interior, not an end/corner line
+    assert xmin < ac.x < xmax
+
+    # explicit end frame still honoured
+    e = build_rack(RackConfig(module="single", n_bays=3, levels=[LevelSpec(gap=2000.0)],
+                              frame_height=2200.0, load_frame=0))
+    assert e.nodes[e.load_cases["placement"].nodal_loads[0].node].x == min(
+        nd.x for nd in e.nodes.values())
+
+    # single bay: no interior line -> end frame
+    s = build_rack(RackConfig(module="single", n_bays=1, levels=[LevelSpec(gap=2000.0)],
+                              frame_height=2200.0))
+    assert s.nodes[s.load_cases["placement"].nodal_loads[0].node].x == min(
+        nd.x for nd in s.nodes.values())
+
+
 def test_connector_looseness_modelled_or_lumped():
     # default: looseness recorded on the hinge but carried in phi_l (engine does
     # NOT model the dead-band)

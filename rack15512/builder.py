@@ -296,15 +296,19 @@ class RackConfig:
     dead_load_beam: float = 0.05            # N/mm per beam
     placement_load: float = 500.0           # N horizontal at top (EN 15512)
     # accidental impact loads on an upright (EN 15512; 0 disables) -
-    # applied to the corner upright at accidental_height, combined at
-    # gamma = 1.0 with dead + pallet loads (accidental design situation)
+    # applied to the load_frame upright (an interior line by default) at
+    # accidental_height, combined at gamma = 1.0 with dead + pallet loads
+    # (accidental design situation)
     accidental_load_x: float = 1250.0       # N down-aisle
     accidental_load_y: float = 2500.0       # N cross-aisle
     accidental_height: float = 400.0        # mm above floor
     # upright line (frame) index 0..n_bays that carries the placement &
-    # accidental loads; for multi-bay runs pick a frame with an add-on
-    # connection.  0 = the end (starter) frame.
-    load_frame: int = 0
+    # accidental loads.  None (default) -> the governing INTERIOR upright line
+    # (shared between two bays, ~twice the axial of an end column), matching
+    # RSTAB/EN 15512 practice of loading an inner frame, not the corner/edge;
+    # falls back to the only (end) line for a single-bay run.  An explicit
+    # int still pins a specific line (0 = the end/starter frame).
+    load_frame: Optional[int] = None
     # switches to drop whole action types from the model + combinations
     include_placement: bool = True          # horizontal placement loads
     include_accidental: bool = True         # accidental impact loads
@@ -1138,8 +1142,15 @@ def build_rack(cfg: RackConfig) -> RackModel:
         else:
             pattern = False
 
-    # the frame (upright line) carrying the placement & accidental loads
-    li = max(0, min(int(cfg.load_frame), cfg.n_bays))
+    # the frame (upright line) carrying the placement & accidental loads.
+    # default (None) -> a governing INTERIOR line (shared between two bays);
+    # an interior column carries ~twice the end-column axial, so the placement
+    # and accidental impact land on the inner frame (RSTAB/EN 15512 practice),
+    # not the corner/edge.  Single-bay runs have no interior line -> use line 0.
+    if cfg.load_frame is None:
+        li = cfg.n_bays // 2 if cfg.n_bays >= 2 else 0
+    else:
+        li = max(0, min(int(cfg.load_frame), cfg.n_bays))
 
     top_j = j_of(beam_levels[-1])
     placement = cfg.include_placement and cfg.placement_load > 0
