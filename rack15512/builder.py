@@ -325,6 +325,10 @@ class RackConfig:
     # in the connector spring (EN 15512), instead of the default of lumping it
     # into the sway imperfection phi_l.  Needs the 2nd-order nonlinear solver.
     model_connector_looseness: bool = False
+    # optional NONLINEAR connector moment-rotation diagram (semi-rigid hinge
+    # nonlinearity, RSTAB-style): [[phi_rad, M_Nmm], ...] for phi>=0.  When set it
+    # replaces the linear connector spring on every pallet-beam end.
+    connector_moment_rotation: Optional[List[List[float]]] = None
     # nonlinear axial-dependent base: [[P_kN, C_Nmm_per_rad], ...] giving the base
     # ROTATIONAL stiffness as a function of column compression (RSTAB-style; 0 at
     # uplift = tearing).  When set, the engine iterates the base spring to match.
@@ -653,11 +657,12 @@ def build_rack(cfg: RackConfig) -> RackModel:
         beam_pairs[z] = []
         for i in range(cfg.n_bays):
             for s in sides:
+                mphi = cfg.connector_moment_rotation
                 m.add_member(
                     mid, nid(i, s, j), nid(i + 1, s, j), sec_name,
                     member_set="pallet beams", mesh=cfg.mesh_beam,
-                    hinge_i=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos),
-                    hinge_j=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos))
+                    hinge_i=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos, m_phi_z=mphi),
+                    hinge_j=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos, m_phi_z=mphi))
                 beam_pairs[z].append(mid)
                 mid += 1
 

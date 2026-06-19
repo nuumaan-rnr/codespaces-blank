@@ -177,6 +177,11 @@ class Hinge:
     m_rd_z: Optional[float] = None
     m_rd_y: Optional[float] = None
     looseness: float = 0.0
+    # optional NONLINEAR moment-rotation diagram for the connector (rz) axis:
+    # [[phi_rad, M_Nmm], ...] for phi >= 0 (the engine mirrors it for -phi).
+    # When given, the engine builds a multilinear M-phi connector (semi-rigid
+    # hinge nonlinearity, RSTAB-style) instead of the linear rz spring.
+    m_phi_z: Optional[List[List[float]]] = None
 
 
 @dataclass

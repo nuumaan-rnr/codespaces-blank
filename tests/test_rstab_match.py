@@ -59,3 +59,19 @@ def test_connector_looseness_modelled_or_lumped():
     assert b1.hinge_i.looseness == 0.01
     assert m1.imperfection.phi_l == 0.0
     assert m1.model_connector_looseness is True
+
+
+def test_nonlinear_connector_moment_rotation():
+    import os, tempfile
+    from rack15512 import io_json
+    mphi = [[0.01, 0.73e6], [0.04, 2.0e6], [0.10, 3.0e6]]
+    m = build_rack(RackConfig(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
+                              frame_height=2200.0, connector_moment_rotation=mphi))
+    b = next(mm for mm in m.members.values() if mm.member_set == "pallet beams")
+    assert b.hinge_i.m_phi_z == mphi and b.hinge_j.m_phi_z == mphi
+    # io_json round-trips the diagram
+    p = os.path.join(tempfile.mkdtemp(), "m.json")
+    io_json.save(m, p)
+    m2 = io_json.load(p)
+    b2 = next(mm for mm in m2.members.values() if mm.member_set == "pallet beams")
+    assert b2.hinge_i.m_phi_z == mphi

@@ -260,6 +260,20 @@ class OpenSeesEngine:
         ops.uniaxialMaterial("Elastic", self._mat_tag, k)
         return self._mat_tag
 
+    def _mphi_mat(self, m_phi) -> int:
+        """Nonlinear connector: a multilinear moment-rotation (M-phi) spring from
+        [[phi_rad, M_Nmm], ...] (phi>=0), mirrored to negative rotation - a
+        semi-rigid hinge nonlinearity (RSTAB-style)."""
+        pts = sorted(((float(p), float(m)) for p, m in m_phi if p >= 0.0))
+        if pts and pts[0][0] > 0.0:
+            pts.insert(0, (0.0, 0.0))
+        strain = [-p for p, _ in reversed(pts[1:])] + [p for p, _ in pts]
+        stress = [-m for _, m in reversed(pts[1:])] + [m for _, m in pts]
+        self._mat_tag += 1
+        ops.uniaxialMaterial("ElasticMultiLinear", self._mat_tag,
+                             "-strain", *strain, "-stress", *stress)
+        return self._mat_tag
+
     def _looseness_mat(self, k: float, gap: float) -> int:
         """Connector with rotational free-play (looseness): zero moment until the
         relative rotation exceeds +/- gap [rad], then stiffness k - the EN 15512
@@ -291,8 +305,12 @@ class OpenSeesEngine:
                 k = RIGID_ROT              # continuous axis
             elif k <= 0.0:
                 continue                   # released axis
-            # model connector free-play on the connector (local-z) spring only
-            if direction == 6 and loose > 0.0 and k < RIGID_ROT:
+            # connector (local-z) spring: nonlinear M-phi diagram if given, else
+            # a free-play dead-band if modelled, else a linear spring
+            mphi = getattr(hinge, "m_phi_z", None) if direction == 6 else None
+            if mphi:
+                mats.append(self._mphi_mat(mphi))
+            elif direction == 6 and loose > 0.0 and k < RIGID_ROT:
                 mats.append(self._looseness_mat(float(k), float(loose)))
             else:
                 mats.append(self._elastic_mat(float(k)))

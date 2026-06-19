@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-19 · RSTAB-matching options: EN1993 flat imperfection (1/300) vs EN15512 amplified; beam-connector stiffness override; nonlinear axial-dependent base (tearing under uplift); connector looseness modelled directly as a rotational dead-band (else lumped into phi_l). 2nd-order P-Delta fix + robust near-critical solver; validated vs RSTAB CO1. EN 15512 gamma_M1=1.1; STAAD/RSTAB export"
+BUILD = "2026-06-19 · RSTAB-matching options: EN1993 flat imperfection (1/300) vs EN15512 amplified; beam-connector stiffness override; nonlinear axial-dependent base (tearing under uplift); nonlinear connector moment-rotation diagram (semi-rigid hinge nonlinearity, RSTAB-style); connector looseness option. 2nd-order P-Delta fix + robust near-critical solver; validated vs RSTAB CO1. EN 15512 gamma_M1=1.1; STAAD/RSTAB export"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
