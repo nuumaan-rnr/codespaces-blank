@@ -28,6 +28,7 @@ def model_to_dict(m: RackModel) -> Dict[str, Any]:
         "base_plate": asdict(m.base_plate) if m.base_plate else None,
         "splices": [asdict(s) for s in m.splices],
         "links": [asdict(x) for x in m.links],
+        "base_axial_table": m.base_axial_table,
     }
 
 
@@ -68,6 +69,7 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
         m.splices.append(Splice(**x))
     for x in d.get("links", []):
         m.links.append(Link(**x))
+    m.base_axial_table = d.get("base_axial_table")
     return m
 
 

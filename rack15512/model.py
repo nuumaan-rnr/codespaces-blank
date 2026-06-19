@@ -301,12 +301,18 @@ class Imperfection:
     phi_l: float = 0.0
     phi_min: float = 1.0 / 500.0
     method: str = "EHF"
+    # 'EN15512' -> phi = sqrt(0.5+1/n)*(2*phi_s+phi_l) (the amplified rack value);
+    # 'EN1993'  -> phi = phi_s directly (the plain out-of-plumb, e.g. 1/300), as a
+    #              generic frame / RSTAB-style imperfection (no 2x or sqrt factor).
+    standard: str = "EN15512"
     directions: List[str] = field(
         default_factory=lambda: ["+x", "-x", "+y", "-y"])
 
     def _phi_from(self, phi_s: float) -> float:
         if self.phi is not None:
             return self.phi
+        if self.standard.upper() == "EN1993":
+            return max(phi_s, self.phi_min if self.phi_min < phi_s else 0.0)
         if not self.n_cols:
             raise ValueError(
                 "Imperfection: give either phi directly or n_cols "
@@ -617,6 +623,11 @@ class RackModel:
     # [N*mm/rad], for the report; set by the drive-in builder.
     base_stiffness_source: str = ""
     base_stiffness_value: float = 0.0
+    # nonlinear axial-dependent base: [[P_kN, C_Nmm_per_rad], ...] - the base
+    # rotational stiffness (about the down-aisle bending axis, support.ry) as a
+    # function of column compression; 0 at uplift (tearing).  When set, the engine
+    # iterates the base spring (fixed-point on the support reactions) per case.
+    base_axial_table: Optional[List[List[float]]] = None
 
     # ---- convenience builders -------------------------------------------
     def add_node(self, nid: int, x: float, y: float, z: float) -> Node:

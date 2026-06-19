@@ -314,6 +314,17 @@ class RackConfig:
     gamma_Q: float = 1.4
     phi_s: float = 1.0 / 350.0              # out-of-plumb tolerance (down-aisle)
     phi_s_cross: Optional[float] = None     # cross-aisle out-of-plumb; None=phi_s
+    # 'EN15512' -> phi = sqrt(0.5+1/n)*(2*phi_s+phi_l) (amplified rack value);
+    # 'EN1993'  -> phi = phi_s directly (plain out-of-plumb, e.g. 1/300; RSTAB-style)
+    imperfection_standard: str = "EN15512"
+    imperfection_method: str = "EHF"        # 'EHF' notional forces | 'geometry'
+    # explicit beam-to-upright connector stiffness [N*mm/rad]; when set it
+    # overrides the per-section master value (use to match a specific test/solver)
+    connector_stiffness_override: Optional[float] = None
+    # nonlinear axial-dependent base: [[P_kN, C_Nmm_per_rad], ...] giving the base
+    # ROTATIONAL stiffness as a function of column compression (RSTAB-style; 0 at
+    # uplift = tearing).  When set, the engine iterates the base spring to match.
+    base_axial_table: Optional[List[List[float]]] = None
     # drive-in ULS factors (RSTAB scheme): gamma_G for ULS proof combos, the
     # psi-reduced factor on simultaneous pay+placement, and the placement factor
     # for the anchor/uplift combos (1.0 DL + anchor_placement_factor*placement)
@@ -625,8 +636,10 @@ def build_rack(cfg: RackConfig) -> RackModel:
     for z, sec_name, _ in specs:
         sec = m.sections[sec_name]
         # connector stiffness resolves by the upright wall thickness it bolts to
-        # (beam-stiffness import), else the section's connector_k / cfg default
-        k_c = sec.connector_k_for(up.t) or cfg.connector_stiffness
+        # (beam-stiffness import), else the section's connector_k / cfg default;
+        # an explicit override (to match a test / external solver) wins.
+        k_c = (cfg.connector_stiffness_override
+               or sec.connector_k_for(up.t) or cfg.connector_stiffness)
         m_rd = sec.connector_m_rd or cfg.connector_m_rd
         loos = (sec.connector_looseness
                 if sec.connector_looseness is not None
@@ -1176,8 +1189,11 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # without looseness, so the largest looseness of the connectors in use
     # (per-beam from the master, or the cfg fallback) is included here.
     m.imperfection = Imperfection(
-        n_cols=n_lines, phi_s=cfg.phi_s, phi_l=max(looseness_used),
-        method="EHF", directions=["+x", "-x", "+y", "-y"])
+        n_cols=n_lines, phi_s=cfg.phi_s, phi_s_cross=cfg.phi_s_cross,
+        phi_l=max(looseness_used), method=cfg.imperfection_method,
+        standard=cfg.imperfection_standard,
+        directions=["+x", "-x", "+y", "-y"])
+    m.base_axial_table = cfg.base_axial_table
 
     # ---- seismic settings (IS 1893) -----------------------------------------
     if cfg.seismic:

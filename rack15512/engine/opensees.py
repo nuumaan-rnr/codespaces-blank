@@ -74,22 +74,76 @@ class OpenSeesEngine:
         """geom_sway = (phi, (dx, dy)) applies an initial out-of-plumb to
         the geometry: (x, y) += (dx, dy) * phi * (z - z_min)."""
 
-        n_steps = max(1, model.analysis.n_steps) if order == 2 else 1
-        converged = False
-        for attempt_steps in (n_steps, 5 * n_steps):
-            self._build(model, order, geom_sway)
-            self._apply_loads(model, loads)
-
-            converged = self._solve(model, attempt_steps)
+        def _once() -> CaseResult:
+            n_steps = max(1, model.analysis.n_steps) if order == 2 else 1
+            converged = False
+            for attempt_steps in (n_steps, 5 * n_steps):
+                self._build(model, order, geom_sway)
+                self._apply_loads(model, loads)
+                converged = self._solve(model, attempt_steps)
+                if converged:
+                    break
+            r = CaseResult(name=name, combo=combo, kind=kind, order=order,
+                           imp_direction=imp_direction, converged=converged)
             if converged:
-                break
+                self._collect(model, r)
+            ops.wipe()
+            return r
 
-        res = CaseResult(name=name, combo=combo, kind=kind, order=order,
-                         imp_direction=imp_direction, converged=converged)
-        if converged:
-            self._collect(model, res)
-        ops.wipe()
-        return res
+        # nonlinear axial-dependent base: fixed-point on the support reactions -
+        # the base rotational spring C depends on the column compression, so solve,
+        # read the base axial (= vertical reaction), update C = table(P), re-solve
+        # until the base stiffnesses are mutually consistent (RSTAB-style).
+        table = getattr(model, "base_axial_table", None)
+        if not table:
+            return _once()
+        saved = [s.ry for s in model.supports]
+        try:
+            res = _once()
+            for _ in range(6):
+                if not res.converged:
+                    break
+                if not self._update_base_from_table(model, res, table):
+                    break
+                res = _once()
+            return res
+        finally:
+            for s, ry0 in zip(model.supports, saved):   # don't mutate the model
+                s.ry = ry0
+
+    @staticmethod
+    def _interp_base(P_kN: float, table) -> float:
+        """Base rotational stiffness C [N*mm/rad] for column compression P [kN]
+        from the [[P,C],...] table; 0->C_MIN (tearing under uplift), flat beyond."""
+        C_MIN = 1.0e3
+        if P_kN <= table[0][0]:
+            return max(table[0][1], C_MIN)
+        if P_kN >= table[-1][0]:
+            return table[-1][1]
+        for (p0, c0), (p1, c1) in zip(table, table[1:]):
+            if p0 <= P_kN <= p1:
+                t = (P_kN - p0) / (p1 - p0) if p1 > p0 else 0.0
+                return max(c0 + t * (c1 - c0), C_MIN)
+        return max(table[-1][1], C_MIN)
+
+    def _update_base_from_table(self, model: RackModel, res: CaseResult,
+                                table) -> bool:
+        """Set each column-base rotational spring (support.ry) from its vertical
+        reaction via the table.  Returns True if any changed materially."""
+        changed = False
+        for sup in model.supports:
+            if not isinstance(sup.ry, (int, float)):
+                continue                       # not a rotational spring base
+            r = res.reactions.get(sup.node)
+            if r is None:
+                continue
+            P = r[2] / 1.0e3                   # vertical reaction [kN], +=compression
+            C = self._interp_base(P, table)
+            old = float(sup.ry)
+            if abs(C - old) > 0.03 * max(C, old, 1.0):
+                changed = True
+            sup.ry = C
+        return changed
 
     def modal(self, model: RackModel, masses: Dict[int, float],
               n_modes: int) -> "ModalResult":
