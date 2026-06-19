@@ -604,7 +604,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 elev += gap
             frame_h = st.number_input(
                 "Frame height [mm] (>= top level)", min_value=elev,
-                value=float(g("frame_height", None) or elev + 500), step=50.0)
+                value=max(float(g("frame_height", None) or (elev + 500)), elev),
+                step=50.0)
 
     with st.container(border=True):
         ui.section("◣", "Cross-aisle bracing")
