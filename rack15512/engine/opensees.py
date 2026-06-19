@@ -292,19 +292,30 @@ class OpenSeesEngine:
                     x_start=L * k / nseg, length=L / nseg))
 
     def _build_links(self, model: RackModel) -> None:
-        """Interface links (upright<->stiffener bolt connection): a zeroLength
+        """Interface links (upright<->stiffener bolt connection): a twoNodeLink
         with translational springs in the global axes (kx, ky stiff = transverse
-        tie; kz = vertical bolt-shear stiffness for partial composite); rotations
-        free, so no battened-chord moment artifact."""
+        tie; kz = vertical bolt-shear stiffness for partial composite).  The two
+        BENDING rotations are left free, so there is no battened-chord moment
+        artifact; only the TWIST about the vertical axis (rz) is tied to the
+        upright (equalDOF dof 6).  Without that tie the stiffener column is a
+        chain of beam elements whose uniform twist is a rigid-body mode with no
+        restraint - a singular global stiffness matrix that the linear solver
+        'converges' to garbage (stiffener nodes flying off by ~1e6 mm).  The
+        bolted connection physically prevents the stiffener from twisting about
+        the vertical relative to the upright, so tying rz is correct and, being a
+        pure rotational constraint, induces no translation/chord-moment coupling."""
         for lk in getattr(model, "links", []):
             ni, nj = self._node_tag[lk.node_i], self._node_tag[lk.node_j]
             mats = [self._elastic_mat(lk.kx), self._elastic_mat(lk.ky),
                     self._elastic_mat(lk.kz)]
             # twoNodeLink (proper for the finite offset): translational springs
-            # in the GLOBAL axes (orient local = global), rotations free
+            # in the GLOBAL axes (orient local = global), bending rotations free
             ops.element("twoNodeLink", self._new_tag(), ni, nj,
                         "-mat", *mats, "-dir", 1, 2, 3,
                         "-orient", 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+            # tie the stiffener twist (rz) to the upright - removes the otherwise
+            # unrestrained rigid-body torsion mode of the stiffener chain
+            ops.equalDOF(ni, nj, 6)
 
     def _build_supports(self, model: RackModel) -> None:
         for sup in model.supports:

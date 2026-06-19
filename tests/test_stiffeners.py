@@ -145,6 +145,19 @@ def test_solver_converges_both_types():
         assert cases and all(c.converged for c in cases if c.kind != "SEISMIC")
 
 
+def test_no_singular_stiffener_displacements():
+    """Regression: the stiffener column's twist about the vertical is a rigid-body
+    mode unless tied to the upright (engine ties rz, dof 6).  Without it the linear
+    solver 'converges' to garbage and the stiffener nodes fly off by ~1e6 mm.
+    Every nodal translation must stay physically bounded."""
+    for typ in (1, 2):
+        m = _reinf(stiffener_offset=30.0, stiffener_type=typ)
+        for c in run_all(m):
+            for d in (c.displacements or {}).values():
+                mag = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) ** 0.5
+                assert mag < 1000.0, f"runaway displacement {mag:.0f} mm ({c.name})"
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
