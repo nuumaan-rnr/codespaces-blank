@@ -260,7 +260,22 @@ class OpenSeesEngine:
         ops.uniaxialMaterial("Elastic", self._mat_tag, k)
         return self._mat_tag
 
-    def _hinged_end(self, struct_tag: int, hinge, mmap: _MemberMap) -> int:
+    def _looseness_mat(self, k: float, gap: float) -> int:
+        """Connector with rotational free-play (looseness): zero moment until the
+        relative rotation exceeds +/- gap [rad], then stiffness k - the EN 15512
+        connector looseness modelled directly (vs lumping it into the sway
+        imperfection).  ElasticMultiLinear, symmetric, with a flat dead-band."""
+        self._mat_tag += 1
+        big = gap + 1.0                       # 1 rad of travel beyond the gap
+        m_big = k * (big - gap)
+        strain = [-big, -gap, gap, big]
+        stress = [-m_big, 0.0, 0.0, m_big]
+        ops.uniaxialMaterial("ElasticMultiLinear", self._mat_tag,
+                             "-strain", *strain, "-stress", *stress)
+        return self._mat_tag
+
+    def _hinged_end(self, struct_tag: int, hinge, mmap: _MemberMap,
+                    model_looseness: bool = False) -> int:
         """Create the auxiliary node + translational tie + rotational
         springs (about the member local axes) for a semi-rigid member end;
         return the tag the member connects to."""
@@ -269,13 +284,18 @@ class OpenSeesEngine:
         ops.node(aux, *xyz)
         self._coords[aux] = xyz
         ops.equalDOF(struct_tag, aux, 1, 2, 3)
+        loose = (getattr(hinge, "looseness", 0.0) or 0.0) if model_looseness else 0.0
         mats, dirs = [], []
         for direction, k in ((4, hinge.rx), (5, hinge.ry), (6, hinge.rz)):
             if k is None:
                 k = RIGID_ROT              # continuous axis
             elif k <= 0.0:
                 continue                   # released axis
-            mats.append(self._elastic_mat(float(k)))
+            # model connector free-play on the connector (local-z) spring only
+            if direction == 6 and loose > 0.0 and k < RIGID_ROT:
+                mats.append(self._looseness_mat(float(k), float(loose)))
+            else:
+                mats.append(self._elastic_mat(float(k)))
             dirs.append(direction)
         if mats:
             ele = self._new_tag()
@@ -308,8 +328,9 @@ class OpenSeesEngine:
                 mmap.truss_tag = ele
                 continue
 
-            end_i = self._hinged_end(ti, m.hinge_i, mmap) if m.hinge_i else ti
-            end_j = self._hinged_end(tj, m.hinge_j, mmap) if m.hinge_j else tj
+            ml = getattr(model, "model_connector_looseness", False)
+            end_i = self._hinged_end(ti, m.hinge_i, mmap, ml) if m.hinge_i else ti
+            end_j = self._hinged_end(tj, m.hinge_j, mmap, ml) if m.hinge_j else tj
 
             self._transf_tag += 1
             ttype = "PDelta" if order == 2 else "Linear"

@@ -39,3 +39,23 @@ def test_base_table_stored_on_model():
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_connector_looseness_modelled_or_lumped():
+    # default: looseness recorded on the hinge but carried in phi_l (engine does
+    # NOT model the dead-band)
+    m0 = build_rack(RackConfig(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
+                               frame_height=2200.0, connector_looseness=0.01))
+    b0 = next(mm for mm in m0.members.values() if mm.member_set == "pallet beams")
+    assert b0.hinge_i.looseness == 0.01                 # recorded
+    assert m0.imperfection.phi_l >= 0.01                # carried in the imperfection
+    assert m0.model_connector_looseness is False
+
+    # modelled directly: engine models the dead-band, NOT lumped into phi_l
+    m1 = build_rack(RackConfig(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
+                               frame_height=2200.0, connector_looseness=0.01,
+                               model_connector_looseness=True))
+    b1 = next(mm for mm in m1.members.values() if mm.member_set == "pallet beams")
+    assert b1.hinge_i.looseness == 0.01
+    assert m1.imperfection.phi_l == 0.0
+    assert m1.model_connector_looseness is True

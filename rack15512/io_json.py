@@ -29,6 +29,7 @@ def model_to_dict(m: RackModel) -> Dict[str, Any]:
         "splices": [asdict(s) for s in m.splices],
         "links": [asdict(x) for x in m.links],
         "base_axial_table": m.base_axial_table,
+        "model_connector_looseness": m.model_connector_looseness,
     }
 
 
@@ -70,6 +71,7 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
     for x in d.get("links", []):
         m.links.append(Link(**x))
     m.base_axial_table = d.get("base_axial_table")
+    m.model_connector_looseness = d.get("model_connector_looseness", False)
     return m
 
 

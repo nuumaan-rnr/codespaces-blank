@@ -628,6 +628,10 @@ class RackModel:
     # function of column compression; 0 at uplift (tearing).  When set, the engine
     # iterates the base spring (fixed-point on the support reactions) per case.
     base_axial_table: Optional[List[List[float]]] = None
+    # when True the engine models connector looseness (hinge.looseness) as a
+    # rotational dead-band; otherwise the hinge value is only a record and the
+    # looseness is carried in the sway imperfection phi_l (the default).
+    model_connector_looseness: bool = False
 
     # ---- convenience builders -------------------------------------------
     def add_node(self, nid: int, x: float, y: float, z: float) -> Node:

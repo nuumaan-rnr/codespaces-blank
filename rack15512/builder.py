@@ -321,6 +321,10 @@ class RackConfig:
     # explicit beam-to-upright connector stiffness [N*mm/rad]; when set it
     # overrides the per-section master value (use to match a specific test/solver)
     connector_stiffness_override: Optional[float] = None
+    # model the connector looseness (free-play) DIRECTLY as a rotational dead-band
+    # in the connector spring (EN 15512), instead of the default of lumping it
+    # into the sway imperfection phi_l.  Needs the 2nd-order nonlinear solver.
+    model_connector_looseness: bool = False
     # nonlinear axial-dependent base: [[P_kN, C_Nmm_per_rad], ...] giving the base
     # ROTATIONAL stiffness as a function of column compression (RSTAB-style; 0 at
     # uplift = tearing).  When set, the engine iterates the base spring to match.
@@ -644,7 +648,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         loos = (sec.connector_looseness
                 if sec.connector_looseness is not None
                 else cfg.connector_looseness)
-        looseness_used.append(loos)
+        looseness_used.append(loos)            # always recorded on the hinge
         j = j_of(z)
         beam_pairs[z] = []
         for i in range(cfg.n_bays):
@@ -1188,12 +1192,16 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # when modelled in the hinges; the builder's hinges are linear springs
     # without looseness, so the largest looseness of the connectors in use
     # (per-beam from the master, or the cfg fallback) is included here.
+    # looseness goes EITHER into the imperfection phi_l (default) OR is modelled
+    # directly as a connector dead-band (model_connector_looseness) - never both
+    phi_l_used = 0.0 if cfg.model_connector_looseness else max(looseness_used)
     m.imperfection = Imperfection(
         n_cols=n_lines, phi_s=cfg.phi_s, phi_s_cross=cfg.phi_s_cross,
-        phi_l=max(looseness_used), method=cfg.imperfection_method,
+        phi_l=phi_l_used, method=cfg.imperfection_method,
         standard=cfg.imperfection_standard,
         directions=["+x", "-x", "+y", "-y"])
     m.base_axial_table = cfg.base_axial_table
+    m.model_connector_looseness = cfg.model_connector_looseness
 
     # ---- seismic settings (IS 1893) -----------------------------------------
     if cfg.seismic:
