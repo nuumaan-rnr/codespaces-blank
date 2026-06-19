@@ -418,8 +418,8 @@ class SeismicSettings:
 class CheckSettings:
     """EN 15512 / EN 1993 verification settings (all overridable)."""
 
-    gamma_M0: float = 1.0          # cross-section resistance
-    gamma_M1: float = 1.0          # member buckling resistance
+    gamma_M0: float = 1.0          # cross-section resistance (EN 15512: 1.0)
+    gamma_M1: float = 1.1          # member buckling/stability resistance (EN 15512: 1.1)
     k_M: float = 1.0               # moment interaction factor (buckling)
     # pallet beams are normally laterally restrained by the unit load; when True
     # the LTB check records that assumption (informative) instead of computing
@@ -581,7 +581,7 @@ class BuiltUpColumn:
     panel_a: float = 500.0             # batten / lacing panel spacing a [mm]
     L: Optional[float] = None          # column length [mm]; None -> member length
     e0_ratio: float = 500.0            # initial bow imperfection e0 = L / ratio
-    gamma_M1: float = 1.0
+    gamma_M1: float = 1.1              # member buckling/stability resistance (EN 15512: 1.1)
     # battened: stiffness of one batten about the column axis (I_b) [mm^4];
     # large value -> the chord term governs S_v (EN 1993-1-1 eq 6.73)
     batten_I: Optional[float] = None

@@ -23,7 +23,7 @@ from .model import CrossSection, Steel
 
 def upright_utilisation(sec: CrossSection, mat: Steel, Lcr_y: float, Lcr_z: float,
                         N: float, My: float = 0.0, Mz: float = 0.0, *,
-                        gamma_M1: float = 1.0, gamma_M0: float = 1.0,
+                        gamma_M1: float = 1.1, gamma_M0: float = 1.0,
                         k_M: float = 1.0, beta_T: float = 0.7) -> Dict:
     """Closed-form column utilisation for one section, mirroring
     en15512._buckling_checks.  N is the axial COMPRESSION magnitude [N] (>0),
@@ -65,7 +65,7 @@ def upright_utilisation(sec: CrossSection, mat: Steel, Lcr_y: float, Lcr_z: floa
 
 def suggest_uprights(lib, fy_of: Callable[[str], float], *, N: float,
                      Lcr_y: float, Lcr_z: float, E: float = 210000.0,
-                     G: float = 81000.0, gamma_M1: float = 1.0,
+                     G: float = 81000.0, gamma_M1: float = 1.1,
                      gamma_M0: float = 1.0, k_M: float = 1.0,
                      beta_T: float = 0.7, My: float = 0.0, Mz: float = 0.0
                      ) -> List[Dict]:
