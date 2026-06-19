@@ -8,8 +8,10 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rack15512.analysis import run_all
-from rack15512.builder import RackConfig, build_rack
-from rack15512.checks.en15512 import run_checks, upright_set_buckling_rows
+from rack15512.builder import RackConfig, build_rack, _closed_upright_section
+from rack15512.checks.en15512 import (_chi_ft, run_checks,
+                                      upright_set_buckling_rows)
+from rack15512.model import CrossSection, Steel
 
 _HEAVY = dict(module="single", n_bays=3, beam_levels=[1800.0, 3600.0, 5400.0],
               depth=1000.0, frame_height=6000.0, bracing_pitch=600.0,
@@ -80,6 +82,43 @@ def test_buckling_reduces_without_moment_spike():
                 stiffener_offset=30.0, stiffener_type=1)
     assert reinf["util"] < bare["util"]          # buckling reduced
     assert reinf["My_kNm"] <= bare["My_kNm"] + 0.1   # no induced moment
+
+
+def _open_upright_with_ft():
+    """A lipped-channel upright carrying gross FT data from the master: small
+    St-Venant torsion, sizeable warping, shear-centre offset from the centroid
+    (so flexural-torsional buckling can govern)."""
+    return CrossSection(
+        name="UP-OC", material="S355", A=600.0, Iy=1.0e6, Iz=0.9e6,
+        J=800.0, Wely=2.0e4, Welz=1.8e4, A_eff=540.0, buckling_curve_y="b",
+        t=2.0, width_b=100.0, depth_h=100.0,
+        It_gross=800.0, Iw_gross=2.5e9, y0=35.0)
+
+
+def test_closed_section_reduces_warping_and_centres_shear_centre():
+    up = _open_upright_with_ft()
+    closed = _closed_upright_section("UP-OC~closed", up)
+    # St-Venant torsion jumps (closed cell, Bredt); warping collapses; the
+    # shear centre moves onto the centroid.
+    assert closed.It_gross > up.It_gross * 100
+    assert closed.Iw_gross < up.Iw_gross * 0.1
+    assert closed.y0 == 0.0
+    # the flexural section is untouched (composite gain lives on the stiffener).
+    assert closed.A == up.A and closed.Iy == up.Iy and closed.Iz == up.Iz
+
+
+def test_type1_closed_beats_open_on_ft():
+    """With master FT data, the open upright is penalised by flexural-torsional
+    buckling; closing the face (Type 1) lifts the FT reduction factor so the
+    closed section is governed by ordinary flexural buckling instead."""
+    mat = Steel(name="S355")
+    up = _open_upright_with_ft()
+    closed = _closed_upright_section("UP-OC~closed", up)
+    length, ncr_y = 3000.0, 250.0e3
+    chi_open = _chi_ft(up, mat, length, ncr_y)
+    chi_closed = _chi_ft(closed, mat, length, ncr_y)
+    assert chi_open is not None and chi_closed is not None
+    assert chi_closed > chi_open                 # Type 1 FT credit is real
 
 
 def test_solver_converges_both_types():

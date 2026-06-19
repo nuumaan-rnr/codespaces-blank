@@ -98,16 +98,31 @@ def _bolt_slip_stiffness(d: float, fub: float, fu: float,
 
 
 def _closed_upright_section(name, up):
-    """Type-1 stiffener closes the upright's open face -> a closed cell.  Credit
-    the much larger St-Venant torsion (Bredt: It = 4*Am^2 / (perimeter/t)) so the
-    flexural-torsional buckling resistance reflects the closed section."""
+    """Type-1 stiffener closes the upright's open face -> a closed cell.  Make the
+    closed-section credit physically consistent for the flexural-torsional check
+    (EN 15512 9.7.5):
+
+      * St-Venant torsion is much larger (Bredt: It = 4*Am^2 / (perimeter/t)) and
+        now dominates Ncr,T;
+      * a closed cell warps very little, so the warping constant Iw collapses to a
+        small fraction of the open value;
+      * the shear centre moves onto (near) the centroid, so y0 -> 0 and the
+        flexural-torsional coupling decouples (i0^2 = (Iy+Iz)/A).
+
+    Only It_gross/Iw_gross/y0 (the FT inputs) change; the flexural section
+    properties (A, Iy, Iz, section moduli) are unchanged because the thin closing
+    lip adds negligible bending area on the upright's own centroid line - that
+    composite gain is carried by the separate stiffener member, not here."""
     from dataclasses import replace
     h = up.depth_h or 100.0
     b = up.width_b or 100.0
     t = up.t or 2.0
     it_closed = 4.0 * (h * b) ** 2 / (2.0 * (h + b) / t)
     it = max(it_closed, up.It_gross or up.J or 1.0)
-    return replace(up, name=name, It_gross=it, J=max(it, up.J))
+    # closed cell: warping is negligible (~a few % of the open lipped channel).
+    iw_closed = (up.Iw_gross * 0.05) if up.Iw_gross else up.Iw_gross
+    return replace(up, name=name, It_gross=it, J=max(it, up.J),
+                   Iw_gross=iw_closed, y0=0.0)
 
 
 @dataclass
