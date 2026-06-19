@@ -337,12 +337,227 @@ def main(argv: Optional[List[str]] = None) -> None:
     ap = argparse.ArgumentParser(description="Generate upright & beam load charts.")
     ap.add_argument("--master", required=True, help="section master .xlsx")
     ap.add_argument("--out", default="charts", help="output directory")
+    ap.add_argument("--model", action="store_true",
+                    help="model-based upright working-load charts (N+My+Mz, full FEA)")
     args = ap.parse_args(argv)
+    if args.model:
+        s = generate_model_based(args.master, args.out)
+        print(f"model-based upright charts: {s['sections']} sections")
+        print(f"  {s['xlsx']}\n  {s['png_zip']}")
+        return
     summary = generate(args.master, args.out)
     print(f"uprights: {summary['uprights']} charts, beams: {summary['beams']} charts")
     print(f"  {summary['upright_xlsx']}")
     print(f"  {summary['beam_xlsx']}")
     print(f"  {summary['png_zip']}")
+
+
+# =====================================================================
+# MODEL-BASED upright working-load charts (full FEA: N + My + Mz)
+# =====================================================================
+# Unlike the closed-form charts above (pure axial N_b,Rd, an upper bound), these
+# build the real rack and find the axial at which the GOVERNING upright
+# interaction N/Nb,Rd + kM(My/My,Rd + Mz/Mz,Rd) reaches 1.0 - so the down-aisle
+# connector/sway/imperfection moments and cross-aisle moment are included.
+# Reference rack: single-module 3-bay (validated within 2% of, and slightly
+# conservative vs, the back-to-back rack for the down-aisle upright capacity),
+# 5 levels, beam RHS112X50X1.6, base/connector/imperfections from the saved
+# archetype (examples/loadchart_archetype.json).  ULS2 governs (verified).
+
+import json as _json
+
+_ARCH_PATH = os.path.join(os.path.dirname(__file__), "..", "examples",
+                          "loadchart_archetype.json")
+MODEL_BEAM = "RHS112X50X1.6"
+MODEL_NLEV = 5
+MODEL_NBAYS = 3
+MODEL_DA = list(range(250, 4001, 50))      # beam gap = Lcr_DA [mm], 50 mm steps
+# (label, bracing_type, pitch, with-stiffener)
+MODEL_CONFIGS = [
+    ("X-500", "X", 500.0, False), ("X-600", "X", 600.0, False),
+    ("D-1000", "D", 500.0, False), ("D-1200", "D", 600.0, False),
+    ("XS-500", "X", 500.0, True), ("XS-600", "X", 600.0, True),
+]
+
+
+def _load_archetype() -> dict:
+    return _json.load(open(_ARCH_PATH, encoding="utf-8"))
+
+
+def _label(btype, pitch, xs):
+    if xs:
+        return f"XS-{int(pitch)}"
+    return f"X-{int(pitch)}" if btype == "X" else f"D-{int(2 * pitch)}"
+
+
+def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load):
+    """Single-module 3-bay rack at a per-level load, reduced to the governing
+    ULS2 combination with down-aisle imperfection (fast capacity eval)."""
+    import dataclasses
+    from .builder import RackConfig, build_rack, LevelSpec
+    fields = {f.name for f in dataclasses.fields(RackConfig)}
+    kw = {k: v for k, v in arch.items() if k in fields}
+    h = MODEL_NLEV * gap + 200.0
+    kw["levels"] = [LevelSpec(gap=gap, beam_section=MODEL_BEAM, pallet_load=load)
+                    for _ in range(MODEL_NLEV)]
+    kw.update(master=mw, module="single", n_bays=MODEL_NBAYS,
+              upright_section=section, beam_section=MODEL_BEAM,
+              bracing_type=btype, bracing_pitch=pitch, frame_height=h,
+              pallet_load_per_level=load, ca_brace_zones=(), ca_x_height=None,
+              steel_fy=FY_UPRIGHT, fy_override=True)
+    if xs:
+        depth = round(mw.library.get(section).depth_h or 0.0)
+        st = {90: "IN_STIFFENER90X1.6", 120: "IN_STIFFENER120X1.6"}.get(depth)
+        if not st:
+            return None
+        kw.update(stiffener_section=st, reinforce_height=h, stiffener_type=1)
+    m = build_rack(RackConfig(**kw))
+    m.analysis.compute_alpha_cr = False
+    m.imperfection.directions = ["+x"]
+    m.combinations = [c for c in m.combinations if c.name == "ULS2"]
+    return m
+
+
+def _eval_upright(mw, arch, section, gap, btype, pitch, xs, load):
+    from .analysis import run_all, UnstableModelError
+    from .checks.en15512 import run_checks, upright_set_buckling_rows
+    m = _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load)
+    if m is None:
+        return None
+    try:
+        rows = upright_set_buckling_rows(m, run_checks(m, run_all(m)))
+    except Exception:
+        return (99.0, 0.0, 0.0, 0.0)
+    up = [r for r in rows if r["set"].startswith("Upright")]
+    if not up:
+        return (0.0, 0.0, 0.0, 0.0)
+    r = max(up, key=lambda r: r["util"])
+    return (r["util"], r["N_kN"], r["My_kNm"], r["Mz_kNm"])
+
+
+def model_upright_point(mw, arch, section, gap, btype, pitch, xs):
+    """Working-load capacity at one point: the axial where the governing upright
+    interaction = 1.0 with the real N/My/Mz (fixed-point search, closed-form seed)."""
+    lcr_ca = pitch if btype == "X" else 2.0 * pitch
+    sec = mw.library.get(section)
+    if xs:
+        depth = round(sec.depth_h or 0.0)
+        stn = {90: "IN_STIFFENER90X1.6", 120: "IN_STIFFENER120X1.6"}.get(depth)
+        if not stn:
+            return None
+        st = mw.library.get(stn)
+        sec = combined_upright_section(sec, st, st.mount_offset or 30.0)
+    n_axial, _ = upright_capacity_kN(sec, FY_UPRIGHT, gap, lcr_ca)
+    load = max(n_axial * 1e3 / MODEL_NLEV / 1.4 * 0.8, 300.0)
+    best = None
+    for _ in range(6):
+        res = _eval_upright(mw, arch, section, gap, btype, pitch, xs, load)
+        if res is None:
+            return None
+        u, N, My, Mz = res
+        best = (load, u, N, My, Mz)
+        if u > 0 and abs(u - 1.0) < 0.04:
+            break
+        load = min(max(load / max(u, 1e-3), 1.0), 1e8)
+    load, u, N, My, Mz = best
+    if u <= 0:
+        return None
+    s = 1.0 / u
+    return {"section": section, "config": _label(btype, pitch, xs),
+            "lcr_da": int(gap), "lcr_ca": int(lcr_ca),
+            "load_per_level_kN": round(load * s / 1e3, 2),
+            "N_cap_kN": round(N * s, 2), "My_kNm": round(My * s, 3),
+            "Mz_kNm": round(Mz * s, 3)}
+
+
+def generate_model_based(master_path, out_dir, checkpoint=None):
+    """Resumable model-based upright working-load charts (N+My+Mz)."""
+    mw = load_master(master_path)
+    arch = _load_archetype()
+    os.makedirs(out_dir, exist_ok=True)
+    checkpoint = checkpoint or os.path.join(out_dir, "_model_checkpoint.json")
+    done = {}
+    if os.path.exists(checkpoint):
+        done = _json.load(open(checkpoint, encoding="utf-8"))
+    sections = mw.library.names("upright")
+    todo = [(s, bt, p, xs, g) for s in sections
+            for (_lbl, bt, p, xs) in MODEL_CONFIGS for g in MODEL_DA]
+    n = 0
+    for s, bt, p, xs, g in todo:
+        key = f"{s}|{_label(bt, p, xs)}|{g}"
+        if key in done:
+            continue
+        pt = model_upright_point(mw, arch, s, float(g), bt, p, xs)
+        done[key] = pt or {}
+        n += 1
+        if n % 40 == 0:
+            _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
+            print(f"  ... {len([k for k in done if done[k]])} points done", flush=True)
+    _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
+    return _finalize_model_based(done, out_dir)
+
+
+def _finalize_model_based(done, out_dir):
+    import openpyxl
+    up_dir = os.path.join(out_dir, "uprights_model")
+    os.makedirs(up_dir, exist_ok=True)
+    bysec = {}
+    for pt in done.values():
+        if not pt:
+            continue
+        c = bysec.setdefault(pt["section"], {}).setdefault(
+            pt["config"], {"da": [], "cap": [], "load": [], "lcr_ca": pt["lcr_ca"]})
+        c["da"].append(pt["lcr_da"])
+        c["cap"].append(pt["N_cap_kN"])
+        c["load"].append(pt["load_per_level_kN"])
+    for sec, curves in bysec.items():
+        for c in curves.values():
+            order = sorted(range(len(c["da"])), key=lambda i: c["da"][i])
+            for k in ("da", "cap", "load"):
+                c[k] = [c[k][i] for i in order]
+        _plot_model_upright(sec, curves, os.path.join(up_dir, f"{sec}.png"))
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Uprights_model"
+    ws.append(["section", "config", "Lcr_CA_mm", "Lcr_DA_mm",
+               "upright_axial_capacity_kN", "load_per_level_kN", "My_kNm", "Mz_kNm"])
+    for key, pt in sorted(done.items()):
+        if pt:
+            ws.append([pt["section"], pt["config"], pt["lcr_ca"], pt["lcr_da"],
+                       pt["N_cap_kN"], pt["load_per_level_kN"], pt["My_kNm"],
+                       pt["Mz_kNm"]])
+    xlsx = os.path.join(out_dir, "Upright_Load_Charts_MODEL.xlsx")
+    wb.save(xlsx)
+    png_zip = os.path.join(out_dir, "upright_model_png.zip")
+    with zipfile.ZipFile(png_zip, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(os.listdir(up_dir)):
+            if f.endswith(".png"):
+                z.write(os.path.join(up_dir, f), f"uprights_model/{f}")
+    return {"sections": len(bysec), "xlsx": xlsx, "png_zip": png_zip}
+
+
+def _plot_model_upright(name, curves, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    for label in ("X-500", "X-600", "D-1000", "D-1200", "XS-500", "XS-600"):
+        c = curves.get(label)
+        if not c:
+            continue
+        colour, ls = _STYLE.get(label, (branding.GREY, "-"))
+        ax.plot(c["da"], c["load"], ls, color=colour, lw=1.8, label=label)
+    ax.set_xlabel("Down-aisle buckling length  Lcr,DA = beam gap  [mm]")
+    ax.set_ylabel("Working load per level, per bay  [kN]  (N+My+Mz = 1)")
+    ax.set_title(f"{name}  -  model-based upright load chart  ·  fy=355  ·  "
+                 f"gamma_M1=1.1\nsingle-module 3-bay, 5 levels, RHS112 beam, "
+                 f"EN 15512 imperfections (N+My+Mz)", fontsize=9.5)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
