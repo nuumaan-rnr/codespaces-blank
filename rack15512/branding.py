@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-19 · EN 15512 material factor: gamma_M1 = 1.1 on member buckling/stability (uprights, stiffeners, braces, built-up), gamma_M0 = 1.0 on cross-section; stiffener twist (rz) tied to the upright (no singular torsion mode); partial-composite stiffener with per-section mount_offset; type 1 closed-section FT credit"
+BUILD = "2026-06-19 · Load charts (rack15512.loadcharts): upright axial-capacity charts vs Lcr_DA (250-5000, 50 mm steps) for X/D/XS at pitch 500/600 (fy 355, gamma_M1 1.1); beam load-per-level charts vs span (500-4000, 50 mm steps) with semi-rigid connectors per upright thickness (deflection L/200). EN 15512 material factor gamma_M1 = 1.1; stiffener twist tied to upright; partial-composite stiffener with per-section mount_offset"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark
