@@ -310,8 +310,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Stiffener offset [mm]", 0.0, 200.0,
             float(g("stiffener_offset", 30.0)), 5.0,
             disabled=(stiff_sel == "(none)"),
-            help="Upright↔stiffener centroid gap (cross-aisle); captures the CG "
-                 "shift. Set to the real centroid separation of the assembly.")
+            help="Fallback upright↔stiffener centroid gap (cross-aisle); captures "
+                 "the CG shift. Used only when the selected stiffener has no "
+                 "mount_offset in the master (the master value takes precedence).")
         stiffener_type = _sc[1].selectbox(
             "Stiffener type", [1, 2],
             index=0 if int(g("stiffener_type", 1)) == 1 else 1,

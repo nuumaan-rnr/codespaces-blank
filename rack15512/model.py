@@ -96,6 +96,11 @@ class CrossSection:
     It_gross: Optional[float] = None              # St-Venant torsion [mm^4]
     Iw_gross: Optional[float] = None              # warping constant [mm^6]
     y0: Optional[float] = None                    # shear-centre offset [mm]
+    # for stiffener sections: cross-aisle distance from the UPRIGHT centroid line
+    # to THIS stiffener's centroid line when mounted (the assembly centroid gap).
+    # When given on the selected stiffener, the builder uses it to place the
+    # stiffener node instead of the global RackConfig.stiffener_offset.
+    mount_offset: Optional[float] = None          # [mm]
     Iy_gross: Optional[float] = None
     Iz_gross: Optional[float] = None
     # shear areas for Timoshenko (shear-flexible) beams [mm^2]; when both are

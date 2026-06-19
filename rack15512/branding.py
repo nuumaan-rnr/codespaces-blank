@@ -11,7 +11,7 @@ TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
 PRODUCT = "EN 15512 SPR Design"
 # Build marker — shown in the sidebar so you can confirm which code is running.
-BUILD = "2026-06-19 · Stiffener interface = M8 8.8 bolts at a chosen pitch (300/600 mm); bolt-shear stiffness auto-derived (EN 1993-1-8) and spread by the pitch so closer bolts = more composite (300 mm: 16% vs 600 mm: 10% share); type 1 closed-section FT credit now physically consistent (Bredt St-Venant torsion up, warping collapses, shear centre → centroid) so flexural-torsional buckling stops governing the closed upright"
+BUILD = "2026-06-19 · Stiffener as a partial-composite member: node placed at the selected stiffener's own mount_offset from the master (per-section centroid gap; falls back to the global offset); M8 8.8 bolts at 300/600 mm with auto-derived shear stiffness; type 1 closed-section FT credit physically consistent (Bredt torsion up, warping collapses, shear centre → centroid); stiffener buckling length = bolt pitch and reported as its own set"
 
 # brand palette (sampled from the logo)
 TEAL = "#0C8490"          # primary mark

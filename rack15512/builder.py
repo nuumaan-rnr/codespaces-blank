@@ -945,8 +945,11 @@ def build_rack(cfg: RackConfig) -> RackModel:
                         um0.section = up_zone_section
             ps = partner.get(s, s)
             interior = 1.0 if y_of_side[ps] >= y_of_side[s] else -1.0
-            dy = (interior if cfg.stiffener_type == 1 else -interior) \
-                * cfg.stiffener_offset
+            # offset magnitude: the selected stiffener's own mounted centroid gap
+            # (from the master) when given, else the global config value
+            off = (st_sec.mount_offset if st_sec.mount_offset is not None
+                   else cfg.stiffener_offset)
+            dy = (interior if cfg.stiffener_type == 1 else -interior) * off
             x_up = i * cfg.bay_width
             for j in zone_js:                 # offset stiffener nodes
                 m.add_node(SNID + nid(i, s, j), x_up, y_of_side[s] + dy, zs[j])

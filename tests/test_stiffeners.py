@@ -121,6 +121,23 @@ def test_type1_closed_beats_open_on_ft():
     assert chi_closed > chi_open                 # Type 1 FT credit is real
 
 
+def test_mount_offset_from_section_overrides_config():
+    """When the selected stiffener carries a mount_offset (from the master), the
+    builder places the stiffener node at that distance, NOT the global config
+    offset; the direction is still set automatically by the type."""
+    from rack15512.builder import _pick
+    from rack15512.library import SectionLibrary
+    lib = SectionLibrary.bundled()
+    lib.get(_pick(lib, _STIFF, "upright")).mount_offset = 42.0
+    m = build_rack(RackConfig(**_HEAVY, library=lib, stiffener_section=_STIFF,
+                              reinforce_height=_RH, stiffener_offset=30.0,
+                              stiffener_type=1))
+    SNID = 8_000_000
+    sn = next(nd for nid, nd in m.nodes.items() if nid >= SNID)
+    up = m.nodes[sn.id - SNID]
+    assert abs(abs(sn.y - up.y) - 42.0) < 1e-6      # section value, not 30
+
+
 def test_solver_converges_both_types():
     for typ in (1, 2):
         m = _reinf(stiffener_offset=30.0, stiffener_type=typ)

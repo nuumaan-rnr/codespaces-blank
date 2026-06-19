@@ -309,6 +309,9 @@ _TEMPLATE_FIELDS = {
     "it_gross": ("It_gross", CM4), "it": ("It_gross", CM4),
     "iw_gross": ("Iw_gross", 1.0e6), "iw": ("Iw_gross", 1.0e6),
     "y0": ("y0", 10.0), "depth_h": ("depth_h", 1.0), "depth": ("depth_h", 1.0),
+    # stiffener mounting: cross-aisle centroid gap to the upright [mm]
+    "mount_offset": ("mount_offset", 1.0), "centroid_offset": ("mount_offset", 1.0),
+    "offset": ("mount_offset", 1.0),
     "width_b": ("width_b", 1.0), "width": ("width_b", 1.0),
     "t": ("t", 1.0), "e1": ("e1", 1.0), "e2": ("e2", 1.0),
     "connector_k": ("connector_k", 1.0e6),       # kNm/rad -> N*mm/rad
