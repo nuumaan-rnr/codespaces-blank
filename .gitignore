@@ -9,4 +9,5 @@ build/
 dist/
 projects/
 masters/
+charts/
 .rnr_settings.json
