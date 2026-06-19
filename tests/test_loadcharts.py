@@ -75,6 +75,22 @@ def test_beam_capacity_positive_decreasing_and_thicker_upright_stronger():
                                      beam.connector_m_rd)[1] == "deflection"
 
 
+def test_model_based_xs_combines_upright_and_stiffener():
+    """Model-based working-load: XS (upright+stiffener together) carries more
+    axial than the bare X upright at the same point, and all are positive."""
+    from rack15512 import loadcharts as lc
+    mw = load_master(_MASTER)
+    arch = lc._load_archetype()
+    x = lc.model_upright_point(mw, arch, "UP0012", 1800.0, "X", 600.0, False)
+    xs = lc.model_upright_point(mw, arch, "UP0012", 1800.0, "X", 600.0, True)
+    d = lc.model_upright_point(mw, arch, "UP0012", 1800.0, "D", 600.0, False)
+    assert x and xs and d
+    assert x["N_cap_kN"] > 0 and xs["N_cap_kN"] > 0 and d["N_cap_kN"] > 0
+    assert xs["N_cap_kN"] > x["N_cap_kN"]        # stiffener adds capacity
+    assert d["N_cap_kN"] < x["N_cap_kN"]         # D longer cross-aisle -> weaker
+    assert xs["config"] == "XS-600" and d["config"] == "D-1200"
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
