@@ -372,11 +372,11 @@ MODEL_BEAM = "RHS112X50X1.6"
 MODEL_NLEV = 5
 MODEL_NBAYS = 3
 MODEL_DA = list(range(250, 4001, 50))      # beam gap = Lcr_DA [mm], 50 mm steps
-# (label, bracing_type, pitch, with-stiffener)
+# (label, bracing_type, pitch, with-stiffener) - 600 mm pitch only
 MODEL_CONFIGS = [
-    ("X-500", "X", 500.0, False), ("X-600", "X", 600.0, False),
-    ("D-1000", "D", 500.0, False), ("D-1200", "D", 600.0, False),
-    ("XS-500", "X", 500.0, True), ("XS-600", "X", 600.0, True),
+    ("X-600", "X", 600.0, False),
+    ("D-1200", "D", 600.0, False),
+    ("XS-600", "X", 600.0, True),
 ]
 
 
@@ -431,8 +431,19 @@ def _eval_upright(mw, arch, section, gap, btype, pitch, xs, load):
     up = [r for r in rows if r["set"].startswith("Upright")]
     if not up:
         return (0.0, 0.0, 0.0, 0.0)
-    r = max(up, key=lambda r: r["util"])
-    return (r["util"], r["N_kN"], r["My_kNm"], r["Mz_kNm"])
+    gov = max(up, key=lambda r: r["util"])
+    util, N = gov["util"], gov["N_kN"]
+    # XS: the reinforced column is the upright AND the stiffener acting together -
+    # the assembly fails when EITHER member reaches 1.0, and the axial capacity is
+    # the COMBINED axial (upright + the stiffener it shares load with).
+    stf = [r for r in rows if r["set"].startswith("Stiffener")]
+    if stf:
+        gov_st = max(stf, key=lambda r: r["util"])
+        util = max(util, gov_st["util"])
+        target = gov["set"].replace("Upright", "Stiffener")
+        match = next((r for r in stf if r["set"] == target), gov_st)
+        N = N + match["N_kN"]
+    return (util, N, gov["My_kNm"], gov["Mz_kNm"])
 
 
 def model_upright_point(mw, arch, section, gap, btype, pitch, xs):
@@ -546,9 +557,9 @@ def _plot_model_upright(name, curves, path):
         if not c:
             continue
         colour, ls = _STYLE.get(label, (branding.GREY, "-"))
-        ax.plot(c["da"], c["load"], ls, color=colour, lw=1.8, label=label)
+        ax.plot(c["da"], c["cap"], ls, color=colour, lw=1.8, label=label)
     ax.set_xlabel("Down-aisle buckling length  Lcr,DA = beam gap  [mm]")
-    ax.set_ylabel("Working load per level, per bay  [kN]  (N+My+Mz = 1)")
+    ax.set_ylabel("Upright axial capacity  [kN]  (XS = upright+stiffener; N+My+Mz = 1)")
     ax.set_title(f"{name}  -  model-based upright load chart  ·  fy=355  ·  "
                  f"gamma_M1=1.1\nsingle-module 3-bay, 5 levels, RHS112 beam, "
                  f"EN 15512 imperfections (N+My+Mz)", fontsize=9.5)
