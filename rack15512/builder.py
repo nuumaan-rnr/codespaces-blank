@@ -956,12 +956,17 @@ def build_rack(cfg: RackConfig) -> RackModel:
             for ja, jb in zip(zone_js, zone_js[1:]):   # stiffener column members
                 um = up_by_lo.get(round(zs[ja], 3))
                 seg = zs[jb] - zs[ja]
+                # the stiffener is tied to the upright transversely at every bolt
+                # row (the stiff kx/ky interface links), so its buckling length is
+                # the bolt pitch (this segment), NOT the upright storey length; and
+                # it is reported as its OWN set, not lumped into the upright row.
+                slabel = (("Stiffener " + um.set_label.split(" ", 1)[1])
+                          if (um and um.set_label) else None)
                 m.add_member(mid, SNID + nid(i, s, ja), SNID + nid(i, s, jb),
                              stiff_name, member_set="upright stiffeners",
                              mesh=cfg.mesh_upright, vecxz=(0.0, 1.0, 0.0),
-                             L_buckling_y=(um.L_buckling_y if um else seg),
-                             L_buckling_z=(um.L_buckling_z if um else seg),
-                             area_factor=1.0, set_label=um.set_label if um else None)
+                             L_buckling_y=seg, L_buckling_z=seg,
+                             area_factor=1.0, set_label=slabel)
                 mid += 1
             zz = [zs[j] for j in zone_js]     # interface links at each node,
             for p, j in enumerate(zone_js):   # kz spread by tributary length
