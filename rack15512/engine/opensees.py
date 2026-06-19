@@ -274,6 +274,13 @@ class OpenSeesEngine:
             # so short/deep bays (drive-in rails) pick up shear deformation and
             # match RSTAB; otherwise Euler-Bernoulli elasticBeamColumn.
             shear = bool(sec.Avy and sec.Avy > 0 and sec.Avz and sec.Avz > 0)
+            # ElasticTimoshenkoBeam carries NO geometric stiffness, so under a
+            # PDelta transform it silently kills the 2nd-order (P-Delta) effect
+            # (1st order == 2nd order).  Use it only for 1st-order analyses; for
+            # 2nd order use elasticBeamColumn so P-Delta actually amplifies the
+            # sway (shear deformation is <1% for the slender sway-critical members).
+            if order == 2:
+                shear = False
             for k in range(nseg):
                 ele = self._new_tag()
                 if shear:
@@ -429,6 +436,12 @@ class OpenSeesEngine:
 
     # ------------------------------------------------------------------ solve
     def _solve(self, model: RackModel, n_steps: int) -> bool:
+        """Static solve.  Near a 2nd-order limit point (sway-critical racks) the
+        plain Newton iteration with one load increment per step stalls, so try a
+        cascade of progressively more robust schemes: accelerated KrylovNewton,
+        then a line-search Newton, each with finer load stepping.  The first that
+        converges wins; ordinary 1st-order / well-conditioned cases pass on the
+        first (cheapest) attempt."""
         st = model.analysis
         ops.constraints("Transformation")
         ops.numberer("RCM")
@@ -438,11 +451,23 @@ class OpenSeesEngine:
             ops.system("UmfPack")
         except Exception:
             ops.system("BandGeneral")
-        ops.test("NormDispIncr", st.tolerance, st.max_iter)
-        ops.algorithm("Newton")
-        ops.integrator("LoadControl", 1.0 / n_steps)
-        ops.analysis("Static")
-        return ops.analyze(n_steps) == 0
+        tol = max(st.tolerance, 1.0e-6)
+        attempts = (("Newton", n_steps),
+                    ("KrylovNewton", max(n_steps, 10)),
+                    ("KrylovNewton", 4 * max(n_steps, 10)),
+                    ("NewtonLineSearch", 10 * max(n_steps, 10)))
+        for algo, steps in attempts:
+            ops.test("NormDispIncr", tol, max(st.max_iter, 100))
+            if algo == "NewtonLineSearch":
+                ops.algorithm(algo, "-type", "Bisection")
+            else:
+                ops.algorithm(algo)
+            ops.integrator("LoadControl", 1.0 / steps)
+            ops.analysis("Static")
+            if ops.analyze(steps) == 0:
+                return True
+            ops.reset()                     # restart from the unloaded state
+        return False
 
     # ---------------------------------------------------------------- results
     def _collect(self, model: RackModel, res: CaseResult,
