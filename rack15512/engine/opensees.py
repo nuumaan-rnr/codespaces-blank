@@ -274,6 +274,23 @@ class OpenSeesEngine:
                              "-strain", *strain, "-stress", *stress)
         return self._mat_tag
 
+    def _plastic_mat(self, k: float, my: float, b: float, phi_u: float,
+                     loose: float = 0.0) -> int:
+        """Plastic (Hysteretic) connector: elastic at k up to yield moment my,
+        then hardening (ratio b) to the ultimate point phi_u; symmetric.  loose>0
+        switches on pinching to approximate hook take-up.  Returns the mat tag."""
+        self._mat_tag += 1
+        phi_y = my / k
+        phi_ult = max(phi_u, phi_y * 1.5)
+        mu = my + b * k * (phi_ult - phi_y)
+        px = 0.4 if loose > 0 else 1.0
+        py = 0.2 if loose > 0 else 1.0
+        ops.uniaxialMaterial("Hysteretic", self._mat_tag,
+                             my, phi_y, mu, phi_ult,
+                             -my, -phi_y, -mu, -phi_ult,
+                             px, py, 0.0, 0.0, 0.0)
+        return self._mat_tag
+
     def _looseness_mat(self, k: float, gap: float) -> int:
         """Connector with rotational free-play (looseness): zero moment until the
         relative rotation exceeds +/- gap [rad], then stiffness k - the EN 15512
@@ -306,10 +323,18 @@ class OpenSeesEngine:
             elif k <= 0.0:
                 continue                   # released axis
             # connector (local-z) spring: nonlinear M-phi diagram if given, else
-            # a free-play dead-band if modelled, else a linear spring
+            # a plastic (Hysteretic) law past yield, else a free-play dead-band,
+            # else a linear spring
             mphi = getattr(hinge, "m_phi_z", None) if direction == 6 else None
+            plastic = (direction == 6 and getattr(hinge, "plastic", False)
+                       and hinge.m_rd_z and k < RIGID_ROT)
             if mphi:
                 mats.append(self._mphi_mat(mphi))
+            elif plastic:
+                mats.append(self._plastic_mat(
+                    float(k), float(hinge.m_rd_z),
+                    float(getattr(hinge, "hardening", 0.02)),
+                    float(getattr(hinge, "phi_u", 0.05)), loose))
             elif direction == 6 and loose > 0.0 and k < RIGID_ROT:
                 mats.append(self._looseness_mat(float(k), float(loose)))
             else:

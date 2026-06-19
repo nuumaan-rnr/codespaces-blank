@@ -75,3 +75,22 @@ def test_nonlinear_connector_moment_rotation():
     m2 = io_json.load(p)
     b2 = next(mm for mm in m2.members.values() if mm.member_set == "pallet beams")
     assert b2.hinge_i.m_phi_z == mphi
+
+
+def test_plastic_connector_law():
+    import os, tempfile
+    from rack15512 import io_json
+    m = build_rack(RackConfig(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
+                              frame_height=2200.0, connector_plastic=True,
+                              connector_m_rd=2.5e6, connector_hardening=0.03,
+                              connector_phi_u=0.06))
+    b = next(mm for mm in m.members.values() if mm.member_set == "pallet beams")
+    assert b.hinge_i.plastic is True
+    assert b.hinge_i.m_rd_z == 2.5e6
+    assert b.hinge_i.hardening == 0.03 and b.hinge_i.phi_u == 0.06
+    # round-trips
+    p = os.path.join(tempfile.mkdtemp(), "m.json")
+    io_json.save(m, p)
+    b2 = next(mm for mm in io_json.load(p).members.values()
+              if mm.member_set == "pallet beams")
+    assert b2.hinge_i.plastic is True and b2.hinge_i.phi_u == 0.06

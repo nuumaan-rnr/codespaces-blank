@@ -182,6 +182,12 @@ class Hinge:
     # When given, the engine builds a multilinear M-phi connector (semi-rigid
     # hinge nonlinearity, RSTAB-style) instead of the linear rz spring.
     m_phi_z: Optional[List[List[float]]] = None
+    # plastic (Hysteretic) connector law about rz: elastic at rz up to m_rd_z,
+    # then hardening (ratio b) to phi_u - for pushover / loading past the
+    # connection moment capacity.  Used when plastic=True and m_rd_z is given.
+    plastic: bool = False
+    hardening: float = 0.02       # post-yield stiffness ratio b
+    phi_u: float = 0.05           # rotation at the ultimate point [rad]
 
 
 @dataclass

@@ -329,6 +329,12 @@ class RackConfig:
     # nonlinearity, RSTAB-style): [[phi_rad, M_Nmm], ...] for phi>=0.  When set it
     # replaces the linear connector spring on every pallet-beam end.
     connector_moment_rotation: Optional[List[List[float]]] = None
+    # plastic (Hysteretic) connector law: elastic to the connector moment
+    # capacity (connector_m_rd), then hardening - for pushover / loading the
+    # connection past its capacity.  Needs the 2nd-order nonlinear solver.
+    connector_plastic: bool = False
+    connector_hardening: float = 0.02      # post-yield stiffness ratio
+    connector_phi_u: float = 0.05          # ultimate connector rotation [rad]
     # nonlinear axial-dependent base: [[P_kN, C_Nmm_per_rad], ...] giving the base
     # ROTATIONAL stiffness as a function of column compression (RSTAB-style; 0 at
     # uplift = tearing).  When set, the engine iterates the base spring to match.
@@ -658,11 +664,16 @@ def build_rack(cfg: RackConfig) -> RackModel:
         for i in range(cfg.n_bays):
             for s in sides:
                 mphi = cfg.connector_moment_rotation
+
+                def _conn():
+                    return Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos, m_phi_z=mphi,
+                                 plastic=cfg.connector_plastic,
+                                 hardening=cfg.connector_hardening,
+                                 phi_u=cfg.connector_phi_u)
                 m.add_member(
                     mid, nid(i, s, j), nid(i + 1, s, j), sec_name,
                     member_set="pallet beams", mesh=cfg.mesh_beam,
-                    hinge_i=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos, m_phi_z=mphi),
-                    hinge_j=Hinge(rz=k_c, m_rd_z=m_rd, looseness=loos, m_phi_z=mphi))
+                    hinge_i=_conn(), hinge_j=_conn())
                 beam_pairs[z].append(mid)
                 mid += 1
 
