@@ -338,6 +338,22 @@ The signature CSV is two columns — half-wavelength and buckling load (or load
 factor); `read_signature_csv` sniffs the delimiter and skips a header row. See
 `examples/cufsm_upright.py` for the full upright workflow.
 
+### CUFSM → DSM design & handoff app
+
+For an interactive version of the whole sections/DSM step:
+
+```bash
+pip install streamlit plotly
+streamlit run app_cufsm.py
+```
+
+A five-step page: define the upright (gross + net properties), optionally
+generate a plain lipped-channel node/strip geometry to seed the CUFSM model,
+import the signature curve and pick the local/distortional minima (plotted),
+compute the DSM resistances and effective area, then **hand off** — copy a
+`DSMData` snippet / JSON, or upload a rack model JSON and write the `dsm` data
+straight into a chosen section so the EN 15512 checks use it.
+
 DSM is an internationally validated method, but it does **not** remove
 EN 15512's requirement to type-test the final perforated section — use it to
 derive or cross-check the effective properties, then confirm by test.
