@@ -7,9 +7,9 @@ from dataclasses import asdict
 from typing import Any, Dict
 
 from .model import (AnalysisSettings, BasePlate, CheckSettings, Combination,
-                    CrossSection, Hinge, Imperfection, Link, LoadCase, Member,
-                    MemberLoad, NodalLoad, Node, RackModel, Splice, Steel,
-                    Support)
+                    CrossSection, DSMData, Hinge, Imperfection, Link, LoadCase,
+                    Member, MemberLoad, NodalLoad, Node, RackModel, Splice,
+                    Steel, Support)
 
 
 def model_to_dict(m: RackModel) -> Dict[str, Any]:
@@ -38,6 +38,9 @@ def model_from_dict(d: Dict[str, Any]) -> RackModel:
     for x in d.get("materials", []):
         m.materials[x["name"]] = Steel(**x)
     for x in d.get("sections", []):
+        x = dict(x)
+        if x.get("dsm") is not None:
+            x["dsm"] = DSMData(**x["dsm"])
         m.sections[x["name"]] = CrossSection(**x)
     for x in d.get("nodes", []):
         m.nodes[x["id"]] = Node(**x)

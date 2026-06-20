@@ -293,14 +293,64 @@ drives sway direction, overload → failure).
 python -m pytest tests/
 ```
 
+## Cold-formed sections: CUFSM + Direct Strength Method
+
+The perforated upright's **local** and **distortional** buckling are the one
+part of EN 15512 the global frame model cannot see directly — EN 15512 covers
+them through an *effective cross-section* whose area and moduli normally come
+from stub-column / bending tests. This package adds the analytical alternative
+the research record validates for rack uprights: the **Direct Strength Method
+(DSM)** fed by **[CUFSM](https://www.ce.jhu.edu/cufsm/)** elastic buckling.
+
+The division of labour is the accurate one:
+
+- **CUFSM** (free, finite-strip) gives the length-independent **local**
+  (`Pcrl`/`Mcrl`) and **distortional** (`Pcrd`/`Mcrd`) elastic buckling from the
+  section's *signature curve* — its two characteristic minima.
+- the **global** elastic load (`Pcre`) is taken from the **frame analysis**
+  here (Euler / EN 15512 9.7.5 flexural-torsional), so the global limit state
+  stays consistent with the second-order model — not re-derived in CUFSM.
+- `rack15512.dsm` combines them into the nominal strength
+  `Pn = min(Pne, Pnl, Pnd)` (AISI S100-16 Ch. E/F, with the members-with-holes
+  net-section provisions; `Anet = Ag` recovers the unperforated DSM).
+
+Two ways to use it:
+
+```python
+from rack15512 import cufsm
+from rack15512.model import DSMData
+
+# 1) read a CUFSM signature curve and extract the local/distortional minima
+hw, val = cufsm.read_signature_csv("examples/cufsm_upright_signature.csv")
+loads = cufsm.loads_from_signature(hw, val, reference=1.0)   # already in N
+
+# (a) attach to the section -> adds an explicit DSM_BC check (per upright,
+#     reports Pne/Pnl/Pnd and which mode governs) alongside the EN checks:
+section.dsm = DSMData(Pcrl=loads.Pcrl, Pcrd=loads.Pcrd, Anet=540.0)
+
+# (b) or let CUFSM/DSM *populate* the EN effective area, so the existing
+#     STRESS and BUCKLING checks use buckling-derived A_eff instead of a
+#     hand-supplied test value:
+cufsm.populate_effective_properties(section, steel, axial=loads, Anet=540.0)
+```
+
+The signature CSV is two columns — half-wavelength and buckling load (or load
+factor); `read_signature_csv` sniffs the delimiter and skips a header row. See
+`examples/cufsm_upright.py` for the full upright workflow.
+
+DSM is an internationally validated method, but it does **not** remove
+EN 15512's requirement to type-test the final perforated section — use it to
+derive or cross-check the effective properties, then confirm by test.
+
 ## Scope & disclaimer
 
-The global analysis is a full 3D beam/truss model. Distortional and
-torsional-flexural buckling of cold-formed uprights, warping torsion,
-lateral-torsional beam buckling and EN 15512 Annex-A test evaluation are
-outside the current scope — per EN 15512 practice these are covered
-through the tested effective section properties and resistances you supply
-in the master.
+The global analysis is a full 3D beam/truss model. Local and distortional
+buckling of cold-formed perforated uprights are now covered by the optional
+CUFSM/DSM route above (and flexural-torsional buckling by EN 15512 9.7.5);
+warping torsion, lateral-torsional beam buckling and EN 15512 Annex-A test
+evaluation remain outside scope — per EN 15512 practice these are covered
+through the tested effective section properties and resistances you supply in
+the master.
 
 This software is an engineering aid. All defaults (partial factors,
 imperfection parameters, deflection limits) must be verified by a

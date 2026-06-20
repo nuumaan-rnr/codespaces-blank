@@ -45,6 +45,29 @@ class Steel:
 
 
 @dataclass
+class DSMData:
+    """CUFSM-derived elastic local/distortional buckling for the Direct
+    Strength Method check (see :mod:`rack15512.dsm` / :mod:`rack15512.cufsm`).
+
+    These are the length-independent signature-curve minima; the global
+    elastic load is taken from the frame analysis, not stored here.  Loads are
+    in N, moments in N*mm.  ``Anet`` / ``Wnet_*`` default to the gross values
+    (no holes) when omitted.  Attach to a section as ``CrossSection.dsm`` to
+    enable the DSM_AXIAL / DSM_BC verification for that section's members.
+    """
+
+    Pcrl: float                       # local elastic axial buckling load [N]
+    Pcrd: float                       # distortional elastic axial buckling [N]
+    Anet: Optional[float] = None      # net cross-section area [mm^2]
+    Mcrl_z: Optional[float] = None    # local elastic moment, local z [N*mm]
+    Mcrd_z: Optional[float] = None    # distortional elastic moment, local z
+    Mcrl_y: Optional[float] = None    # local elastic moment, local y [N*mm]
+    Mcrd_y: Optional[float] = None    # distortional elastic moment, local y
+    Wnet_z: Optional[float] = None    # net section modulus, local z [mm^3]
+    Wnet_y: Optional[float] = None    # net section modulus, local y [mm^3]
+
+
+@dataclass
 class CrossSection:
     """Full 3D cross-section properties (in member local axes, see module
     docstring).  Typically selected from the section master library.
@@ -109,6 +132,10 @@ class CrossSection:
     # match RSTAB.  Left None -> Euler-Bernoulli elasticBeamColumn.
     Avy: Optional[float] = None                   # shear area along local y
     Avz: Optional[float] = None                   # shear area along local z
+    # CUFSM/DSM elastic local & distortional buckling (optional).  When set,
+    # the upright is additionally verified by the Direct Strength Method
+    # (checks.en15512._dsm_checks).  See rack15512.dsm / rack15512.cufsm.
+    dsm: Optional["DSMData"] = None
 
     @property
     def area_eff(self) -> float:
