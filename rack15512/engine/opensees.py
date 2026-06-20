@@ -570,6 +570,22 @@ class OpenSeesEngine:
         except Exception:
             ops.system("BandGeneral")
         tol = max(st.tolerance, 1.0e-6)
+        if getattr(st, "fast_solve", False):
+            # lean path for load-chart sweeps: accelerated KrylovNewton with one
+            # finer-stepped retry, but WITHOUT the expensive 100-step line-search
+            # stage.  Robust enough to converge feasible near-critical loads, yet
+            # fails quickly when the load is above the stability limit (the search
+            # then reduces the load).
+            base = max(n_steps, 4)
+            for steps in (base, 3 * base):
+                ops.test("NormDispIncr", tol, max(st.max_iter, 8))
+                ops.algorithm("KrylovNewton")
+                ops.integrator("LoadControl", 1.0 / steps)
+                ops.analysis("Static")
+                if ops.analyze(steps) == 0:
+                    return True
+                ops.reset()
+            return False
         attempts = (("Newton", n_steps),
                     ("KrylovNewton", max(n_steps, 10)),
                     ("KrylovNewton", 4 * max(n_steps, 10)),

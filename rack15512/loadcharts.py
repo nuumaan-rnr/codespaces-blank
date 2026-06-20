@@ -369,7 +369,7 @@ import json as _json
 _ARCH_PATH = os.path.join(os.path.dirname(__file__), "..", "examples",
                           "loadchart_archetype.json")
 MODEL_BEAM = "RHS112X50X1.6"
-MODEL_NLEV = 5
+MODEL_NLEV = 1
 MODEL_NBAYS = 3
 MODEL_DA = list(range(250, 4001, 50))      # beam gap = Lcr_DA [mm], 50 mm steps
 # (label, bracing_type, pitch, with-stiffener) - 600 mm pitch only
@@ -413,6 +413,11 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load):
         kw.update(stiffener_section=st, reinforce_height=h, stiffener_type=1)
     m = build_rack(RackConfig(**kw))
     m.analysis.compute_alpha_cr = False
+    # lean solver for the sweep: a single fast attempt that fails quickly when
+    # the load is above the stability limit (the search then reduces the load)
+    m.analysis.fast_solve = True
+    m.analysis.n_steps = 4
+    m.analysis.max_iter = 12
     m.imperfection.directions = ["+x"]
     m.combinations = [c for c in m.combinations if c.name == "ULS2"]
     return m
@@ -447,8 +452,14 @@ def _eval_upright(mw, arch, section, gap, btype, pitch, xs, load):
 
 
 def model_upright_point(mw, arch, section, gap, btype, pitch, xs):
-    """Working-load capacity at one point: the axial where the governing upright
-    interaction = 1.0 with the real N/My/Mz (fixed-point search, closed-form seed)."""
+    """Maximum working-load capacity at one point.
+
+    Per the load-reduction rule: a non-converging ULS means the load is above
+    the upright's stability limit, so reduce the load until the model converges
+    AND the governing interaction (N+My+Mz) stays <= 1.0.  The capacity is the
+    largest per-level load satisfying both - whichever governs, buckling or
+    strength.  Seeded from the closed-form strut value and bracketed/bisected.
+    """
     lcr_ca = pitch if btype == "X" else 2.0 * pitch
     sec = mw.library.get(section)
     if xs:
@@ -459,21 +470,43 @@ def model_upright_point(mw, arch, section, gap, btype, pitch, xs):
         st = mw.library.get(stn)
         sec = combined_upright_section(sec, st, st.mount_offset or 30.0)
     n_axial, _ = upright_capacity_kN(sec, FY_UPRIGHT, gap, lcr_ca)
-    load = max(n_axial * 1e3 / MODEL_NLEV / 1.4 * 0.8, 300.0)
-    best = None
-    for _ in range(6):
-        res = _eval_upright(mw, arch, section, gap, btype, pitch, xs, load)
-        if res is None:
+    seed = max(n_axial * 1e3 / MODEL_NLEV / 1.4 * 0.8, 200.0)
+
+    def ev(load):
+        r = _eval_upright(mw, arch, section, gap, btype, pitch, xs, load)
+        if r is None:
             return None
-        u, N, My, Mz = res
-        best = (load, u, N, My, Mz)
-        if u > 0 and abs(u - 1.0) < 0.04:
+        u, N, My, Mz = r
+        feasible = (u < 10.0) and (0.0 < u <= 1.0)   # u>=10 sentinel = unstable
+        return feasible, u, N, My, Mz
+
+    lo = None          # (load,u,N,My,Mz): largest load that is stable AND u<=1
+    hi = None          # smallest load known infeasible (unstable OR u>1)
+    load = seed
+    for _ in range(7):
+        r = ev(load)
+        if r is None:
+            return None
+        feasible, u, N, My, Mz = r
+        if feasible:
+            if lo is None or load > lo[0]:
+                lo = (load, u, N, My, Mz)
+            nxt = (load * min(max(1.0 / max(u, 1e-3), 1.05), 1.8)
+                   if hi is None else 0.5 * (load + hi))
+        else:
+            hi = load if hi is None else min(hi, load)
+            nxt = load * 0.5 if lo is None else 0.5 * (lo[0] + hi)
+        if lo and hi and (hi - lo[0]) <= 0.05 * lo[0]:
             break
-        load = min(max(load / max(u, 1e-3), 1.0), 1e8)
-    load, u, N, My, Mz = best
-    if u <= 0:
+        load = max(nxt, 50.0)
+
+    if lo is None:
         return None
-    s = 1.0 / u
+    load, u, N, My, Mz = lo
+    # strength-governed but not iterated to exactly 1.0 (no upper bound found):
+    # scale the converged result to the interaction limit; otherwise lo already
+    # sits at the governing (stability or strength) capacity.
+    s = (1.0 / u) if (hi is None and u > 0.0) else 1.0
     return {"section": section, "config": _label(btype, pitch, xs),
             "lcr_da": int(gap), "lcr_ca": int(lcr_ca),
             "load_per_level_kN": round(load * s / 1e3, 2),
@@ -481,29 +514,55 @@ def model_upright_point(mw, arch, section, gap, btype, pitch, xs):
             "Mz_kNm": round(Mz * s, 3)}
 
 
-def generate_model_based(master_path, out_dir, checkpoint=None):
-    """Resumable model-based upright working-load charts (N+My+Mz)."""
-    mw = load_master(master_path)
-    arch = _load_archetype()
+_WORKER: dict = {}
+
+
+def _winit(master_path):
+    _WORKER["mw"] = load_master(master_path)
+    _WORKER["arch"] = _load_archetype()
+
+
+def _wpoint(args):
+    s, bt, p, xs, g = args
+    key = f"{s}|{_label(bt, p, xs)}|{g}"
+    try:
+        pt = model_upright_point(_WORKER["mw"], _WORKER["arch"], s, float(g),
+                                 bt, p, xs)
+    except Exception:
+        pt = None
+    return key, (pt or {})
+
+
+def generate_model_based(master_path, out_dir, checkpoint=None, workers=None):
+    """Resumable, parallel model-based upright working-load charts (N+My+Mz).
+
+    Each point is an independent FEA capacity search, so the grid is fanned out
+    across processes.  Progress is checkpointed frequently, so an interrupted
+    run (e.g. a background time limit) resumes where it stopped."""
+    import multiprocessing as mp
     os.makedirs(out_dir, exist_ok=True)
     checkpoint = checkpoint or os.path.join(out_dir, "_model_checkpoint.json")
     done = {}
     if os.path.exists(checkpoint):
         done = _json.load(open(checkpoint, encoding="utf-8"))
-    sections = mw.library.names("upright")
+    sections = load_master(master_path).library.names("upright")
     todo = [(s, bt, p, xs, g) for s in sections
-            for (_lbl, bt, p, xs) in MODEL_CONFIGS for g in MODEL_DA]
+            for (_lbl, bt, p, xs) in MODEL_CONFIGS for g in MODEL_DA
+            if f"{s}|{_label(bt, p, xs)}|{g}" not in done]
+    total = len(sections) * len(MODEL_CONFIGS) * len(MODEL_DA)
+    workers = workers or min(4, os.cpu_count() or 1)
+    print(f"model-based grid: {total} points, {len(todo)} to do, "
+          f"{workers} workers", flush=True)
     n = 0
-    for s, bt, p, xs, g in todo:
-        key = f"{s}|{_label(bt, p, xs)}|{g}"
-        if key in done:
-            continue
-        pt = model_upright_point(mw, arch, s, float(g), bt, p, xs)
-        done[key] = pt or {}
-        n += 1
-        if n % 40 == 0:
-            _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
-            print(f"  ... {len([k for k in done if done[k]])} points done", flush=True)
+    with mp.Pool(workers, initializer=_winit, initargs=(master_path,)) as pool:
+        for key, pt in pool.imap_unordered(_wpoint, todo, chunksize=1):
+            done[key] = pt
+            n += 1
+            if n % 20 == 0:
+                _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
+                ok = len([k for k in done if done[k]])
+                print(f"  ... {len(done)}/{total} evaluated ({ok} with capacity)",
+                      flush=True)
     _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
     return _finalize_model_based(done, out_dir)
 
@@ -561,8 +620,8 @@ def _plot_model_upright(name, curves, path):
     ax.set_xlabel("Down-aisle buckling length  Lcr,DA = beam gap  [mm]")
     ax.set_ylabel("Upright axial capacity  [kN]  (XS = upright+stiffener; N+My+Mz = 1)")
     ax.set_title(f"{name}  -  model-based upright load chart  ·  fy=355  ·  "
-                 f"gamma_M1=1.1\nsingle-module 3-bay, 5 levels, RHS112 beam, "
-                 f"EN 15512 imperfections (N+My+Mz)", fontsize=9.5)
+                 f"gamma_M1=1.1\nsingle-storey 3-bay sub-assemblage, RHS112 beam, "
+                 f"EN 15512 imperfections (max stable load; N+My+Mz)", fontsize=9.5)
     ax.grid(True, alpha=0.3)
     ax.set_ylim(bottom=0)
     ax.legend(fontsize=8, ncol=2)

@@ -382,6 +382,12 @@ class AnalysisSettings:
     # sway-sensitivity report; set False to skip it and roughly halve the
     # number of solves (the ALPHA_CR informative check is then omitted)
     compute_alpha_cr: bool = True
+    # fast/lean solve: a single accelerated KrylovNewton attempt at the given
+    # n_steps/max_iter instead of the full robust cascade (Newton ->
+    # KrylovNewton x1/x4 -> NewtonLineSearch x10).  Used by load-chart sweeps,
+    # where non-convergence simply means "load too high" and must be detected
+    # cheaply (the production default keeps the full cascade for accuracy).
+    fast_solve: bool = False
 
 
 @dataclass
