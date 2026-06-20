@@ -321,6 +321,10 @@ class RackConfig:
     # 'EN15512' -> phi = sqrt(0.5+1/n)*(2*phi_s+phi_l) (amplified rack value);
     # 'EN1993'  -> phi = phi_s directly (plain out-of-plumb, e.g. 1/300; RSTAB-style)
     imperfection_standard: str = "EN15512"
+    # design-stiffness reduction E/gamma_M1 for the 2nd-order stability analysis
+    # (EN 1993-1-1 / EN 15512; RSTAB "Materials (partial factor gamma_M)").
+    # 1.0 = full stiffness; 1.1 = E/1.1 (gamma_M1).
+    stiffness_gamma_m: float = 1.0
     # EN 1993-1-1 5.3.2(3) reduction phi = phi_s * alpha_h * alpha_m (RSTAB's
     # "Calculate value of inclination"); only with imperfection_standard='EN1993'.
     # alpha_h from the frame height, alpha_m from the columns in a row (n_cols).
@@ -1238,6 +1242,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         directions=["+x", "-x", "+y", "-y"])
     m.base_axial_table = cfg.base_axial_table
     m.model_connector_looseness = cfg.model_connector_looseness
+    m.analysis.stiffness_gamma_m = cfg.stiffness_gamma_m
 
     # ---- seismic settings (IS 1893) -----------------------------------------
     if cfg.seismic:

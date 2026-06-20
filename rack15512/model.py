@@ -405,6 +405,12 @@ class AnalysisSettings:
     # where non-convergence simply means "load too high" and must be detected
     # cheaply (the production default keeps the full cascade for accuracy).
     fast_solve: bool = False
+    # design-stiffness reduction for 2nd-order / stability analysis: the member
+    # elastic and shear moduli are divided by stiffness_gamma_m (EN 1993-1-1 /
+    # EN 15512 use E/gamma_M1, gamma_M1 = 1.1, for the P-Delta stability check;
+    # RSTAB's "Activate stiffness factors of: Materials (partial factor gamma_M)").
+    # 1.0 = no reduction (default).  Springs (connectors, base) are not reduced.
+    stiffness_gamma_m: float = 1.0
 
 
 @dataclass

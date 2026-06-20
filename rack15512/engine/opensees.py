@@ -348,9 +348,13 @@ class OpenSeesEngine:
         return aux
 
     def _build_members(self, model: RackModel, order: int) -> None:
+        # design-stiffness reduction E/gamma_M1 (EN 1993 stability / RSTAB
+        # "Materials (partial factor gamma_M)"); 1.0 = full stiffness.
+        ef = 1.0 / max(getattr(model.analysis, "stiffness_gamma_m", 1.0), 1.0e-9)
         for m in model.members.values():
             sec = model.section_of(m)
             mat = model.material_of(m)
+            E_d, G_d = mat.E * ef, mat.G * ef
             ti = self._node_tag[m.node_i]
             tj = self._node_tag[m.node_j]
             xi = self._coords[ti]
@@ -364,7 +368,7 @@ class OpenSeesEngine:
 
             A_an = sec.A * m.area_factor      # analysis-stiffness area
             if m.mtype == "truss":
-                mt = self._elastic_mat(mat.E)
+                mt = self._elastic_mat(E_d)
                 ele = self._new_tag()
                 etype = "corotTruss" if order == 2 else "truss"
                 ops.element(etype, ele, ti, tj, A_an, mt)
@@ -403,14 +407,14 @@ class OpenSeesEngine:
                 ele = self._new_tag()
                 if shear:
                     ops.element("ElasticTimoshenkoBeam", ele,
-                                tags[k], tags[k + 1], mat.E, mat.G, A_an,
+                                tags[k], tags[k + 1], E_d, G_d, A_an,
                                 sec.J, sec.Iy, sec.Iz,
                                 sec.Avy * m.area_factor,
                                 sec.Avz * m.area_factor,
                                 self._transf_tag)
                 else:
                     ops.element("elasticBeamColumn", ele, tags[k], tags[k + 1],
-                                A_an, mat.E, mat.G, sec.J, sec.Iy, sec.Iz,
+                                A_an, E_d, G_d, sec.J, sec.Iy, sec.Iz,
                                 self._transf_tag)
                 mmap.segments.append(_Segment(
                     ele_tag=ele, tag_i=tags[k], tag_j=tags[k + 1],

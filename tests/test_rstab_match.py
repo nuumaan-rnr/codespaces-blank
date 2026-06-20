@@ -33,6 +33,28 @@ def test_en1993_alpha_hm_reduction_matches_rstab():
     assert abs(flat.value() - 1/200) < 1e-9
 
 
+def test_stiffness_gamma_m_softens_design_stiffness():
+    # E/gamma_M1 design stiffness (RSTAB "Materials (partial factor gamma_M)"):
+    # at 1st order the sway scales as 1/E, so gamma_M=1.1 gives ~1.1x the sway.
+    from rack15512.engine.opensees import OpenSeesEngine
+    from rack15512.analysis import run_all
+    base = dict(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
+                frame_height=2200.0)
+    m0 = build_rack(RackConfig(**base, stiffness_gamma_m=1.0))
+    m1 = build_rack(RackConfig(**base, stiffness_gamma_m=1.1))
+    assert m1.analysis.stiffness_gamma_m == 1.1
+    for mm in (m0, m1):
+        mm.analysis.order = 1                      # linear: clean 1/E scaling
+
+    def sway(model):
+        for r in run_all(model):
+            if r.converged and r.combo == "ULS1" and r.imp_direction == "+x":
+                return max(abs(d[0]) for d in r.displacements.values())
+        return 0.0
+    s0, s1 = sway(m0), sway(m1)
+    assert s0 > 0 and abs(s1 / s0 - 1.1) < 0.02     # ~10% softer
+
+
 def test_connector_override_applied():
     m = build_rack(RackConfig(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
                               frame_height=2200.0, connector_stiffness_override=73.0e6))
