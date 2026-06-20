@@ -316,13 +316,30 @@ class Imperfection:
     # 'EN1993'  -> phi = phi_s directly (the plain out-of-plumb, e.g. 1/300), as a
     #              generic frame / RSTAB-style imperfection (no 2x or sqrt factor).
     standard: str = "EN15512"
+    # EN 1993-1-1 5.3.2(3) reduction factors phi = phi_s * alpha_h * alpha_m,
+    # with alpha_h = 2/sqrt(h) (clamped 2/3..1.0, h in metres) and
+    # alpha_m = sqrt(0.5*(1+1/m)).  Only applied when standard == 'EN1993' and
+    # alpha_hm is True (RSTAB's "Calculate value of inclination" dialog); the
+    # phi_min floor is then NOT applied, matching RSTAB.  height is in mm; m is
+    # the number of columns in a row (n_cols).
+    alpha_hm: bool = False
+    height: Optional[float] = None          # structure height h [mm] for alpha_h
     directions: List[str] = field(
         default_factory=lambda: ["+x", "-x", "+y", "-y"])
+
+    def _alpha_hm(self) -> float:
+        h_m = (self.height or 0.0) / 1000.0
+        a_h = max(2.0 / 3.0, min(1.0, 2.0 / math.sqrt(h_m))) if h_m > 0 else 1.0
+        m = self.n_cols or 1
+        a_m = math.sqrt(0.5 * (1.0 + 1.0 / m)) if m >= 1 else 1.0
+        return a_h * a_m
 
     def _phi_from(self, phi_s: float) -> float:
         if self.phi is not None:
             return self.phi
         if self.standard.upper() == "EN1993":
+            if self.alpha_hm:                       # EN 1993-1-1 5.3.2(3)
+                return phi_s * self._alpha_hm()     # no phi_min floor (RSTAB)
             return max(phi_s, self.phi_min if self.phi_min < phi_s else 0.0)
         if not self.n_cols:
             raise ValueError(

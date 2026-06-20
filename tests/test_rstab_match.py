@@ -14,6 +14,25 @@ def test_en1993_imperfection_is_flat_phi_s():
     assert imp15.value() > imp.value()              # EN 15512 is larger (amplified)
 
 
+def test_en1993_alpha_hm_reduction_matches_rstab():
+    # RSTAB "Calculate value of inclination" (EN 1993-1-1 5.3.2(3)):
+    # Phi = Phi0 * alpha_h * alpha_m, with h = 7965 mm, m = 4 columns/row.
+    m = build_rack(RackConfig(module="single", n_bays=3,
+                              levels=[LevelSpec(gap=1800.0)], frame_height=7965.0,
+                              imperfection_standard="EN1993",
+                              imperfection_alpha_hm=True,
+                              phi_s=1/200, phi_s_cross=1/300))
+    imp = m.imperfection
+    assert imp.n_cols == 4 and imp.alpha_hm and imp.height == 7965.0
+    assert abs(imp._alpha_hm() - 0.5602) < 2e-3            # 0.709 * 0.791
+    assert abs(1.0 / imp.value_for("+x") - 357.0) < 1.0    # DA: 1/200 -> 1/357
+    assert abs(1.0 / imp.value_for("-x") - 357.0) < 1.0
+    assert abs(1.0 / imp.value_for("+y") - 535.5) < 1.0    # CA: 1/300 -> 1/535
+    # without alpha_hm the EN1993 path stays flat (no reduction, no phi_min lift)
+    flat = Imperfection(n_cols=4, phi_s=1/200, standard="EN1993", phi_min=1/500)
+    assert abs(flat.value() - 1/200) < 1e-9
+
+
 def test_connector_override_applied():
     m = build_rack(RackConfig(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
                               frame_height=2200.0, connector_stiffness_override=73.0e6))

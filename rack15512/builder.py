@@ -321,6 +321,10 @@ class RackConfig:
     # 'EN15512' -> phi = sqrt(0.5+1/n)*(2*phi_s+phi_l) (amplified rack value);
     # 'EN1993'  -> phi = phi_s directly (plain out-of-plumb, e.g. 1/300; RSTAB-style)
     imperfection_standard: str = "EN15512"
+    # EN 1993-1-1 5.3.2(3) reduction phi = phi_s * alpha_h * alpha_m (RSTAB's
+    # "Calculate value of inclination"); only with imperfection_standard='EN1993'.
+    # alpha_h from the frame height, alpha_m from the columns in a row (n_cols).
+    imperfection_alpha_hm: bool = False
     imperfection_method: str = "EHF"        # 'EHF' notional forces | 'geometry'
     # explicit beam-to-upright connector stiffness [N*mm/rad]; when set it
     # overrides the per-section master value (use to match a specific test/solver)
@@ -1226,6 +1230,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         n_cols=n_lines, phi_s=cfg.phi_s, phi_s_cross=cfg.phi_s_cross,
         phi_l=phi_l_used, method=cfg.imperfection_method,
         standard=cfg.imperfection_standard,
+        alpha_hm=cfg.imperfection_alpha_hm, height=H,
         directions=["+x", "-x", "+y", "-y"])
     m.base_axial_table = cfg.base_axial_table
     m.model_connector_looseness = cfg.model_connector_looseness
