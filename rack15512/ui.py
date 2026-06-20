@@ -416,6 +416,91 @@ def run_with_status(run_fn, label="Running analysis"):
     return result
 
 
+CANCELLED = object()      # sentinel returned by run_cancellable_poll on cancel
+
+
+def run_cancellable_poll(run_fn, label="Running analysis", key="run"):
+    """Run run_fn(progress=cb, should_cancel=fn) in a background thread so the
+    user can cancel it with a Stop button.  Drives itself by short reruns while
+    the worker is alive (it calls st.rerun() and does NOT return in that case).
+
+    Returns one of:
+      ("running", None)   - never actually returned (a rerun is triggered first)
+      ("done", result)    - worker finished; result is run_fn's return value
+      ("cancelled", None) - the user pressed Stop
+      ("error", exc)      - worker raised exc (e.g. UnstableModelError)
+    """
+    import threading
+    from .analysis import RunCancelled
+    hk = f"_crun_{key}"
+    h = st.session_state.get(hk)
+    if h is None:
+        h = {"stages": [], "frac": 0.0, "done": False, "result": None,
+             "error": None, "cancelled": False, "start": _time.time(),
+             "event": threading.Event()}
+
+        def cb(stage, frac):
+            h["stages"].append((stage, _time.time() - h["start"]))
+            h["frac"] = min(max(frac, 0.0), 1.0)
+
+        def worker():
+            try:
+                h["result"] = run_fn(progress=cb,
+                                     should_cancel=h["event"].is_set)
+            except RunCancelled:
+                h["cancelled"] = True
+            except Exception as exc:               # captured, surfaced on the
+                h["error"] = exc                   # main thread when done
+            finally:
+                h["done"] = True
+
+        t = threading.Thread(target=worker, daemon=True)
+        st.session_state[hk] = h
+        log(f"▶ {label}")
+        _render_console()
+        t.start()
+
+    box = st.status(f"⚙️  {label}…",
+                    expanded=True, state="running" if not h["done"] else "complete")
+    box.progress(h["frac"])
+    last = ""
+    for stage, el in h["stages"][-14:]:
+        box.write(f"• {stage}  ·  ⏱ {el:.0f}s")
+        last = stage
+    if last:
+        log(last, "ok")
+        _render_console()
+
+    if not h["done"]:
+        if st.button("⛔ Stop analysis", key=f"_stop_{key}", type="secondary"):
+            h["event"].set()
+            box.write("⛔ Stop requested — cancelling after the current run…")
+        _time.sleep(0.4)
+        st.rerun()                                 # poll again (exits here)
+
+    # finished -> clear holder so the next run starts fresh
+    st.session_state[hk] = None
+    total = _time.time() - h["start"]
+    if h["cancelled"]:
+        box.update(label=f"⛔ Analysis cancelled after {total:.0f}s",
+                   state="error", expanded=False)
+        log("⛔ Analysis cancelled by user", "warn")
+        _render_console()
+        return ("cancelled", None)
+    if h["error"] is not None:
+        box.update(label=f"❌ Run failed after {total:.0f}s",
+                   state="error", expanded=True)
+        box.write(f"Error: {h['error']}")
+        log(f"FAILED: {h['error']}", "error")
+        _render_console()
+        return ("error", h["error"])
+    box.update(label=f"✅  Analysis complete in {total:.0f}s",
+               state="complete", expanded=False)
+    log(f"✓ {label} complete in {total:.0f}s", "ok")
+    _render_console()
+    return ("done", h["result"])
+
+
 def theme_toggle() -> None:
     cur = st.toggle("🌙 Dark mode", key="dark_mode")
     if cur != load_dark_pref():

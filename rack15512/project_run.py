@@ -20,7 +20,7 @@ from .viewer import (plot_deformed, plot_frame_elevation, plot_model,
 def run_configuration(store: ProjectStore, project_id: str, system_id: str,
                       config_id: str, *, plots: bool = True,
                       master_root: str = "masters",
-                      progress=None) -> Tuple[dict, str]:
+                      progress=None, should_cancel=None) -> Tuple[dict, str]:
     """Build, analyse and check a stored configuration; write report and
     plots into its config directory; record and return the run summary.
     Returns (summary, config_dir).
@@ -55,7 +55,7 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     seismic_on = bool(model.seismic and model.seismic.enabled)
     step("Running second-order analysis (gravity combinations)", 0.30)
     # run_all reports finer seismic sub-stages (0.45..0.72) via `progress`
-    cases = run_all(model, progress=progress)
+    cases = run_all(model, progress=progress, should_cancel=should_cancel)
     step("Verifying " + ("EN 15512 + IS 1893 design checks" if seismic_on
                          else "EN 15512 design checks"), 0.75)
     checks = run_checks(model, cases)

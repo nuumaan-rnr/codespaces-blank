@@ -20,7 +20,11 @@ class UnstableModelError(RuntimeError):
     and the run is stopped so the sections can be revised."""
 
 
-def run_all(model: RackModel, progress=None) -> List[CaseResult]:
+class RunCancelled(RuntimeError):
+    """Raised when the user cancels the run (should_cancel() returned True)."""
+
+
+def run_all(model: RackModel, progress=None, should_cancel=None) -> List[CaseResult]:
     # set RACK_VERBOSE=1 to echo per-combination run remarks to the terminal
     # (otherwise remarks go only to the progress callback, e.g. the app UI)
     verbose = bool(os.environ.get("RACK_VERBOSE"))
@@ -40,8 +44,14 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
     order = model.analysis.order
     results: List[CaseResult] = []
 
+    def _check_cancel():
+        if should_cancel and should_cancel():
+            step("Run cancelled by user", 1.0)
+            raise RunCancelled("Analysis cancelled by user.")
+
     n_combo = len(model.combinations) or 1
     for ci, combo in enumerate(model.combinations):
+        _check_cancel()
         step(f"Running {combo.kind} combination {combo.name}",
              0.30 + 0.14 * ci / n_combo)
         base_loads = assemble(model, combo)
@@ -53,6 +63,7 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
             directions = [""]
 
         for direction in directions:
+            _check_cancel()
             loads = base_loads
             geom_sway = None
             name = combo.name
@@ -69,6 +80,9 @@ def run_all(model: RackModel, progress=None) -> List[CaseResult]:
                                    kind=combo.kind, order=order,
                                    imp_direction=direction,
                                    geom_sway=geom_sway)
+            # report convergence pass/fail for THIS run (per combination/direction)
+            mark = "converged ✓" if case.converged else "DID NOT CONVERGE ✗"
+            step(f"   {name}: {mark}", 0.30 + 0.14 * (ci + 1) / n_combo)
             if order == 2 and case.converged and model.analysis.compute_alpha_cr:
                 # first-order companion for the alpha_cr / sway-amplification
                 # estimate (skipped when compute_alpha_cr is off, to save a solve)
