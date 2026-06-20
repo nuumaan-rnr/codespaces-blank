@@ -868,6 +868,21 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             gn("gamma_G_uls" if is_di else "gamma_G",
                1.35 if is_di else 1.3, 1.0, 2.0))
         gQ = c[1].number_input("gamma_Q", 1.0, 2.0, gn("gamma_Q", 1.4, 1.0, 2.0))
+        _gm_saved = float(g("stiffness_gamma_m", 1.0) or 1.0)
+        mat_factor_on = c[2].checkbox(
+            "Material factor γM on stiffness",
+            _gm_saved > 1.0,
+            help="EN 1993-1-1 / EN 15512: run the 2nd-order (P-Delta) stability "
+                 "check on the DESIGN stiffness E/γM1 (RSTAB 'Activate stiffness "
+                 "factors of: Materials (partial factor γM)'). On = softer frame, "
+                 "more sway (matches RSTAB); Off = full elastic stiffness.")
+        gamma_m_val = c[2].number_input(
+            "γM for stiffness (E/γM)", 1.0, 1.5,
+            _gm_saved if _gm_saved > 1.0 else 1.1, 0.05,
+            disabled=not mat_factor_on,
+            help="Member E and G are divided by this for the 2nd-order analysis "
+                 "when the toggle is on. EN 1993 γM1 = 1.1.")
+        stiffness_gamma_m_val = float(gamma_m_val) if mat_factor_on else 1.0
 
     with st.expander("🌐  Seismic (IS 1893:2016) & seismic bracing"):
         from rack15512.seismic import (STRUCTURE_TYPES, ZONE_FACTORS,
@@ -1018,6 +1033,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),
         gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,
+        stiffness_gamma_m=stiffness_gamma_m_val,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_structure_type=s_struct,
