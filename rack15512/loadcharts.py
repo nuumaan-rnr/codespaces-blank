@@ -587,6 +587,134 @@ def model_levels_point(mw, arch, section, gap, btype, pitch, xs,
     return out
 
 
+# --------------------------------------------------------------------------
+# utilization-targeted chart: tune the (soft) load per level so the governing
+# upright utilisation (max of STRESS and BUCKLING) lands in 0.97..0.99, with the
+# level count optimised slightly around a seed.
+# --------------------------------------------------------------------------
+UTIL_TARGET = 0.98
+UTIL_LO = 0.97
+UTIL_HI = 0.99
+
+
+def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev):
+    """Governing upright utilisation at (load per level, nlev).
+
+    Returns (converged, gov_util, stress_util, buckling_util, bottom_axial_kN);
+    gov_util = max over the upright AND upright-stiffener members of the STRESS
+    and BUCKLING utilisations.  converged is False (gov set to a 99 sentinel)
+    when the model is unstable / no ULS converges at this load.
+    """
+    from .analysis import run_all
+    from .checks.en15512 import run_checks
+    m = _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load, nlev)
+    if m is None:
+        return None
+    try:
+        checks = run_checks(m, run_all(m))
+    except Exception:
+        return (False, 99.0, 99.0, 99.0, 0.0)
+    su = bu = 0.0
+    n_ax = 0.0
+    sets = ("uprights", "upright stiffeners")
+    for ch in checks:
+        if ch.informative or ch.member_set not in sets:
+            continue
+        if ch.check == "STRESS":
+            su = max(su, ch.utilization)
+        elif ch.check == "BUCKLING":
+            bu = max(bu, ch.utilization)
+            x = ch.extra or {}
+            n_ax = max(n_ax, abs((x.get("N") or 0.0) / 1.0e3))
+    gov = max(su, bu)
+    return (gov < 50.0 and gov > 0.0, gov, su, bu, n_ax)
+
+
+def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed):
+    """At a fixed level count, tune the (soft) load per level so the governing
+    upright util reaches the 0.97..0.99 band.  Returns the best converged point
+    (load_N, gov, su, bu, axial) closest to UTIL_TARGET, or None if the frame is
+    sway-unstable before util can rise into the band (stability-limited)."""
+    load = max(float(seed), 200.0)
+    lo = None             # (load) largest converged load below target
+    hi = None             # smallest load that overshoots / goes unstable
+    best = None
+    for _ in range(7):
+        r = _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev)
+        if r is None:
+            return None
+        conv, gov, su, bu, ax = r
+        if conv:
+            if best is None or abs(gov - UTIL_TARGET) < abs(best[1] - UTIL_TARGET):
+                best = (load, gov, su, bu, ax)
+            if UTIL_LO <= gov <= UTIL_HI:
+                return best
+            if gov < UTIL_LO:
+                lo = load
+                nxt = (load * min(max(UTIL_TARGET / max(gov, 1e-3), 1.05), 1.8)
+                       if hi is None else 0.5 * (load + hi))
+            else:                                   # overshoot util>0.99
+                hi = load if hi is None else min(hi, load)
+                nxt = 0.5 * ((lo if lo else load * 0.5) + hi)
+        else:                                       # unstable -> load too high
+            hi = load if hi is None else min(hi, load)
+            nxt = (load * 0.5) if lo is None else 0.5 * (lo + hi)
+        load = max(min(nxt, 1.0e9), 50.0)
+    return best
+
+
+def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3):
+    """Find (n_levels, load per level) giving governing upright util in
+    0.97..0.99.  Tunes the soft load and optimises the level count slightly
+    around n_seed (prefers the seed, then +/-1, ...)."""
+    lcr_ca = pitch if btype == "X" else 2.0 * pitch
+    sec = mw.library.get(section)
+    if xs:
+        depth = round(sec.depth_h or 0.0)
+        stn = {90: "IN_STIFFENER90X1.6", 120: "IN_STIFFENER120X1.6"}.get(depth)
+        if not stn:
+            return None
+        sec = combined_upright_section(sec, mw.library.get(stn),
+                                       mw.library.get(stn).mount_offset or 30.0)
+    n_axial, _ = upright_capacity_kN(sec, FY_UPRIGHT, gap, lcr_ca)  # kN, strut
+
+    def seed_for(nlev):                              # soft-load seed at nlev
+        return max(n_axial * 1e3 / nlev / 1.4 * 0.7, 200.0)
+
+    n0 = max(int(n_seed) if n_seed else 3, 1)
+    order = [n0]
+    for d in range(1, 6):
+        order += [n0 - d, n0 + d]
+    best = None                                      # (nlev, load, gov, su, bu, ax)
+    for nlev in order:
+        if nlev < 1 or nlev > 9:
+            continue
+        r = _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev,
+                       seed_for(nlev))
+        if r is None:
+            continue
+        cand = (nlev,) + r
+        if UTIL_LO <= r[1] <= UTIL_HI:
+            best = cand
+            break
+        if best is None or abs(r[1] - UTIL_TARGET) < abs(best[2] - UTIL_TARGET):
+            best = cand
+    out = {"section": section, "config": _label(btype, pitch, xs),
+           "lcr_ca": int(lcr_ca), "lcr_da": int(gap)}
+    if best is None:
+        out.update(n_levels=0, load_per_level_kg=0.0, frame_load_kg=0.0,
+                   bottom_axial_kN=0.0, stress_util=None, buckling_util=None,
+                   gov_util=None)
+        return out
+    nlev, load, gov, su, bu, ax = best
+    load_kg = load / G_ACC
+    out.update(n_levels=int(nlev), load_per_level_kg=round(load_kg, 1),
+               frame_load_kg=round(load_kg * nlev, 1),
+               bottom_axial_kN=round(ax, 1), stress_util=round(su, 3),
+               buckling_util=round(bu, 3), gov_util=round(gov, 3))
+    return out
+
+
 _WORKER: dict = {}
 
 
@@ -808,6 +936,151 @@ def _plot_levels(name, curves, path):
     ax.grid(True, alpha=0.3)
     ax.set_ylim(0, LEVELS_MAX + 0.5)
     ax.set_yticks(range(0, LEVELS_MAX + 1))
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+# --------------------------------------------------------------------------
+# utilization-targeted chart generator (parallel, resumable)
+# --------------------------------------------------------------------------
+def _wpoint_util(args):
+    s, bt, p, xs, g, nseed = args
+    key = f"{s}|{_label(bt, p, xs)}|{g}"
+    try:
+        pt = model_util_point(_WORKER["mw"], _WORKER["arch"], s, float(g),
+                              bt, p, xs, nseed)
+    except Exception:
+        pt = None
+    return key, (pt or {})
+
+
+def _read_level_seeds(path):
+    """Read max_levels per (section, config, Lcr_DA) from a prior chart xlsx, to
+    seed the level-count search (>=1).  Returns {} on any problem."""
+    seeds = {}
+    if not path or not os.path.exists(path):
+        return seeds
+    try:
+        import openpyxl
+        ws = openpyxl.load_workbook(path, read_only=True, data_only=True).active
+        it = ws.iter_rows(values_only=True)
+        hdr = list(next(it))
+        idx = {name: i for i, name in enumerate(hdr)}
+        sc, cf = idx.get("section"), idx.get("config")
+        ld, ml = idx.get("Lcr_DA_mm"), idx.get("max_levels")
+        if None in (sc, cf, ld, ml):
+            return {}
+        for r in it:
+            if r[sc] is None:
+                continue
+            seeds[(r[sc], r[cf], int(r[ld]))] = max(int(r[ml] or 0), 1)
+    except Exception:
+        return {}
+    return seeds
+
+
+def generate_util_based(master_path, out_dir, seeds_file=None,
+                        checkpoint=None, workers=None):
+    """Resumable, parallel utilisation-targeted chart: for every case tune the
+    soft load per level (and slightly the level count) so the governing upright
+    util (max of STRESS and BUCKLING) lands in 0.97..0.99.  Level counts are
+    seeded from a prior chart (seeds_file) when given."""
+    import multiprocessing as mp
+    os.makedirs(out_dir, exist_ok=True)
+    checkpoint = checkpoint or os.path.join(out_dir, "_util_checkpoint.json")
+    done = {}
+    if os.path.exists(checkpoint):
+        done = _json.load(open(checkpoint, encoding="utf-8"))
+    sections = load_master(master_path).library.names("upright")
+    seeds = _read_level_seeds(seeds_file)
+    todo = []
+    for s in sections:
+        for (_lbl, bt, p, xs) in MODEL_CONFIGS:
+            for g in MODEL_DA:
+                key = f"{s}|{_label(bt, p, xs)}|{g}"
+                if key in done:
+                    continue
+                nseed = seeds.get((s, _label(bt, p, xs), int(g)), 3)
+                todo.append((s, bt, p, xs, g, nseed))
+    total = len(sections) * len(MODEL_CONFIGS) * len(MODEL_DA)
+    workers = workers or min(4, os.cpu_count() or 1)
+    print(f"util-target grid: {total} pts, {len(todo)} to do, {workers} workers, "
+          f"target util {UTIL_LO}-{UTIL_HI}", flush=True)
+    n = 0
+    with mp.Pool(workers, initializer=_winit, initargs=(master_path,)) as pool:
+        for key, pt in pool.imap_unordered(_wpoint_util, todo, chunksize=1):
+            done[key] = pt
+            n += 1
+            if n % 20 == 0:
+                _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
+                ok = len([k for k in done if done[k] and done[k].get("gov_util")])
+                print(f"  ... {len(done)}/{total} ({ok} utilised)", flush=True)
+    _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
+    return _finalize_util(done, out_dir)
+
+
+def _finalize_util(done, out_dir):
+    import openpyxl
+    up_dir = os.path.join(out_dir, "uprights_util")
+    os.makedirs(up_dir, exist_ok=True)
+    bysec = {}
+    for pt in done.values():
+        if not pt or not pt.get("gov_util"):
+            continue
+        c = bysec.setdefault(pt["section"], {}).setdefault(
+            pt["config"], {"da": [], "load": [], "lev": []})
+        c["da"].append(pt["lcr_da"])
+        c["load"].append(pt["load_per_level_kg"])
+        c["lev"].append(pt["n_levels"])
+    for sec, curves in bysec.items():
+        for c in curves.values():
+            order = sorted(range(len(c["da"])), key=lambda i: c["da"][i])
+            for k in ("da", "load", "lev"):
+                c[k] = [c[k][i] for i in order]
+        _plot_util(sec, curves, os.path.join(up_dir, f"{sec}.png"))
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Upright_util_chart"
+    ws.append(["section", "config", "Lcr_CA_mm", "Lcr_DA_mm", "n_levels",
+               "load_per_level_kg", "frame_load_kg", "bottom_upright_axial_kN",
+               "stress_util", "buckling_util", "gov_util"])
+    for key, pt in sorted(done.items()):
+        if pt:
+            ws.append([pt["section"], pt["config"], pt["lcr_ca"], pt["lcr_da"],
+                       pt.get("n_levels"), pt.get("load_per_level_kg"),
+                       pt.get("frame_load_kg"), pt.get("bottom_axial_kN"),
+                       pt.get("stress_util"), pt.get("buckling_util"),
+                       pt.get("gov_util")])
+    xlsx = os.path.join(out_dir, "Upright_Load_Chart_Utilised.xlsx")
+    wb.save(xlsx)
+    png_zip = os.path.join(out_dir, "upright_util_png.zip")
+    with zipfile.ZipFile(png_zip, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(os.listdir(up_dir)):
+            if f.endswith(".png"):
+                z.write(os.path.join(up_dir, f), f"uprights_util/{f}")
+    return {"sections": len(bysec), "xlsx": xlsx, "png_zip": png_zip}
+
+
+def _plot_util(name, curves, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    for label in ("X-500", "X-600", "D-1000", "D-1200", "XS-500", "XS-600"):
+        c = curves.get(label)
+        if not c:
+            continue
+        colour, ls = _STYLE.get(label, (branding.GREY, "-"))
+        ax.plot(c["da"], c["load"], ls, color=colour, lw=1.8, label=label)
+    ax.set_xlabel("Down-aisle buckling length  Lcr,DA = beam gap  [mm]")
+    ax.set_ylabel("Max load per level  [kg]  (governing util 0.97-0.99)")
+    ax.set_title(f"{name}  -  fully-utilised upright load chart  ·  fy=355  ·  "
+                 f"gamma_M1=1.1\nunbraced 3-bay semi-rigid frame, levels optimised, "
+                 f"soft load; util = max(stress, buckling)", fontsize=9.5)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=130)
