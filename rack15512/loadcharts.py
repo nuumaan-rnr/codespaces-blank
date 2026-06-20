@@ -43,6 +43,7 @@ E_STEEL = 210000.0          # MPa
 G_STEEL = 81000.0           # MPa
 GAMMA_M0 = 1.0              # cross-section resistance (EN 15512)
 GAMMA_M1 = 1.1              # member buckling resistance (EN 15512)
+GAMMA_Q = 1.4              # variable (pallet) load factor at ULS (EN 15512)
 FY_UPRIGHT = 355.0          # YS355, per the request
 DEFL_RATIO = 200.0          # beam deflection limit L / 200 (EN 15512 SLS)
 
@@ -147,11 +148,15 @@ def upright_chart_data(lib, fy: float = FY_UPRIGHT) -> Dict[str, dict]:
 def beam_level_capacity_kN(beam: CrossSection, fy: float, span: float,
                            k_conn: Optional[float], m_rd: Optional[float]
                            ) -> Tuple[float, str]:
-    """Max TOTAL load per bay level (both beams) [kN] for a single-span beam with
-    equal semi-rigid end rotational springs of stiffness k_conn [N*mm/rad].
+    """Max TOTAL WORKING load per bay level (both beams) [kN] for a single-span
+    beam with equal semi-rigid end rotational springs of stiffness k_conn
+    [N*mm/rad].
 
-    Returns (load_kN, governing) where governing is one of bending / connector /
-    deflection / shear.  Load is shared by the two beams: total = 2 * w * span."""
+    The strength limits (bending / connector / shear) are ULS checks - the
+    variable load factor GAMMA_Q is applied so the returned value is the
+    permissible WORKING (characteristic) load; deflection is the SLS limit
+    (L/200) at working load.  Returns (load_kN, governing); load is shared by
+    the two beams: total = 2 * w * span."""
     L = span
     EI = E_STEEL * beam.Iz                       # strong (down-aisle gravity) axis
     # connection fixity factor: gamma=0 pinned, gamma=1 fully fixed
@@ -159,28 +164,30 @@ def beam_level_capacity_kN(beam: CrossSection, fy: float, span: float,
     inf = float("inf")
     lim: Dict[str, float] = {}
 
-    # beam bending: max of mid-span (wL^2(1/8 - g/12)) and end (wL^2 * g/12)
+    # beam bending (ULS): max of mid-span (wL^2(1/8 - g/12)) and end (wL^2 g/12);
+    # working load = M_Rd / (gamma_Q * coef * L^2)
     coef_mid = 1.0 / 8.0 - gamma / 12.0
     coef_end = gamma / 12.0
     coef_bend = max(coef_mid, coef_end)
     m_rd_beam = beam.mod_z_eff * fy / GAMMA_M0
-    lim["bending"] = m_rd_beam / (coef_bend * L * L) if coef_bend > 0 else inf
+    lim["bending"] = (m_rd_beam / (GAMMA_Q * coef_bend * L * L)
+                      if coef_bend > 0 else inf)
 
-    # connector moment: end moment <= connector design resistance
-    lim["connector"] = (m_rd / (coef_end * L * L)
+    # connector moment (ULS): end moment <= connector design resistance
+    lim["connector"] = (m_rd / (GAMMA_Q * coef_end * L * L)
                         if (m_rd and coef_end > 1e-12) else inf)
 
-    # deflection L/200 (bending + shear when Avz given)
+    # deflection L/200 (SLS, working load): bending + shear when Avz given
     cb = L ** 4 / EI * (5.0 / 384.0 - gamma / 96.0)
     cs = L * L / (8.0 * G_STEEL * beam.Avz) if beam.Avz else 0.0
     lim["deflection"] = (L / DEFL_RATIO) / (cb + cs) if (cb + cs) > 0 else inf
 
-    # shear: V = wL/2 <= V_Rd = A_v fy / (sqrt3 gM0), A_v = 2 h t (two webs)
+    # shear (ULS): V = wL/2 <= V_Rd = A_v fy / (sqrt3 gM0), A_v = 2 h t (two webs)
     if beam.depth_h and beam.t:
         v_rd = 2.0 * beam.depth_h * beam.t * fy / (math.sqrt(3.0) * GAMMA_M0)
-        lim["shear"] = 2.0 * v_rd / L
+        lim["shear"] = 2.0 * v_rd / (GAMMA_Q * L)
 
-    w = min(lim.values())                        # per beam [N/mm]
+    w = min(lim.values())                        # per beam [N/mm], working
     gov = min(lim, key=lim.get)
     return 2.0 * w * L / 1e3, gov                # both beams -> total kN per level
 
