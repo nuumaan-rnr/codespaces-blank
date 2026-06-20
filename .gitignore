@@ -12,4 +12,5 @@ masters/
 charts/
 charts_util/
 charts_util_smoke/
+charts_beam/
 .rnr_settings.json
