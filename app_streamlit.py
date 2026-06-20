@@ -232,9 +232,24 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         ui.section("📐", "Geometry")
         c = st.columns(4)
         name = c[0].text_input("Configuration name", g("name", "Config 1"))
+
+        def _sec_label(nm):
+            """'CODE — description' for a section dropdown (falls back to dims)."""
+            try:
+                sec = lib.get(nm)
+                desc = (getattr(sec, "description", "") or "").strip()
+                if not desc and getattr(sec, "depth_h", None):
+                    desc = (f"{sec.depth_h:g}x{getattr(sec,'width_b',0):g}"
+                            f"x{getattr(sec,'t',0):g}")
+                return f"{nm} — {desc}" if desc else str(nm)
+            except Exception:
+                return str(nm)
+
         up_sec = c[1].selectbox(
             "Upright", up_names, key="cfg_upright",
-            index=_idx(up_names, g("upright_section", "UP0010")))
+            index=_idx(up_names, g("upright_section", "UP0010")),
+            format_func=_sec_label,
+            help="Shows the section code and its description (size / lip).")
         # default bracing: the saved value when editing, else the last-used
         # bracing (remembered across new configs in this session), else fallback
         _brace_default = (g("brace_section", None)
