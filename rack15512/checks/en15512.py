@@ -53,6 +53,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from .. import dsm
 from ..model import CrossSection, RackModel
 from ..results import CaseResult
 from . import buckling
@@ -116,6 +117,7 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
             out += _stress_checks(model, case)
             out += _shear_checks(model, case)
             out += _buckling_checks(model, case)
+            out += _dsm_checks(model, case)
             out += _ltb_checks(model, case)
             out += _brace_buckling_checks(model, case)
             out += _connector_checks(model, case)
@@ -141,6 +143,7 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
                 out += _stress_checks(model, case)
                 out += _shear_checks(model, case)
                 out += _buckling_checks(model, case)
+                out += _dsm_checks(model, case)
                 out += _ltb_checks(model, case)
                 out += _brace_buckling_checks(model, case)
                 out += _connector_checks(model, case)
@@ -360,6 +363,97 @@ def _chi_ft(sec: CrossSection, mat, length: float, Ncr_y: float,
         return None
     lam = buckling.lambda_bar(sec.area_eff, mat.fy, Ncr_FT)
     return buckling.chi(lam, sec.buckling_curve_y)
+
+
+def _ncr_global_min(sec: CrossSection, mat, m, mr) -> float:
+    """Least global elastic axial buckling load (Pcre for the DSM), consistent
+    with the buckling lengths used by _buckling_checks: min of flexural about
+    both axes and, when the gross torsion/warping/shear-centre data is present,
+    flexural-torsional (EN 15512 9.7.5)."""
+    Lcr_y = m.L_buckling_y if m.L_buckling_y else m.k_buckling_y * mr.length
+    Lcr_z = m.L_buckling_z if m.L_buckling_z else m.k_buckling_z * mr.length
+    ncr = min(buckling.n_cr(mat.E, sec.Iy, Lcr_y),
+              buckling.n_cr(mat.E, sec.Iz, Lcr_z))
+    if sec.It_gross is not None and sec.Iw_gross is not None \
+            and sec.y0 is not None:
+        Iy_g = sec.Iy_gross if sec.Iy_gross is not None else sec.Iy
+        Iz_g = sec.Iz_gross if sec.Iz_gross is not None else sec.Iz
+        i0_sq = (Iy_g + Iz_g) / sec.A + sec.y0 ** 2
+        L_T = m.L_buckling_y or mr.length
+        Ncr_y = buckling.n_cr(mat.E, sec.Iy, Lcr_y)
+        Ncr_T = buckling.n_cr_torsional(mat.E, mat.G, sec.It_gross,
+                                        sec.Iw_gross, i0_sq, L_T)
+        Ncr_FT = buckling.n_cr_flex_tors(Ncr_y, Ncr_T, sec.y0, i0_sq)
+        if Ncr_FT > 0:
+            ncr = min(ncr, Ncr_FT)
+    return ncr
+
+
+def _dsm_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
+    """Direct Strength Method verification of cold-formed (perforated) uprights
+    that carry CUFSM elastic local/distortional buckling data (CrossSection.dsm).
+
+    For each compressed target member: the global elastic load Pcre comes from
+    the frame buckling lengths (so it is consistent with the EN flexural / FT
+    check and the second-order model), the local/distortional elastic loads
+    come from CUFSM, and rack15512.dsm combines them into the nominal axial
+    strength Pn = min(Pne, Pnl, Pnd) (AISI S100-16 E2/E3/E4 with the members-
+    with-holes provisions).  Design resistance Nb,Rd = Pn / gamma_M1, with a
+    linear beam-column interaction using DSM bending resistances when the
+    section also carries Mcrl/Mcrd, else the EN effective moduli.
+
+    This complements the EN 1993-1-3 effective-section BUCKLING check: it adds
+    the distortional limit state, which that route only covers through the
+    tested A_eff.  Reported as DSM_BC; runs only for sections with .dsm set, so
+    models without CUFSM data are unaffected."""
+    res: List[CheckResult] = []
+    g = model.checks.gamma_M1
+    kM = model.checks.k_M
+    targets = _buckling_targets(model)
+    for mid, mr in case.members.items():
+        m = model.members[mid]
+        if targets is not None and m.member_set not in targets:
+            continue
+        sec = model.section_of(m)
+        d = sec.dsm
+        if d is None or mr.N_min >= 0.0:
+            continue
+        mat = model.material_of(m)
+        Pcre = _ncr_global_min(sec, mat, m, mr)
+        Py = sec.A * mat.fy
+        Pynet = (d.Anet if d.Anet is not None else sec.A) * mat.fy
+        col = dsm.column_strength(Py, Pcre, d.Pcrl, d.Pcrd, Pynet)
+        Nb_rd = col.Pn / g
+        Nc = abs(mr.N_min)
+        eta = Nc / Nb_rd if Nb_rd > 0 else 99.0
+
+        def _m_rd(Mcrl, Mcrd, Sf, Sfnet, W_eff):
+            if Mcrl and Mcrd:
+                My = Sf * mat.fy
+                Mynet = (Sfnet if Sfnet is not None else Sf) * mat.fy
+                b = dsm.beam_strength(My, 1e30, Mcrl, Mcrd, Mynet)
+                return b.Mn / g, "DSM"
+            return W_eff * mat.fy / g, "eff"
+
+        Mz_rd, z_src = _m_rd(d.Mcrl_z, d.Mcrd_z, sec.Welz, d.Wnet_z,
+                             sec.mod_z_eff)
+        My_rd, y_src = _m_rd(d.Mcrl_y, d.Mcrd_y, sec.Wely, d.Wnet_y,
+                             sec.mod_y_eff)
+        if m.mtype == "beam":
+            eta += kM * mr.My_absmax / My_rd + kM * mr.Mz_absmax / Mz_rd
+        detail = (f"Nc={Nc/1e3:.1f} kN; Pcre={Pcre/1e3:.0f}, Pcrl={d.Pcrl/1e3:.0f},"
+                  f" Pcrd={d.Pcrd/1e3:.0f} kN -> Pne={col.Pne/1e3:.1f}, "
+                  f"Pnl={col.Pnl/1e3:.1f}, Pnd={col.Pnd/1e3:.1f} kN; "
+                  f"Pn={col.Pn/1e3:.1f} kN ({col.governs} governs), "
+                  f"Nb,Rd=Pn/gM1={Nb_rd/1e3:.1f} kN; "
+                  f"My_Rd={My_rd/1e6:.2f}({y_src}), Mz_Rd={Mz_rd/1e6:.2f}({z_src})"
+                  f" kNm")
+        res.append(CheckResult("DSM_BC", case.name, f"member {mid}",
+                               m.member_set, eta, detail,
+                               extra={"Pn": col.Pn, "Pne": col.Pne,
+                                      "Pnl": col.Pnl, "Pnd": col.Pnd,
+                                      "governs": col.governs, "Pcre": Pcre}))
+    return res
 
 
 # bracing member sets verified by the strut workbook (compression + tension)
