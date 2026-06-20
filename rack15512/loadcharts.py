@@ -390,16 +390,18 @@ def _label(btype, pitch, xs):
     return f"X-{int(pitch)}" if btype == "X" else f"D-{int(2 * pitch)}"
 
 
-def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load):
+def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
+                      nlev=None):
     """Single-module 3-bay rack at a per-level load, reduced to the governing
     ULS2 combination with down-aisle imperfection (fast capacity eval)."""
     import dataclasses
     from .builder import RackConfig, build_rack, LevelSpec
+    nlev = int(nlev or MODEL_NLEV)
     fields = {f.name for f in dataclasses.fields(RackConfig)}
     kw = {k: v for k, v in arch.items() if k in fields}
-    h = MODEL_NLEV * gap + 200.0
+    h = nlev * gap + 200.0
     kw["levels"] = [LevelSpec(gap=gap, beam_section=MODEL_BEAM, pallet_load=load)
-                    for _ in range(MODEL_NLEV)]
+                    for _ in range(nlev)]
     kw.update(master=mw, module="single", n_bays=MODEL_NBAYS,
               upright_section=section, beam_section=MODEL_BEAM,
               bracing_type=btype, bracing_pitch=pitch, frame_height=h,
@@ -423,10 +425,10 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load):
     return m
 
 
-def _eval_upright(mw, arch, section, gap, btype, pitch, xs, load):
+def _eval_upright(mw, arch, section, gap, btype, pitch, xs, load, nlev=None):
     from .analysis import run_all, UnstableModelError
     from .checks.en15512 import run_checks, upright_set_buckling_rows
-    m = _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load)
+    m = _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load, nlev)
     if m is None:
         return None
     try:
@@ -512,6 +514,72 @@ def model_upright_point(mw, arch, section, gap, btype, pitch, xs):
             "load_per_level_kN": round(load * s / 1e3, 2),
             "N_cap_kN": round(N * s, 2), "My_kNm": round(My * s, 3),
             "Mz_kNm": round(Mz * s, 3)}
+
+
+G_ACC = 9.81                # m/s^2: pallet mass (kg) -> load (N)
+LOAD_CAP_KG = 3000.0        # capped load per beam level [kg]
+LEVELS_TARGET = 3           # start height; extend up while there is spare capacity
+LEVELS_MAX = 7
+LEVELS_MIN = 1
+
+
+def model_levels_point(mw, arch, section, gap, btype, pitch, xs,
+                       load_kg=LOAD_CAP_KG, lmin=LEVELS_MIN, lmax=LEVELS_MAX,
+                       target=LEVELS_TARGET):
+    """Maximum number of beam levels the upright supports at a fixed capped load
+    per level (default 3000 kg).
+
+    The load per level is held at the cap; the OUTPUT is how tall the rack can
+    be.  A non-converging or over-utilised ULS means the rack is too tall, so
+    reduce the level count; if the target (5) is met with margin, extend up to
+    lmax (7).  Returns the governing bottom-upright axial and Mz at that height.
+    """
+    lcr_ca = pitch if btype == "X" else 2.0 * pitch
+    load = load_kg * G_ACC
+    if xs:
+        depth = round(mw.library.get(section).depth_h or 0.0)
+        if depth not in (90, 120):
+            return None
+
+    def feasible(L):
+        r = _eval_upright(mw, arch, section, gap, btype, pitch, xs, load, nlev=L)
+        if r is None:
+            return None
+        u, N, My, Mz = r
+        ok = (u < 10.0) and (0.0 < u <= 1.0)        # u>=10 sentinel = unstable
+        return ok, u, N, My, Mz
+
+    best = None
+    r = feasible(target)
+    if r is None:
+        return None
+    if r[0]:                                          # target met -> climb
+        best = (target,) + r[1:]
+        L = target
+        while L < lmax:
+            L += 1
+            r = feasible(L)
+            if r and r[0]:
+                best = (L,) + r[1:]
+            else:
+                break
+    else:                                             # target too tall -> descend
+        L = target
+        while L > lmin:
+            L -= 1
+            r = feasible(L)
+            if r and r[0]:
+                best = (L,) + r[1:]
+                break
+    out = {"section": section, "config": _label(btype, pitch, xs),
+           "lcr_ca": int(lcr_ca), "lcr_da": int(gap), "load_kg": load_kg}
+    if best is None:                                  # cannot carry lmin levels
+        out.update(max_levels=0, bottom_axial_kN=0.0, util=None, Mz_kNm=0.0)
+        return out
+    L, u, N, My, Mz = best
+    out.update(max_levels=int(L), bottom_axial_kN=round(N, 1),
+               util=round(u, 3), Mz_kNm=round(Mz, 3))
+    return out
 
 
 _WORKER: dict = {}
@@ -624,6 +692,117 @@ def _plot_model_upright(name, curves, path):
                  f"EN 15512 imperfections (max stable load; N+My+Mz)", fontsize=9.5)
     ax.grid(True, alpha=0.3)
     ax.set_ylim(bottom=0)
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+# --------------------------------------------------------------------------
+# levels-based chart: max number of beam levels at a capped load per level
+# (unbraced down-aisle semi-rigid moment frame; start at 3, climb to 7)
+# --------------------------------------------------------------------------
+def _wpoint_levels(args):
+    s, bt, p, xs, g = args
+    key = f"{s}|{_label(bt, p, xs)}|{g}"
+    try:
+        pt = model_levels_point(_WORKER["mw"], _WORKER["arch"], s, float(g),
+                                bt, p, xs)
+    except Exception:
+        pt = None
+    return key, (pt or {})
+
+
+def generate_levels_based(master_path, out_dir, checkpoint=None, workers=None):
+    """Resumable, parallel max-levels chart: for each upright/config/beam gap,
+    the largest number of beam levels (1..7, starting from 3) that the UNBRACED
+    down-aisle semi-rigid moment frame carries at the capped load per level
+    (3000 kg).  A non-converging/over-utilised ULS means the rack is too tall."""
+    import multiprocessing as mp
+    os.makedirs(out_dir, exist_ok=True)
+    checkpoint = checkpoint or os.path.join(out_dir, "_levels_checkpoint.json")
+    done = {}
+    if os.path.exists(checkpoint):
+        done = _json.load(open(checkpoint, encoding="utf-8"))
+    sections = load_master(master_path).library.names("upright")
+    todo = [(s, bt, p, xs, g) for s in sections
+            for (_lbl, bt, p, xs) in MODEL_CONFIGS for g in MODEL_DA
+            if f"{s}|{_label(bt, p, xs)}|{g}" not in done]
+    total = len(sections) * len(MODEL_CONFIGS) * len(MODEL_DA)
+    workers = workers or min(4, os.cpu_count() or 1)
+    print(f"max-levels grid: {total} points, {len(todo)} to do, "
+          f"{workers} workers, load {LOAD_CAP_KG:.0f} kg/level, "
+          f"levels {LEVELS_MIN}..{LEVELS_MAX}", flush=True)
+    n = 0
+    with mp.Pool(workers, initializer=_winit, initargs=(master_path,)) as pool:
+        for key, pt in pool.imap_unordered(_wpoint_levels, todo, chunksize=1):
+            done[key] = pt
+            n += 1
+            if n % 20 == 0:
+                _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
+                print(f"  ... {len(done)}/{total} evaluated", flush=True)
+    _json.dump(done, open(checkpoint, "w", encoding="utf-8"))
+    return _finalize_levels(done, out_dir)
+
+
+def _finalize_levels(done, out_dir):
+    import openpyxl
+    up_dir = os.path.join(out_dir, "uprights_levels")
+    os.makedirs(up_dir, exist_ok=True)
+    bysec = {}
+    for pt in done.values():
+        if not pt:
+            continue
+        c = bysec.setdefault(pt["section"], {}).setdefault(
+            pt["config"], {"da": [], "lev": [], "lcr_ca": pt["lcr_ca"]})
+        c["da"].append(pt["lcr_da"])
+        c["lev"].append(pt["max_levels"])
+    for sec, curves in bysec.items():
+        for c in curves.values():
+            order = sorted(range(len(c["da"])), key=lambda i: c["da"][i])
+            for k in ("da", "lev"):
+                c[k] = [c[k][i] for i in order]
+        _plot_levels(sec, curves, os.path.join(up_dir, f"{sec}.png"))
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Max_levels_3000kg"
+    ws.append(["section", "config", "Lcr_CA_mm", "Lcr_DA_mm", "load_per_level_kg",
+               "max_levels", "bottom_upright_axial_kN", "util", "Mz_kNm"])
+    for key, pt in sorted(done.items()):
+        if pt:
+            ws.append([pt["section"], pt["config"], pt["lcr_ca"], pt["lcr_da"],
+                       pt.get("load_kg", LOAD_CAP_KG), pt["max_levels"],
+                       pt.get("bottom_axial_kN"), pt.get("util"),
+                       pt.get("Mz_kNm")])
+    xlsx = os.path.join(out_dir, "Upright_Max_Levels_3000kg.xlsx")
+    wb.save(xlsx)
+    png_zip = os.path.join(out_dir, "upright_levels_png.zip")
+    with zipfile.ZipFile(png_zip, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(os.listdir(up_dir)):
+            if f.endswith(".png"):
+                z.write(os.path.join(up_dir, f), f"uprights_levels/{f}")
+    return {"sections": len(bysec), "xlsx": xlsx, "png_zip": png_zip}
+
+
+def _plot_levels(name, curves, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    for label in ("X-500", "X-600", "D-1000", "D-1200", "XS-500", "XS-600"):
+        c = curves.get(label)
+        if not c:
+            continue
+        colour, ls = _STYLE.get(label, (branding.GREY, "-"))
+        ax.step(c["da"], c["lev"], where="mid", color=colour, lw=1.8, label=label)
+    ax.set_xlabel("Down-aisle buckling length  Lcr,DA = beam gap  [mm]")
+    ax.set_ylabel(f"Max beam levels at {LOAD_CAP_KG:.0f} kg/level")
+    ax.set_title(f"{name}  -  max rack levels at {LOAD_CAP_KG:.0f} kg/level  ·  "
+                 f"fy=355  ·  gamma_M1=1.1\nunbraced 3-bay semi-rigid moment frame, "
+                 f"RHS112 beam, EN 15512 imperfections (N+My+Mz)", fontsize=9.5)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, LEVELS_MAX + 0.5)
+    ax.set_yticks(range(0, LEVELS_MAX + 1))
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=130)
