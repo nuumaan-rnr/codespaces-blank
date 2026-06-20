@@ -691,6 +691,11 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
 
     with st.expander("🔩  Material & brace connections" if is_di
                      else "🔩  Connections, base & checks"):
+        # beam (connector) stiffness source - defaults; the selective branch
+        # exposes the selector below (drive-in rails use their own handling)
+        connector_stiffness_source = g("connector_stiffness_source", "master")
+        connector_calc_factor = float(g("connector_calc_factor", 2.0))
+        connector_stiffness_val = float(g("connector_stiffness", 1.0e8))
         if is_di:
             # drive-in: steel grade, semi-rigid base, and the brace bolt
             # connection (no footplate / anchor check).
@@ -771,6 +776,33 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             base_stiff = ("auto" if base_mode == _bmodes[0]
                           else "derived" if base_mode == _bmodes[1]
                           else kbase * 1e6)
+            c = st.columns(3)
+            _cmodes = ["Master import (tested)", "Calculated (E·I/L formula)",
+                       "Manual value"]
+            _cidx = {"master": 0, "calculated": 1,
+                     "manual": 2}.get(connector_stiffness_source, 0)
+            conn_mode = c[0].selectbox(
+                "Beam stiffness source", _cmodes, index=_cidx,
+                help="Beam-to-upright connector rotational spring. "
+                     "'Master import' = tested per-upright-thickness values "
+                     "(falls back to the connector default); 'Calculated' = "
+                     "factor·E·I_b/L_b from the beam section, bounded by the "
+                     "beam's own flexural stiffness; 'Manual value' = below.")
+            conn_factor_in = c[1].number_input(
+                "Beam stiffness factor (×E·I/L)", 1.0, 8.0,
+                connector_calc_factor, 1.0,
+                disabled=(conn_mode != _cmodes[1]),
+                help="Calculated source only: 2 = far end pinned, 4 = fixed, "
+                     "6 = double curvature (down-aisle sway, stiffest).")
+            conn_manual_in = c[2].number_input(
+                "Beam stiffness [kNm/rad] (Manual)", 0.0, 5000.0,
+                connector_stiffness_val / 1e6,
+                disabled=(conn_mode != _cmodes[2]),
+                help="Used only with the 'Manual value' source.")
+            connector_stiffness_source = {0: "master", 1: "calculated",
+                                          2: "manual"}[_cmodes.index(conn_mode)]
+            connector_calc_factor = float(conn_factor_in)
+            connector_stiffness_val = float(conn_manual_in) * 1e6
             c = st.columns(3)
             brace_factor = c[0].number_input(
                 "Bracing area factor", 0.05, 1.0,
@@ -1049,6 +1081,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,
         stiffness_gamma_m=stiffness_gamma_m_val,
+        connector_stiffness=connector_stiffness_val,
+        connector_stiffness_source=connector_stiffness_source,
+        connector_calc_factor=connector_calc_factor,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_structure_type=s_struct,

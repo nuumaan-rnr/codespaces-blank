@@ -420,7 +420,8 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
     m.analysis.fast_solve = True
     m.analysis.n_steps = 4
     m.analysis.max_iter = 12
-    m.analysis.stiffness_gamma_m = 1.1     # E/gamma_M1 design stiffness (RSTAB)
+    # full elastic stiffness (RSTAB uses gamma_M = 1.0); the material-factor
+    # reduction is a user-selectable option, not applied to the chart by default
     m.imperfection.directions = ["+x"]
     # govern by the worse of max-gravity (ULS1: 1.4 LL) and the placement combo
     # (ULS2: 1.26 LL + 1.26 placement) - ULS1 has the higher axial and usually

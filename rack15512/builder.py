@@ -257,6 +257,15 @@ class RackConfig:
     connector_stiffness: float = 1.0e8       # N*mm/rad, about local z
     connector_m_rd: Optional[float] = 2.5e6  # N*mm
     connector_looseness: float = 0.0         # rad (phi_l)
+    # beam-to-upright connector stiffness source (like base_stiffness):
+    #   'master'     -> the master beam-stiffness import (per upright thickness),
+    #                   falling back to the section / connector_stiffness default
+    #   'calculated' -> factor * E*I_b/L_b (rack15512.beam_stiffness; an estimate
+    #                   bounded by the beam's own flexural stiffness)
+    #   'manual'     -> connector_stiffness directly
+    # connector_stiffness_override (when set) always wins, for any source.
+    connector_stiffness_source: str = "master"
+    connector_calc_factor: float = 2.0       # k = factor * E*I_b/L_b (2/4/6)
     # floor connection: explicit stiffness [N*mm/rad] (0 = pinned), or the
     # default 'auto' = interpolate the master's tested BASE_STIFFNESS table at
     # the estimated upright axial load (EN 15512).  With no master 'auto' falls
@@ -661,11 +670,21 @@ def build_rack(cfg: RackConfig) -> RackModel:
     looseness_used = [cfg.connector_looseness]
     for z, sec_name, _ in specs:
         sec = m.sections[sec_name]
-        # connector stiffness resolves by the upright wall thickness it bolts to
-        # (beam-stiffness import), else the section's connector_k / cfg default;
-        # an explicit override (to match a test / external solver) wins.
-        k_c = (cfg.connector_stiffness_override
-               or sec.connector_k_for(up.t) or cfg.connector_stiffness)
+        # connector stiffness source (an explicit override always wins):
+        #  * calculated -> factor * E*I_b/L_b (beam flexural / line stiffness)
+        #  * manual     -> the cfg.connector_stiffness value
+        #  * master     -> per-upright-thickness import, else section / cfg default
+        if cfg.connector_stiffness_override:
+            k_c = cfg.connector_stiffness_override
+        elif cfg.connector_stiffness_source == "calculated":
+            from .beam_stiffness import derived_connector_stiffness
+            E_beam = m.materials[sec.material].E
+            k_c = derived_connector_stiffness(sec, E_beam, cfg.bay_width,
+                                              cfg.connector_calc_factor)
+        elif cfg.connector_stiffness_source == "manual":
+            k_c = cfg.connector_stiffness
+        else:                                  # 'master' (default)
+            k_c = sec.connector_k_for(up.t) or cfg.connector_stiffness
         m_rd = sec.connector_m_rd or cfg.connector_m_rd
         loos = (sec.connector_looseness
                 if sec.connector_looseness is not None

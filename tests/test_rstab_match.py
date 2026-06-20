@@ -33,6 +33,35 @@ def test_en1993_alpha_hm_reduction_matches_rstab():
     assert abs(flat.value() - 1/200) < 1e-9
 
 
+def test_calculated_beam_connector_stiffness():
+    # 'calculated' beam stiffness = factor * E*I_b/L_b (beam_stiffness module),
+    # like the base R899 option; an explicit override still wins.
+    from rack15512.beam_stiffness import derived_connector_stiffness
+
+    class _B:                                   # minimal beam section
+        Iz = 800000.0
+        material = "steel"
+    assert abs(derived_connector_stiffness(_B(), 210000.0, 2700.0, 2.0)
+               - 2.0 * 210000.0 * 800000.0 / 2700.0) < 1.0
+    # factor scales linearly (6 = double-curvature/sway, the stiffest)
+    k2 = derived_connector_stiffness(_B(), 210000.0, 2700.0, 2.0)
+    k6 = derived_connector_stiffness(_B(), 210000.0, 2700.0, 6.0)
+    assert abs(k6 / k2 - 3.0) < 1e-6
+
+    base = dict(module="single", n_bays=2, bay_width=2700.0,
+                levels=[LevelSpec(gap=2000.0)], frame_height=2200.0)
+    mcalc = build_rack(RackConfig(**base, connector_stiffness_source="calculated",
+                                  connector_calc_factor=6.0))
+    mman = build_rack(RackConfig(**base, connector_stiffness_source="manual",
+                                 connector_stiffness=42.0e6))
+    bc = next(mm for mm in mcalc.members.values()
+              if mm.member_set == "pallet beams")
+    bm = next(mm for mm in mman.members.values()
+              if mm.member_set == "pallet beams")
+    assert bc.hinge_i.rz > bm.hinge_i.rz          # 6EI/L stiffer than 42 kNm/rad
+    assert abs(bm.hinge_i.rz - 42.0e6) < 1.0      # manual value used verbatim
+
+
 def test_stiffness_gamma_m_softens_design_stiffness():
     # E/gamma_M1 design stiffness (RSTAB "Materials (partial factor gamma_M)"):
     # at 1st order the sway scales as 1/E, so gamma_M=1.1 gives ~1.1x the sway.
