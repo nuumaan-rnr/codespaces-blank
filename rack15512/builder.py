@@ -1191,12 +1191,16 @@ def build_rack(cfg: RackConfig) -> RackModel:
                     {"dead": 1.0, "pallets": 1.0}, imperfection=False),
     ]
     if placement:
+        # EN 15512 / RSTAB CO2 & CO5: when the horizontal placement force acts
+        # together with the pallet (live) load, BOTH are taken at the psi-reduced
+        # factor pay_placement_factor (1.26 = 1.4 x 0.9), not the full gamma_Q.
+        psi_pl = cfg.pay_placement_factor
         m.combinations.insert(1, Combination(
-            "ULS2", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                            "placement": cfg.gamma_Q}))
+            "ULS2", "ULS", {"dead": cfg.gamma_G, "pallets": psi_pl,
+                            "placement": psi_pl}))
         m.combinations.insert(2, Combination(
-            "ULS3", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                            "placement_y": cfg.gamma_Q}))
+            "ULS3", "ULS", {"dead": cfg.gamma_G, "pallets": psi_pl,
+                            "placement_y": psi_pl}))
         m.combinations.append(Combination(
             "SLS2", "SLS", {"dead": 1.0, "pallets": 1.0, "placement": 1.0},
             imperfection=False))

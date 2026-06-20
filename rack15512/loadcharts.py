@@ -421,7 +421,10 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
     m.analysis.n_steps = 4
     m.analysis.max_iter = 12
     m.imperfection.directions = ["+x"]
-    m.combinations = [c for c in m.combinations if c.name == "ULS2"]
+    # govern by the worse of max-gravity (ULS1: 1.4 LL) and the placement combo
+    # (ULS2: 1.26 LL + 1.26 placement) - ULS1 has the higher axial and usually
+    # governs down-aisle stability, ULS2 adds the placement sway force.
+    m.combinations = [c for c in m.combinations if c.name in ("ULS1", "ULS2")]
     return m
 
 
