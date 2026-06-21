@@ -27,17 +27,21 @@ second-order model.  See :func:`rack15512.dsm.column_strength`.
 
 from __future__ import annotations
 
-import csv
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
-from . import dsm
+from . import dsm, section_props
 from .model import CrossSection, Steel
+from .section_props import SectionProperties
 
 __all__ = [
     "BucklingLoads", "signature_minima", "classify_minima",
     "read_signature_csv", "loads_from_signature",
     "effective_area", "populate_effective_properties",
+    "read_cufsm_model", "parse_cufsm_model", "properties_from_cufsm",
+    "PropertyCheck", "PropertyReport", "validate_properties",
+    "validation_markdown", "populate_gross_properties",
 ]
 
 
@@ -206,4 +210,176 @@ def populate_effective_properties(section: CrossSection, steel: Steel,
         section.Wz_eff = dsm.section_modulus_effective(
             steel.fy, section.Welz, bending_z.Pcrl, bending_z.Pcrd,
             Sfnet=Sfnet_z)
+    return section
+
+
+# =====================================================================
+# CUFSM model geometry -> full section properties + EN 15512 validation
+# =====================================================================
+def parse_cufsm_model(lines: Sequence[str]):
+    """Parse a CUFSM model (node + element mesh) from text lines.
+
+    Two layouts are accepted:
+
+    * **labelled blocks** - a line containing ``node``/``nodes`` then rows
+      ``id, x, y`` (extra columns ignored), a line containing ``elem``/
+      ``elements`` then rows ``id, node_i, node_j, t`` (or ``node_i, node_j,
+      t``).  ``#`` and ``%`` start comments;
+    * **raw CUFSM matrices** - no labels: 8-column rows are nodes
+      ``[num x z ...]`` and 5-column rows are elements ``[num i j t mat]``.
+
+    Returns ``(nodes, elems)`` = ``({id: (x, y)}, [(i, j, t), ...])``.
+    """
+    nodes: dict = {}
+    elems: list = []
+    mode = None                              # 'node' | 'elem' | None (heuristic)
+    for raw in lines:
+        line = raw.split("#", 1)[0].split("%", 1)[0].strip()   # drop comments
+        if not line:
+            continue
+        if any(ch.isalpha() for ch in line):     # a header / label line
+            low = line.lower()
+            if "elem" in low:                     # check 'elem' before 'node'
+                mode = "elem"
+            elif "node" in low:
+                mode = "node"
+            continue                          # never parse an alpha line as data
+        vals = []
+        ok = True
+        for tok in line.replace(",", " ").split():
+            try:
+                vals.append(float(tok))
+            except ValueError:
+                ok = False
+                break
+        if not ok or not vals:
+            continue
+        kind = mode
+        if kind is None:                      # unlabelled: classify by width
+            kind = "node" if len(vals) >= 8 or len(vals) == 3 else "elem"
+        if kind == "node" and len(vals) >= 3:
+            nodes[int(round(vals[0]))] = (vals[1], vals[2])
+        elif kind == "elem":
+            if len(vals) >= 4:                # id, i, j, t (, mat)
+                i, j, t = int(round(vals[1])), int(round(vals[2])), vals[3]
+            elif len(vals) == 3:              # i, j, t
+                i, j, t = int(round(vals[0])), int(round(vals[1])), vals[2]
+            else:
+                continue
+            elems.append((i, j, t))
+    if not nodes or not elems:
+        raise ValueError("could not parse a CUFSM model - need both node rows "
+                         "and element rows (use [nodes] / [elements] labels, "
+                         "or the raw 8-col node / 5-col element matrices)")
+    return nodes, elems
+
+
+def read_cufsm_model(path: str):
+    """Read a CUFSM model file (see :func:`parse_cufsm_model`)."""
+    with open(path, "r", encoding="utf-8") as fh:
+        return parse_cufsm_model(fh.read().splitlines())
+
+
+def properties_from_cufsm(source) -> SectionProperties:
+    """Full thin-walled section properties from a CUFSM model: a file path, or
+    a pre-parsed ``(nodes, elems)`` tuple."""
+    if isinstance(source, (tuple, list)) and len(source) == 2 \
+            and isinstance(source[0], dict):
+        nodes, elems = source
+    else:
+        nodes, elems = read_cufsm_model(source)
+    return section_props.thin_walled_properties(nodes, elems)
+
+
+@dataclass
+class PropertyCheck:
+    """One row of the property validation: a quantity, the CUFSM value, the
+    master value (or None), the relative difference and a status."""
+
+    quantity: str
+    cufsm: float
+    master: Optional[float]
+    unit: str
+    pct: Optional[float] = None              # (cufsm-master)/master * 100
+    status: str = "n/a"                      # OK | CHECK | n/a (master blank)
+
+
+@dataclass
+class PropertyReport:
+    rows: List[PropertyCheck]
+    tol: float
+
+    @property
+    def ok(self) -> bool:
+        return all(r.status != "CHECK" for r in self.rows)
+
+
+def validate_properties(props: SectionProperties, section: CrossSection,
+                        tol: float = 0.05) -> PropertyReport:
+    """Compare CUFSM-computed section properties with a master CrossSection.
+
+    Area and torsion/warping/shear-centre are compared directly; the two
+    principal second moments are matched to the master Iy/Iz by magnitude (so
+    the local-axis naming convention does not matter).  ``tol`` is the relative
+    tolerance flagged as CHECK (default 5%)."""
+    rows: List[PropertyCheck] = []
+
+    def add(name, cufsm_val, master_val, unit):
+        pct = status = None
+        if master_val is None or master_val == 0:
+            status = "n/a (master blank)"
+        else:
+            pct = (cufsm_val - master_val) / master_val * 100.0
+            status = "OK" if abs(pct) <= tol * 100.0 else "CHECK"
+        rows.append(PropertyCheck(name, cufsm_val, master_val, unit, pct,
+                                  status))
+
+    add("A", props.A, section.A, "mm^2")
+    # principal moments matched to the master pair by magnitude
+    c_minor, c_major = sorted((props.I2, props.I1))
+    m_minor, m_major = sorted((section.Iz, section.Iy))
+    add("I_minor", c_minor, m_minor, "mm^4")
+    add("I_major", c_major, m_major, "mm^4")
+    add("J (It)", props.J, section.It_gross if section.It_gross else section.J,
+        "mm^4")
+    add("Cw (Iw)", props.Cw, section.Iw_gross, "mm^6")
+    add("y0 (shear-centre offset)", math.hypot(props.x_sc, props.y_sc),
+        section.y0, "mm")
+    return PropertyReport(rows=rows, tol=tol)
+
+
+def validation_markdown(report: PropertyReport) -> str:
+    """Markdown table of a :func:`validate_properties` report."""
+    out = [f"| Quantity | CUFSM | Master | Δ% | Status |",
+           "|---|---:|---:|---:|---|"]
+    for r in report.rows:
+        m = "-" if r.master is None else f"{r.master:,.4g}"
+        p = "-" if r.pct is None else f"{r.pct:+.1f}%"
+        out.append(f"| {r.quantity} [{r.unit}] | {r.cufsm:,.4g} | {m} | {p} "
+                   f"| {r.status} |")
+    verdict = "all within tolerance" if report.ok else "differences to review"
+    out.append("")
+    out.append(f"*{verdict} (tol ±{report.tol*100:.0f}%).*")
+    return "\n".join(out)
+
+
+def populate_gross_properties(section: CrossSection, props: SectionProperties,
+                              overwrite: bool = False) -> CrossSection:
+    """Fill the gross torsion / warping / shear-centre fields EN 15512 9.7.5
+    needs (``It_gross``, ``Iw_gross``, ``y0``) - and ``Iy_gross``/``Iz_gross``
+    when missing - from the CUFSM geometry, so the flexural-torsional buckling
+    check uses computed rather than estimated values.  Existing values are kept
+    unless ``overwrite`` is set.  Returns the same section."""
+    if overwrite or section.It_gross is None:
+        section.It_gross = props.J
+    if overwrite or section.Iw_gross is None:
+        section.Iw_gross = props.Cw
+    if overwrite or section.y0 is None:
+        section.y0 = math.hypot(props.x_sc, props.y_sc)
+    # map the principal pair onto the master's Iy/Iz by magnitude
+    c_minor, c_major = sorted((props.I2, props.I1))
+    if overwrite or section.Iy_gross is None:
+        section.Iy_gross = c_major if section.Iy >= section.Iz else c_minor
+    if overwrite or section.Iz_gross is None:
+        section.Iz_gross = c_minor if section.Iy >= section.Iz else c_major
     return section

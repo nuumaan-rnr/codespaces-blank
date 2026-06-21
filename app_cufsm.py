@@ -19,6 +19,7 @@ analysis, not CUFSM (see rack15512.cufsm)."""
 from __future__ import annotations
 
 import json
+import math
 
 import streamlit as st
 
@@ -222,6 +223,83 @@ with tab_geo:
             "Reproduce it in CUFSM, add the rounded corners and the upright's "
             "perforation pattern (or an equivalent reduced thickness), then run "
             "the signature curve.")
+
+    st.divider()
+    ui.section("✓", "Validate a CUFSM model → section properties (EN 15512 9.7.5)")
+    st.write("Upload the CUFSM **model** (node + element mesh) to compute the "
+             "full property set — A, I, **J, Cw, shear centre, i₀** — and check "
+             "it against the Section-tab values. These populate the gross "
+             "torsion/warping/shear-centre the flexural-torsional buckling "
+             "check needs.")
+    mdl = st.file_uploader("CUFSM model: [nodes]/[elements] blocks, or the raw "
+                          "8-col node / 5-col element matrices",
+                          type=["txt", "csv", "dat"], key="cufsmmodel")
+    if mdl is not None:
+        try:
+            nn, ee = cufsm.parse_cufsm_model(
+                mdl.getvalue().decode("utf-8", errors="ignore").splitlines())
+            props = cufsm.properties_from_cufsm((nn, ee))
+        except (ValueError, KeyError) as exc:
+            st.error(f"could not read the CUFSM model: {exc}")
+            props = None
+        if props is not None:
+            mc1, mc2 = st.columns([0.45, 0.55])
+            with mc1:
+                import plotly.graph_objects as go
+                mesh = go.Figure()
+                for i, j, _t in ee:
+                    mesh.add_trace(go.Scatter(
+                        x=[nn[i][0], nn[j][0]], y=[nn[i][1], nn[j][1]],
+                        mode="lines", line=dict(color=B.TEAL, width=3),
+                        showlegend=False))
+                mesh.add_trace(go.Scatter(
+                    x=[props.xc + props.x_sc], y=[props.yc + props.y_sc],
+                    mode="markers+text", text=["shear centre"],
+                    textposition="top center", showlegend=False,
+                    marker=dict(size=12, color="#E08A1E", symbol="x")))
+                mesh.add_trace(go.Scatter(
+                    x=[props.xc], y=[props.yc], mode="markers+text",
+                    text=["centroid"], textposition="bottom center",
+                    showlegend=False, marker=dict(size=9, color=B.GREY)))
+                mesh.update_yaxes(scaleanchor="x", scaleratio=1)
+                mesh.update_layout(height=360, title="CUFSM mesh",
+                                  margin=dict(l=10, r=10, t=30, b=10),
+                                  paper_bgcolor="rgba(0,0,0,0)",
+                                  plot_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(mesh, width="stretch")
+            with mc2:
+                ui.stat_strip([
+                    ("A", f"{_fmt(props.A,0)} mm²"),
+                    ("J (It)", f"{_fmt(props.J,0)} mm⁴"),
+                    ("Cw (Iw)", f"{props.Cw:,.3g} mm⁶")])
+                ui.stat_strip([
+                    ("I_major", f"{props.I1:,.4g}"),
+                    ("I_minor", f"{props.I2:,.4g}"),
+                    ("shear-centre offset",
+                     f"{_fmt(math.hypot(props.x_sc, props.y_sc),1)} mm"),
+                    ("i₀", f"{_fmt(props.i0,1)} mm")])
+                if props.closed:
+                    st.warning("a closed cell was detected — the shear centre / "
+                               "Cw assume an open section; review.")
+            # validate against the Section-tab inputs (A, I); J/Cw/y0 are new
+            sec = CrossSection(name, "steel", A, Iy, Iz, props.J, Wely, Welz)
+            report = cufsm.validate_properties(props, sec)
+            st.markdown(cufsm.validation_markdown(report))
+            st.code(
+                "from rack15512 import cufsm\n"
+                "# fill It_gross / Iw_gross / y0 (EN 15512 9.7.5 inputs):\n"
+                "props = cufsm.properties_from_cufsm('your_model.txt')\n"
+                "cufsm.populate_gross_properties(section, props)",
+                language="python")
+            st.download_button(
+                "Download section_properties.json",
+                json.dumps({"A": props.A, "Ix": props.Ix, "Iy": props.Iy,
+                            "I_major": props.I1, "I_minor": props.I2,
+                            "J": props.J, "Cw": props.Cw,
+                            "x_sc": props.x_sc, "y_sc": props.y_sc,
+                            "i0": props.i0}, indent=2),
+                file_name=f"{name}_section_properties.json",
+                mime="application/json")
 
 
 # ----------------------------------------------------------- 3 · signature curve
