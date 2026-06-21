@@ -354,6 +354,28 @@ compute the DSM resistances and effective area, then **hand off** — copy a
 `DSMData` snippet / JSON, or upload a rack model JSON and write the `dsm` data
 straight into a chosen section so the EN 15512 checks use it.
 
+### Section properties & §9.7.5 validation from the CUFSM model
+
+The CUFSM *model* (the node + element mesh) also yields the full thin-walled
+property set — area, second moments, **St-Venant torsion `J`, warping constant
+`Cw`, shear centre and the polar radius `i₀`** — i.e. exactly the gross-section
+quantities EN 15512 §9.7.5 needs for flexural-torsional buckling, which are
+otherwise estimated (the master's upright `J` defaults to `A·t²/3`).
+
+```python
+from rack15512 import cufsm
+props  = cufsm.properties_from_cufsm("upright_model.txt")   # A, I, J, Cw, y0, i0
+report = cufsm.validate_properties(props, section)          # vs the master
+print(cufsm.validation_markdown(report))                    # comparison table
+cufsm.populate_gross_properties(section, props)             # fill It_gross/Iw_gross/y0
+```
+
+The model file accepts `[nodes]`/`[elements]` blocks (`examples/cufsm_upright_model.txt`)
+or the raw CUFSM 8-column node / 5-column element matrices. The shear-centre and
+warping math is verified against closed-form sections (a doubly-symmetric I and a
+plain channel) in `tests/test_section_props.py`. The same upload + validation
+table is in the `app_cufsm.py` geometry tab.
+
 DSM is an internationally validated method, but it does **not** remove
 EN 15512's requirement to type-test the final perforated section — use it to
 derive or cross-check the effective properties, then confirm by test.

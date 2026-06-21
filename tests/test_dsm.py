@@ -204,6 +204,81 @@ def test_dsm_data_survives_json_roundtrip(tmp_path):
     assert d.Pcrl == 1.0e6 and d.Pcrd == 1.2e6 and d.Anet == 540.0
 
 
+def _channel_props():
+    from rack15512.section_props import thin_walled_properties
+    b, h, t = 60.0, 120.0, 2.0
+    nodes = {1: (0.0, h / 2), 2: (0.0, -h / 2), 3: (b, h / 2), 4: (b, -h / 2)}
+    elems = [(1, 2, t), (1, 3, t), (2, 4, t)]
+    return thin_walled_properties(nodes, elems)
+
+
+def test_parse_cufsm_model_labelled():
+    text = ("[nodes]  # id, x, y\n1, 0, 0\n2, 0, 100\n3, 90, 0\n"
+            "[elements]  # id, node_i, node_j, t\n1, 1, 2, 2.0\n2, 1, 3, 2.0\n")
+    nodes, elems = cufsm.parse_cufsm_model(text.splitlines())
+    assert nodes == {1: (0.0, 0.0), 2: (0.0, 100.0), 3: (90.0, 0.0)}
+    assert elems == [(1, 2, 2.0), (1, 3, 2.0)]
+
+
+def test_parse_cufsm_model_raw_matrices():
+    # raw CUFSM: 8-col node rows, 5-col element rows, no labels
+    text = ("1 0 0 1 1 1 1 1\n2 0 100 1 1 1 1 1\n3 90 0 1 1 1 1 1\n"
+            "1 1 2 2.0 1\n2 1 3 2.0 1\n")
+    nodes, elems = cufsm.parse_cufsm_model(text.splitlines())
+    assert set(nodes) == {1, 2, 3} and nodes[2] == (0.0, 100.0)
+    assert elems == [(1, 2, 2.0), (1, 3, 2.0)]
+
+
+def test_properties_from_cufsm_example_file():
+    path = os.path.join(os.path.dirname(__file__), "..", "examples",
+                        "cufsm_upright_model.txt")
+    p = cufsm.properties_from_cufsm(path)
+    # A and J have exact closed forms for the line model
+    assert p.A == pytest.approx((100 + 2 * 90 + 2 * 18) * 2.0, rel=1e-9)
+    assert p.J == pytest.approx((100 + 2 * 90 + 2 * 18) * 2.0 ** 3 / 3, rel=1e-9)
+    assert p.Cw > 0 and p.i0 > 0
+
+
+def test_validate_properties_flags_mismatch():
+    p = _channel_props()
+    sec = CrossSection(name="UP", material="steel", A=p.A,
+                       Iy=max(p.I1, p.I2), Iz=min(p.I1, p.I2),
+                       J=p.J, Wely=1.0, Welz=1.0,
+                       It_gross=p.J, Iw_gross=p.Cw,
+                       y0=math.hypot(p.x_sc, p.y_sc))
+    rep = cufsm.validate_properties(p, sec)
+    assert rep.ok and all(r.status in ("OK", "n/a (master blank)")
+                          for r in rep.rows)
+    md = cufsm.validation_markdown(rep)
+    assert "Status" in md and "Cw" in md and "within tolerance" in md
+    # a 50% wrong warping constant is flagged
+    sec.Iw_gross = p.Cw * 1.5
+    rep2 = cufsm.validate_properties(p, sec)
+    assert not rep2.ok
+    assert any(r.quantity.startswith("Cw") and r.status == "CHECK"
+               for r in rep2.rows)
+
+
+def test_populate_gross_properties_for_ft_buckling():
+    p = _channel_props()
+    sec = CrossSection(name="UP", material="steel", A=p.A, Iy=600.0, Iz=400.0,
+                       J=1.0, Wely=1.0, Welz=1.0)
+    assert sec.It_gross is None and sec.Iw_gross is None and sec.y0 is None
+    cufsm.populate_gross_properties(sec, p)
+    assert sec.It_gross == pytest.approx(p.J)
+    assert sec.Iw_gross == pytest.approx(p.Cw)
+    assert sec.y0 == pytest.approx(math.hypot(p.x_sc, p.y_sc))
+    # larger master inertia (Iy) gets the major principal value
+    assert sec.Iy_gross == pytest.approx(max(p.I1, p.I2))
+    assert sec.Iz_gross == pytest.approx(min(p.I1, p.I2))
+    # existing values are kept unless overwrite
+    sec.It_gross = 12345.0
+    cufsm.populate_gross_properties(sec, p)
+    assert sec.It_gross == 12345.0
+    cufsm.populate_gross_properties(sec, p, overwrite=True)
+    assert sec.It_gross == pytest.approx(p.J)
+
+
 def test_populate_effective_properties_feeds_en_checks():
     """A CUFSM run fills A_eff so the EN 15512 effective-section checks use
     DSM-derived properties; a stocky section keeps the gross area."""
