@@ -33,6 +33,29 @@ def test_en1993_alpha_hm_reduction_matches_rstab():
     assert abs(flat.value() - 1/200) < 1e-9
 
 
+def test_member_self_weight_in_dead_case():
+    # RSTAB's LC1 has self-weight active (gamma=78.5 kN/m3); OpenSees applies no
+    # gravity on its own, so the builder must add A*rho*g member self-weight to
+    # the dead case as a global -Z UDL.  Default on; can be switched off.
+    from rack15512.builder import _RHO_STEEL, _G_ACC
+    m = build_rack(RackConfig(module="single", n_bays=2,
+                              levels=[LevelSpec(gap=2000.0)], frame_height=2200.0))
+    dead = m.load_cases["dead"]
+    # one self-weight UDL per member (plus the dead_load_beam UDLs on the beams)
+    sw = [ml for ml in dead.member_loads]
+    assert len(sw) >= len(m.members)                  # every member got self-wt
+    # an upright's self-weight UDL magnitude = A * rho * g
+    up = next(mm for mm in m.members.values() if mm.member_set == "uprights")
+    a = m.sections[up.section].A
+    got = [abs(ml.qz) for ml in dead.member_loads if ml.member == up.id]
+    assert any(abs(q - a * _RHO_STEEL * _G_ACC) < 1e-6 for q in got)
+    # off -> no self-weight (only the beam dead UDLs remain)
+    m0 = build_rack(RackConfig(module="single", n_bays=2,
+                               levels=[LevelSpec(gap=2000.0)], frame_height=2200.0,
+                               include_self_weight=False))
+    assert len(m0.load_cases["dead"].member_loads) < len(m.members)
+
+
 def test_calculated_beam_connector_stiffness():
     # 'calculated' beam stiffness = factor * E*I_b/L_b (beam_stiffness module),
     # like the base R899 option; an explicit override still wins.

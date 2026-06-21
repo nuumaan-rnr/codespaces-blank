@@ -413,7 +413,8 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
               upright_section=section, beam_section=MODEL_BEAM,
               bracing_type=btype, bracing_pitch=pitch, frame_height=h,
               pallet_load_per_level=load, ca_brace_zones=(), ca_x_height=None,
-              steel_fy=FY_UPRIGHT, fy_override=True)
+              steel_fy=FY_UPRIGHT, fy_override=True,
+              include_self_weight=False)   # pallet capacity; self-wt negligible
     if xs:
         depth = round(mw.library.get(section).depth_h or 0.0)
         st = {90: "IN_STIFFENER90X1.6", 120: "IN_STIFFENER120X1.6"}.get(depth)

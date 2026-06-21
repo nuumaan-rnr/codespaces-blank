@@ -48,6 +48,8 @@ from .model import (BasePlate, Combination, Hinge, Imperfection, Link, LoadCase,
                     Steel, Support)
 
 _TOL = 1.0     # mm: merge coincident elevations
+_RHO_STEEL = 7.85e-6   # steel density [kg/mm^3]  (A[mm^2]*rho -> kg/mm)
+_G_ACC = 9.81          # gravity [m/s^2]; A*rho*g gives N/mm member self-weight
 
 
 def _selected_bays(n_bays: int, pattern: str) -> List[int]:
@@ -303,6 +305,9 @@ class RackConfig:
     # loads
     pallet_load_per_level: float = 20000.0  # N per bay per level PER MODULE
     dead_load_beam: float = 0.05            # N/mm per beam
+    # include steel member self-weight (A*rho*g) as a global -Z UDL in the dead
+    # load case (RSTAB does this automatically; OpenSees needs it sent).
+    include_self_weight: bool = True
     placement_load: float = 500.0           # N horizontal at top (EN 15512)
     # accidental impact loads on an upright (EN 15512; 0 disables) -
     # applied to the load_frame upright (an interior line by default) at
@@ -1142,6 +1147,16 @@ def build_rack(cfg: RackConfig) -> RackModel:
     for ids in beam_pairs.values():
         for b in ids:
             dead.member_loads.append(MemberLoad(b, qz=-cfg.dead_load_beam))
+    # member self-weight (steel): a global -Z UDL w = A*rho*g [N/mm] on EVERY
+    # member, resolved per-orientation by the engine (uprights -> axial, beams ->
+    # transverse).  RSTAB includes this automatically (LC1 self-weight, Z=1); we
+    # must send it explicitly - OpenSees applies no gravity on its own.
+    if cfg.include_self_weight:
+        w_self = _RHO_STEEL * _G_ACC                  # [N/mm per mm^2 of area]
+        for mid, mem in m.members.items():
+            sec = m.sections.get(mem.section)
+            if sec and sec.A:
+                dead.member_loads.append(MemberLoad(mid, qz=-sec.A * w_self))
     m.load_cases["dead"] = dead
 
     n_sides = len(sides)
