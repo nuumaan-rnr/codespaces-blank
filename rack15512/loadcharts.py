@@ -602,6 +602,8 @@ def model_levels_point(mw, arch, section, gap, btype, pitch, xs,
 UTIL_TARGET = 0.98
 UTIL_LO = 0.97
 UTIL_HI = 0.99
+UTIL_LOAD_CAP_KG = 2500.0   # HARD cap on load per level for the util chart [kg]
+MAX_LEVELS_CAP = 30         # upper bound on the level-count search
 
 
 def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev):
@@ -637,12 +639,13 @@ def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev):
     return (gov < 50.0 and gov > 0.0, gov, su, bu, n_ax)
 
 
-def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed):
-    """At a fixed level count, tune the (soft) load per level so the governing
-    upright util reaches the 0.97..0.99 band.  Returns the best converged point
-    (load_N, gov, su, bu, axial) closest to UTIL_TARGET, or None if the frame is
-    sway-unstable before util can rise into the band (stability-limited)."""
-    load = max(float(seed), 200.0)
+def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
+               max_load=1.0e9):
+    """At a fixed level count, tune the load per level so the governing upright
+    util reaches the 0.97..0.99 band, never exceeding max_load.  Returns the
+    best converged point (load_N, gov, su, bu, axial) closest to UTIL_TARGET, or
+    None if the frame is sway-unstable before util can rise into the band."""
+    load = max(min(float(seed), max_load), 200.0)
     lo = None             # (load) largest converged load below target
     hi = None             # smallest load that overshoots / goes unstable
     best = None
@@ -657,6 +660,8 @@ def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed):
             if UTIL_LO <= gov <= UTIL_HI:
                 return best
             if gov < UTIL_LO:
+                if load >= max_load - 1.0:           # capped: cannot add load
+                    return best
                 lo = load
                 nxt = (load * min(max(UTIL_TARGET / max(gov, 1e-3), 1.05), 1.8)
                        if hi is None else 0.5 * (load + hi))
@@ -666,60 +671,103 @@ def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed):
         else:                                       # unstable -> load too high
             hi = load if hi is None else min(hi, load)
             nxt = (load * 0.5) if lo is None else 0.5 * (lo + hi)
-        load = max(min(nxt, 1.0e9), 50.0)
+        load = max(min(nxt, max_load), 50.0)
     return best
 
 
 def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3):
     """Find (n_levels, load per level) giving governing upright util in
-    0.97..0.99.  Tunes the soft load and optimises the level count slightly
-    around n_seed (prefers the seed, then +/-1, ...)."""
+    0.97..0.99 with the load per level HARD-capped at UTIL_LOAD_CAP_KG.
+
+    Capacity is built by ADDING LEVELS (not weight): the load stays at the cap
+    and the level count is raised until util enters the band; only when the band
+    falls between two integer level counts is the load trimmed below the cap at
+    the higher level count (more levels, lighter).  With the load fixed a stiffer
+    config carries more levels, so capacity is monotone XS > X > D.
+    """
     lcr_ca = pitch if btype == "X" else 2.0 * pitch
-    sec = mw.library.get(section)
     if xs:
-        depth = round(sec.depth_h or 0.0)
-        stn = {90: "IN_STIFFENER90X1.6", 120: "IN_STIFFENER120X1.6"}.get(depth)
-        if not stn:
+        depth = round(mw.library.get(section).depth_h or 0.0)
+        if depth not in (90, 120):
             return None
-        sec = combined_upright_section(sec, mw.library.get(stn),
-                                       mw.library.get(stn).mount_offset or 30.0)
-    n_axial, _ = upright_capacity_kN(sec, FY_UPRIGHT, gap, lcr_ca)  # kN, strut
+    cap = UTIL_LOAD_CAP_KG * G_ACC                   # N per level (hard cap)
 
-    def seed_for(nlev):                              # soft-load seed at nlev
-        return max(n_axial * 1e3 / nlev / 1.4 * 0.7, 200.0)
-
-    n0 = max(int(n_seed) if n_seed else 3, 1)
-    order = [n0]
-    for d in range(1, 6):
-        order += [n0 - d, n0 + d]
-    best = None                                      # (nlev, load, gov, su, bu, ax)
-    for nlev in order:
-        if nlev < 1 or nlev > 9:
-            continue
-        r = _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev,
-                       seed_for(nlev))
+    def at_cap(n):
+        """(feasible, conv, gov, su, bu, ax) at the cap load for n levels;
+        feasible = converged and util <= UTIL_HI."""
+        r = _eval_util(mw, arch, section, gap, btype, pitch, xs, cap, n)
         if r is None:
-            continue
-        cand = (nlev,) + r
-        if UTIL_LO <= r[1] <= UTIL_HI:
-            best = cand
-            break
-        if best is None or abs(r[1] - UTIL_TARGET) < abs(best[2] - UTIL_TARGET):
-            best = cand
-    out = {"section": section, "config": _label(btype, pitch, xs),
-           "lcr_ca": int(lcr_ca), "lcr_da": int(gap)}
-    if best is None:
-        out.update(n_levels=0, load_per_level_kg=0.0, frame_load_kg=0.0,
-                   bottom_axial_kN=0.0, stress_util=None, buckling_util=None,
-                   gov_util=None)
+            return None
+        conv, gov, su, bu, ax = r
+        return (conv and gov <= UTIL_HI, conv, gov, su, bu, ax)
+
+    def pack(n, load, gov, su, bu, ax):
+        out = {"section": section, "config": _label(btype, pitch, xs),
+               "lcr_ca": int(lcr_ca), "lcr_da": int(gap)}
+        load_kg = load / G_ACC
+        out.update(n_levels=int(n), load_per_level_kg=round(load_kg, 1),
+                   frame_load_kg=round(load_kg * n, 1),
+                   bottom_axial_kN=round(ax, 1), stress_util=round(su, 3),
+                   buckling_util=round(bu, 3), gov_util=round(gov, 3))
         return out
-    nlev, load, gov, su, bu, ax = best
-    load_kg = load / G_ACC
-    out.update(n_levels=int(nlev), load_per_level_kg=round(load_kg, 1),
-               frame_load_kg=round(load_kg * nlev, 1),
-               bottom_axial_kN=round(ax, 1), stress_util=round(su, 3),
-               buckling_util=round(bu, 3), gov_util=round(gov, 3))
-    return out
+
+    def reduced(n):
+        """n levels with the load trimmed below the cap to land util in band."""
+        return _tune_load(mw, arch, section, gap, btype, pitch, xs, n, cap,
+                          max_load=cap)
+
+    _cache: Dict[int, object] = {}
+
+    def cap_eval(n):
+        if n not in _cache:
+            _cache[n] = at_cap(n)
+        return _cache[n]
+
+    # --- find N_max = the largest level count that fits at the cap load -------
+    # (converged AND util <= UTIL_HI).  Feasibility is monotone in n (taller =
+    # less stable / higher util), so walk up/down from the seed.
+    n = max(int(n_seed) if n_seed else 3, 1)
+    f = cap_eval(n)
+    if f is None:
+        return pack(0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    if f[0]:                                          # seed fits -> climb up
+        N_max = n
+        while N_max < MAX_LEVELS_CAP:
+            g = cap_eval(N_max + 1)
+            if g is None or not g[0]:
+                break
+            N_max += 1
+    else:                                             # seed too tall -> descend
+        N_max = 0
+        m = n - 1
+        while m >= 1:
+            g = cap_eval(m)
+            if g is not None and g[0]:
+                N_max = m
+                break
+            m -= 1
+
+    # --- candidates: maximise capacity (n * load) with load<=cap, util<=UTIL_HI
+    cands = []                                        # (frame_kg, n, load, gov,su,bu,ax)
+    if N_max >= 1:
+        a = cap_eval(N_max)
+        cands.append((UTIL_LOAD_CAP_KG * N_max, N_max, cap,
+                      a[2], a[3], a[4], a[5]))
+    # one extra level at a trimmed (sub-cap) load - usually more total capacity
+    rb = reduced(N_max + 1)
+    if rb and rb[1] <= UTIL_HI + 1e-6:
+        cands.append((rb[0] / G_ACC * (N_max + 1), N_max + 1, rb[0],
+                      rb[1], rb[2], rb[3], rb[4]))
+    if N_max == 0:                                    # even 1 level over at cap
+        r1 = reduced(1)
+        if r1:
+            cands.append((r1[0] / G_ACC, 1, r1[0],
+                          r1[1], r1[2], r1[3], r1[4]))
+    if not cands:
+        return pack(0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    # pick the highest capacity (frame load); util is <= UTIL_HI by construction
+    _, nb, lb, gov, su, bu, ax = max(cands, key=lambda c: c[0])
+    return pack(nb, lb, gov, su, bu, ax)
 
 
 _WORKER: dict = {}
@@ -1037,14 +1085,15 @@ def _finalize_util(done, out_dir):
         if not pt or not pt.get("gov_util"):
             continue
         c = bysec.setdefault(pt["section"], {}).setdefault(
-            pt["config"], {"da": [], "load": [], "lev": []})
+            pt["config"], {"da": [], "load": [], "lev": [], "frame": []})
         c["da"].append(pt["lcr_da"])
         c["load"].append(pt["load_per_level_kg"])
         c["lev"].append(pt["n_levels"])
+        c["frame"].append(pt.get("frame_load_kg", 0.0))
     for sec, curves in bysec.items():
         for c in curves.values():
             order = sorted(range(len(c["da"])), key=lambda i: c["da"][i])
-            for k in ("da", "load", "lev"):
+            for k in ("da", "load", "lev", "frame"):
                 c[k] = [c[k][i] for i in order]
         _plot_util(sec, curves, os.path.join(up_dir, f"{sec}.png"))
     wb = openpyxl.Workbook()
@@ -1080,12 +1129,13 @@ def _plot_util(name, curves, path):
         if not c:
             continue
         colour, ls = _STYLE.get(label, (branding.GREY, "-"))
-        ax.plot(c["da"], c["load"], ls, color=colour, lw=1.8, label=label)
+        ax.plot(c["da"], c["frame"], ls, color=colour, lw=1.8, label=label)
     ax.set_xlabel("Down-aisle buckling length  Lcr,DA = beam gap  [mm]")
-    ax.set_ylabel("Max load per level  [kg]  (governing util 0.97-0.99)")
-    ax.set_title(f"{name}  -  fully-utilised upright load chart  ·  fy=355  ·  "
-                 f"gamma_M1=1.1\nunbraced 3-bay semi-rigid frame, levels optimised, "
-                 f"soft load; util = max(stress, buckling)", fontsize=9.5)
+    ax.set_ylabel("Upright capacity = total frame load  [kg]  (<=2500 kg/level)")
+    ax.set_title(f"{name}  -  fully-utilised upright capacity  ·  fy=355  ·  "
+                 f"gamma_M1=1.1\nunbraced 3-bay semi-rigid frame, load<=2500 kg/level, "
+                 f"levels maximised; util = max(stress, buckling) ~0.97-0.99",
+                 fontsize=9.5)
     ax.grid(True, alpha=0.3)
     ax.set_ylim(bottom=0)
     ax.legend(fontsize=8, ncol=2)
