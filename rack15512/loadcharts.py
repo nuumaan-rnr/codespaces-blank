@@ -1133,14 +1133,23 @@ def _finalize_util(done, out_dir):
     ws.title = "Upright_util_chart"
     ws.append(["section", "config", "Lcr_CA_mm", "Lcr_DA_mm", "n_levels",
                "load_per_level_kg", "frame_load_kg", "bottom_upright_axial_kN",
-               "stress_util", "buckling_util", "gov_util"])
+               "stress_util", "buckling_util", "gov_util", "status"])
     for key, pt in sorted(done.items()):
         if pt:
+            gov = pt.get("gov_util")
+            # PASS = utilised into the target band; UNDER = best achievable but
+            # sway-limited below 0.97 (value + util still reported)
+            if gov is None:
+                status = "NO RESULT"
+            elif gov >= UTIL_LO:
+                status = "PASS"
+            else:
+                status = "UNDER (sway-limited)"
             ws.append([pt["section"], pt["config"], pt["lcr_ca"], pt["lcr_da"],
                        pt.get("n_levels"), pt.get("load_per_level_kg"),
                        pt.get("frame_load_kg"), pt.get("bottom_axial_kN"),
                        pt.get("stress_util"), pt.get("buckling_util"),
-                       pt.get("gov_util")])
+                       gov, status])
     xlsx = os.path.join(out_dir, "Upright_Load_Chart_Utilised.xlsx")
     wb.save(xlsx)
     png_zip = os.path.join(out_dir, "upright_util_png.zip")
