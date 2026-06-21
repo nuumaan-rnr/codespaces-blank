@@ -773,12 +773,14 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3):
 
     # sway/cap-limited below the band: the load cap left the frame's capacity
     # under-used -> ADD LEVELS and REDUCE the load (down to UTIL_LOAD_FLOOR_KG)
-    # so the same buckling capacity is reached over more, lighter levels.
+    # so the same buckling capacity is reached over more, lighter levels.  The
+    # extra-level climb is bounded (a few levels above N_max) and stops at the
+    # first in-band result, so it cannot run away into huge, very slow models.
     floor = UTIL_LOAD_FLOOR_KG * G_ACC
-    band_best = None                                  # max-capacity in-band combo
     misses = 0
     n2 = max(N_max + 1, 2)
-    while n2 <= MAX_LEVELS_CAP and misses < 3:
+    n2_max = min(MAX_LEVELS_CAP, max(N_max, 1) + 6)
+    while n2 <= n2_max and misses < 3:
         r = _tune_load(mw, arch, section, gap, btype, pitch, xs, n2, cap,
                        max_load=cap)
         if r is None:
@@ -787,19 +789,15 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3):
         if load_r < floor - 1.0:                      # would need < 1500 kg -> stop
             break
         frame_r = load_r / G_ACC * n2
-        if UTIL_LO <= gov_r <= UTIL_HI:               # reached the band
-            if band_best is None or frame_r > band_best[0]:
-                band_best = (frame_r, n2, load_r, gov_r, su_r, bu_r, ax_r)
-            misses = 0
-        else:
-            misses += 1
+        if UTIL_LO <= gov_r <= UTIL_HI:               # reached the band -> done
+            return pack(n2, load_r, gov_r, su_r, bu_r, ax_r)
+        misses += 1
         # keep the closest-to-target as an improved fallback (still load>=floor)
         if abs(gov_r - UTIL_TARGET) < abs(best[3] - UTIL_TARGET):
             best = (frame_r, n2, load_r, gov_r, su_r, bu_r, ax_r)
         n2 += 1
 
-    pick = band_best if band_best else best
-    return pack(pick[1], pick[2], pick[3], pick[4], pick[5], pick[6])
+    return pack(best[1], best[2], best[3], best[4], best[5], best[6])
 
 
 _WORKER: dict = {}
