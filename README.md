@@ -403,6 +403,16 @@ The model's `J/Cw/y0` then feed the EN 15512 §9.7.5 flexural-torsional check an
 the `Pcrl/Pcrd` feed the DSM check, for every member of that section. Existing
 master values are kept unless `cufsm_overwrite=True`.
 
+### Importing CUFSM into a stored master (the apps)
+
+The intended production workflow: on the main app's **Section masters** page
+(and in the `app_cufsm.py` Handoff tab), pick a stored master and an upright,
+upload the CUFSM **model** and/or **signature** files, and the section is
+updated in place — `J/Cw/y0`, `A_eff` and the `DSMData` — then **saved back to
+the master** so every project built from it uses the values. This is
+`StoredMaster.apply_cufsm(name, CufsmData(...))` under the hood; the master JSON
+round-trips the new fields (the `dsm` block included).
+
 DSM is an internationally validated method, but it does **not** remove
 EN 15512's requirement to type-test the final perforated section — use it to
 derive or cross-check the effective properties, then confirm by test.

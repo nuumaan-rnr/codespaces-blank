@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import tempfile
 
 import streamlit as st
 
@@ -493,6 +495,54 @@ with tab_out:
                                       mime="application/json")
             elif model:
                 st.warning("the uploaded model has no sections")
+
+        st.divider()
+        st.markdown("**Write into a stored master** — pick a saved master and "
+                    "upright; the Pcrl/Pcrd (A_eff + DSM) above, plus J/Cw/y0 "
+                    "from an optional CUFSM model, are imported and saved for "
+                    "the main app.")
+        from rack15512.master_store import MasterStore
+        store = MasterStore("masters")
+        mids = [m.id for m in store.list()]
+        if not mids:
+            st.caption("No stored masters found — import one in the main app's "
+                       "**Section masters** page first.")
+        else:
+            smid = st.selectbox("Stored master", mids, key="storemaster")
+            sm = store.load(smid)
+            ups = sm.names("upright") or sm.names()
+            if not ups:
+                st.warning("this master has no sections")
+            else:
+                up_t = st.selectbox("Upright section", ups, key="storeup")
+                modelf = st.file_uploader(
+                    "CUFSM model for J/Cw/y0 (optional)",
+                    type=["txt", "csv", "dat"], key="storemodel")
+                if st.button("Import to master & save", type="primary",
+                             key="storego"):
+                    mpath = None
+                    try:
+                        if modelf is not None:
+                            tf = tempfile.NamedTemporaryFile(suffix=".txt",
+                                                             delete=False)
+                            tf.write(modelf.getvalue())
+                            tf.close()
+                            mpath = tf.name
+                        data = cufsm.CufsmData(
+                            model=mpath,
+                            signature=(float(Pcrl), float(Pcrd)),
+                            Anet=float(Anet) or None)
+                        report = sm.apply_cufsm(up_t, data, overwrite=True)
+                        store.save(sm)
+                        st.success(f"Imported into '{up_t}' of master "
+                                   f"'{smid}' and saved.")
+                        if report is not None:
+                            st.markdown(cufsm.validation_markdown(report))
+                    except Exception as exc:
+                        st.error(f"import failed: {exc}")
+                    finally:
+                        if mpath and os.path.exists(mpath):
+                            os.remove(mpath)
 
 st.caption("DSM is a validated analytical route, but does not remove "
            "EN 15512's requirement to type-test the final perforated section. "

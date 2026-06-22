@@ -46,7 +46,11 @@ def _section_to_dict(s: CrossSection) -> Dict[str, Any]:
 
 def _section_from_dict(d: Dict[str, Any]) -> CrossSection:
     known = {f.name for f in fields(CrossSection)}
-    return CrossSection(**{k: v for k, v in d.items() if k in known})
+    kw = {k: v for k, v in d.items() if k in known}
+    if isinstance(kw.get("dsm"), dict):          # rebuild the nested DSMData
+        from .model import DSMData
+        kw["dsm"] = DSMData(**kw["dsm"])
+    return CrossSection(**kw)
 
 
 def builtin_others_master() -> "StoredMaster":
@@ -133,6 +137,32 @@ class StoredMaster:
         self.fy.pop(name, None)
         self.base_tables.pop(name, None)
         self.updated = _now()
+
+    # ---- CUFSM import ---------------------------------------------------
+    def apply_cufsm(self, name: str, data: "object",
+                    overwrite: bool = True) -> "object":
+        """Import CUFSM output onto a stored upright section: populate the gross
+        torsion/warping/shear-centre (from the model) and the effective area +
+        DSM local/distortional data (from the signature), then store the
+        updated section back in this master.  ``data`` is a
+        ``rack15512.cufsm.CufsmData``.  Returns the section-property validation
+        report (CUFSM vs the master values *before* the import), or ``None``
+        when no model was supplied.  Call ``MasterStore.save(master)`` to
+        persist."""
+        from . import cufsm
+        from .model import Steel
+        if name not in self.sections:
+            raise KeyError(f"section '{name}' not in master '{self.id}'")
+        sec = _section_from_dict(self.sections[name])
+        fy = self.fy.get(name, 355.0)
+        report = None
+        if data.model is not None:
+            props = cufsm.properties_from_cufsm(data.model)
+            report = cufsm.validate_properties(props, sec)
+        cufsm.apply_to_section(sec, Steel("steel", fy=fy), data,
+                               overwrite=overwrite)
+        self.upsert_section(sec, fy=fy)
+        return report
 
     def set_base_table(self, upright: str,
                        table: List[Tuple[float, float, float]]) -> None:
