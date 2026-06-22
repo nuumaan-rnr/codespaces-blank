@@ -677,7 +677,8 @@ def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
     return best
 
 
-def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3):
+def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
+                     cap_kg=None):
     """Find (n_levels, load per level) giving governing upright util in
     0.97..0.99 with the load per level HARD-capped at UTIL_LOAD_CAP_KG.
 
@@ -692,7 +693,7 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3):
         depth = round(mw.library.get(section).depth_h or 0.0)
         if depth not in (90, 120):
             return None
-    cap = UTIL_LOAD_CAP_KG * G_ACC                   # N per level (hard cap)
+    cap = (cap_kg or UTIL_LOAD_CAP_KG) * G_ACC       # N per level (hard cap)
 
     def at_cap(n):
         """(feasible, conv, gov, su, bu, ax) at the cap load for n levels;
@@ -1040,6 +1041,71 @@ def _wpoint_util(args):
     except Exception:
         pt = None
     return key, (pt or {})
+
+
+def _wpoint_util_cap(args):
+    """Worker that re-optimises one case at an explicit per-level load cap."""
+    s, bt, p, xs, g, nseed, cap_kg = args
+    key = f"{s}|{_label(bt, p, xs)}|{g}"
+    try:
+        pt = model_util_point(_WORKER["mw"], _WORKER["arch"], s, float(g),
+                              bt, p, xs, nseed, cap_kg=cap_kg)
+    except Exception:
+        pt = None
+    return key, (pt or {})
+
+
+def rerun_under_cases(master_path, main_checkpoint, out_dir, cap_kg=3000.0,
+                      workers=None):
+    """Re-optimise only the UNDER (gov_util < UTIL_LO) cases from a finished
+    util chart, allowing a higher per-level load cap (default 3000 kg), to try
+    to reach the 0.97-0.99 band.  Writes a separate xlsx of the re-run cases and
+    a merged xlsx (PASS cases unchanged, UNDER replaced by the 3000-kg result)."""
+    import multiprocessing as mp
+    import openpyxl
+    os.makedirs(out_dir, exist_ok=True)
+    main = _json.load(open(main_checkpoint, encoding="utf-8"))
+    under = {k for k, v in main.items()
+             if (not v) or (v.get("gov_util") is None) or v["gov_util"] < UTIL_LO}
+    # reverse-map config label -> (bt, p, xs)
+    cfgmap = {_label(bt, p, xs): (bt, p, xs) for (_l, bt, p, xs) in MODEL_CONFIGS}
+    todo = []
+    for k in under:
+        sec, cfg, gs = k.split("|")
+        if cfg not in cfgmap:
+            continue
+        bt, p, xs = cfgmap[cfg]
+        nseed = (main.get(k) or {}).get("n_levels") or 3
+        todo.append((sec, bt, p, xs, int(gs), max(int(nseed), 1), cap_kg))
+    ckpt = os.path.join(out_dir, "_under3000_checkpoint.json")
+    done = _json.load(open(ckpt, encoding="utf-8")) if os.path.exists(ckpt) else {}
+    todo = [t for t in todo if f"{t[0]}|{_label(t[1],t[2],t[3])}|{t[4]}" not in done]
+    workers = workers or min(4, os.cpu_count() or 1)
+    print(f"UNDER re-run @ {cap_kg:.0f} kg: {len(under)} under, {len(todo)} to do",
+          flush=True)
+    n = 0
+    with mp.Pool(workers, initializer=_winit, initargs=(master_path,)) as pool:
+        for key, pt in pool.imap_unordered(_wpoint_util_cap, todo, chunksize=1):
+            done[key] = pt
+            n += 1
+            if n % 10 == 0:
+                _json.dump(done, open(ckpt, "w", encoding="utf-8"))
+                ok = len([k for k in done if done[k] and done[k].get("gov_util")
+                          and done[k]["gov_util"] >= UTIL_LO])
+                print(f"  ... {len(done)}/{len(under)} re-run ({ok} now PASS)",
+                      flush=True)
+    _json.dump(done, open(ckpt, "w", encoding="utf-8"))
+    # merged set: main, with UNDER replaced by the 3000-kg re-run
+    merged = dict(main)
+    for k, v in done.items():
+        if v:
+            merged[k] = v
+    _finalize_util(done, os.path.join(out_dir, "under_3000_only"))
+    res = _finalize_util(merged, out_dir)
+    rescued = len([k for k in done if done[k] and done[k].get("gov_util")
+                   and done[k]["gov_util"] >= UTIL_LO])
+    print(f"DONE: {rescued}/{len(under)} UNDER cases now PASS at {cap_kg:.0f} kg")
+    return res
 
 
 def _read_level_seeds(path):
