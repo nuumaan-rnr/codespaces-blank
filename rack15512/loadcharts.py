@@ -1056,17 +1056,19 @@ def _wpoint_util_cap(args):
 
 
 def rerun_under_cases(master_path, main_checkpoint, out_dir, cap_kg=3000.0,
-                      workers=None):
-    """Re-optimise only the UNDER (gov_util < UTIL_LO) cases from a finished
-    util chart, allowing a higher per-level load cap (default 3000 kg), to try
-    to reach the 0.97-0.99 band.  Writes a separate xlsx of the re-run cases and
-    a merged xlsx (PASS cases unchanged, UNDER replaced by the 3000-kg result)."""
+                      workers=None, under_threshold=UTIL_LO):
+    """Re-optimise only the cases below `under_threshold` (default 0.97) from a
+    finished util chart, allowing a higher per-level load cap (default 3000 kg),
+    to try to reach the 0.97-0.99 band.  Writes a separate xlsx of the re-run
+    cases and a merged xlsx (cases at/above the threshold unchanged; below it
+    replaced by the higher-cap result)."""
     import multiprocessing as mp
     import openpyxl
     os.makedirs(out_dir, exist_ok=True)
     main = _json.load(open(main_checkpoint, encoding="utf-8"))
     under = {k for k, v in main.items()
-             if (not v) or (v.get("gov_util") is None) or v["gov_util"] < UTIL_LO}
+             if (not v) or (v.get("gov_util") is None)
+             or v["gov_util"] < under_threshold}
     # reverse-map config label -> (bt, p, xs)
     cfgmap = {_label(bt, p, xs): (bt, p, xs) for (_l, bt, p, xs) in MODEL_CONFIGS}
     todo = []
@@ -1095,11 +1097,11 @@ def rerun_under_cases(master_path, main_checkpoint, out_dir, cap_kg=3000.0,
                 print(f"  ... {len(done)}/{len(under)} re-run ({ok} now PASS)",
                       flush=True)
     _json.dump(done, open(ckpt, "w", encoding="utf-8"))
-    # merged set: main, with UNDER replaced by the 3000-kg re-run
+    # merged set: main, with only the under-threshold cases replaced
     merged = dict(main)
-    for k, v in done.items():
-        if v:
-            merged[k] = v
+    for k in under:
+        if done.get(k):
+            merged[k] = done[k]
     _finalize_util(done, os.path.join(out_dir, "under_3000_only"))
     res = _finalize_util(merged, out_dir)
     rescued = len([k for k in done if done[k] and done[k].get("gov_util")
