@@ -47,6 +47,16 @@ _CURVES = ("a0", "a", "b", "c", "d")
 class SectionLibrary:
     def __init__(self, sections: Optional[Dict[str, CrossSection]] = None):
         self.sections: Dict[str, CrossSection] = sections or {}
+        # CUFSM data attached by section name (rack15512.cufsm.CufsmData);
+        # build_rack applies it to every matching section automatically.
+        self.cufsm: Dict[str, object] = {}
+
+    def attach_cufsm(self, name: str, data: object) -> None:
+        """Associate CUFSM data (a ``rack15512.cufsm.CufsmData``) with a section
+        by name.  When that section is used in :func:`build_rack`, the gross
+        torsion/warping/shear-centre (from the model) and the effective area +
+        DSM data (from the signature) are populated automatically."""
+        self.cufsm[name] = data
 
     # ------------------------------------------------------------- loading
     @classmethod

@@ -376,6 +376,33 @@ warping math is verified against closed-form sections (a doubly-symmetric I and 
 plain channel) in `tests/test_section_props.py`. The same upload + validation
 table is in the `app_cufsm.py` geometry tab.
 
+### Auto-wiring CUFSM data into a build
+
+Attach CUFSM data to a section once and every upright of that type is populated
+automatically during `build_rack` — no per-section calls:
+
+```python
+from rack15512 import CufsmData, RackConfig, build_rack
+
+cufsm_up = CufsmData(
+    model="upright_model.txt",       # -> gross J / Cw / y0 (EN 15512 9.7.5)
+    signature="signature.csv",       # -> A_eff + DSMData (local/distortional)
+    Anet=702.0)
+
+# (a) per build:
+model = build_rack(RackConfig(n_bays=3, beam_levels=[1500, 3000, 4500],
+                              upright_section="UP0022",
+                              cufsm={"UP0022": cufsm_up}))
+
+# (b) or attach to the section master/library so it persists across builds:
+lib.attach_cufsm("UP0022", cufsm_up)
+model = build_rack(RackConfig(..., library=lib))
+```
+
+The model's `J/Cw/y0` then feed the EN 15512 §9.7.5 flexural-torsional check and
+the `Pcrl/Pcrd` feed the DSM check, for every member of that section. Existing
+master values are kept unless `cufsm_overwrite=True`.
+
 DSM is an internationally validated method, but it does **not** remove
 EN 15512's requirement to type-test the final perforated section — use it to
 derive or cross-check the effective properties, then confirm by test.

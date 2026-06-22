@@ -253,6 +253,13 @@ class RackConfig:
     # when True, use steel_fy for EVERY section (ignore the master's per-section
     # fy) - lets the material yield be set from the input for any master
     fy_override: bool = False
+    # CUFSM data per section name (rack15512.cufsm.CufsmData): the gross
+    # torsion/warping/shear-centre (from the CUFSM model) and the effective
+    # area + DSMData (from the signature) are auto-populated for every matching
+    # section in the build.  Merged over any data attached to the library
+    # (SectionLibrary.attach_cufsm), with this mapping taking precedence.
+    cufsm: Optional[Dict[str, "CufsmData"]] = None
+    cufsm_overwrite: bool = False      # overwrite existing master values
     # connections (from EN 15512 Annex A tests)
     connector_stiffness: float = 1.0e8       # N*mm/rad, about local z
     connector_m_rd: Optional[float] = 2.5e6  # N*mm
@@ -531,6 +538,21 @@ def build_rack(cfg: RackConfig) -> RackModel:
         else:
             sec.material = "steel"
         m.sections[sec.name] = sec
+
+    # ---- CUFSM auto-population: gross J/Cw/y0 (model) + A_eff & DSMData
+    # (signature) for every matching section.  Library-attached data first,
+    # then RackConfig.cufsm overrides.
+    cufsm_map = dict(getattr(lib, "cufsm", {}) or {})
+    if cfg.cufsm:
+        cufsm_map.update(cfg.cufsm)
+    if cufsm_map:
+        from . import cufsm as _cufsm
+        for nm, data in cufsm_map.items():
+            sec = m.sections.get(nm)
+            if sec is not None:
+                steel = m.materials.get(sec.material) or m.materials["steel"]
+                _cufsm.apply_to_section(sec, steel, data,
+                                        overwrite=cfg.cufsm_overwrite)
 
     # ---- upright lines across the CA direction -----------------------------
     # the two frames of a back-to-back module are MIRRORED: on each frame
