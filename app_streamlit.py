@@ -2932,6 +2932,79 @@ def _render_master(sm):
                     MSTORE.save(sm)
                     st.rerun()
 
+            # ---- CUFSM import: update an upright from a CUFSM run -----------
+            ups = sm.names("upright")
+            if ups:
+                st.divider()
+                st.markdown("**CUFSM import** — update an upright's section "
+                            "properties (J, Cw, y0) and buckling data "
+                            "(Pcrl/Pcrd → A_eff + DSM) from a CUFSM output, and "
+                            "store it in this master.")
+                from rack15512 import cufsm as _cufsm
+                ci = st.columns([2, 1])
+                ctarget = ci[0].selectbox("Upright section", ups,
+                                          key=f"cufup_{sm.id}")
+                _sd = sm.sections[ctarget]
+                canet = ci[1].number_input(
+                    "A_net [mm²] (perforations)",
+                    value=float(_sd.get("A_eff") or _sd.get("A") or 0.0),
+                    key=f"cufanet_{sm.id}",
+                    help="Net cross-section through a perforation; defaults to "
+                         "the current A_eff / A.")
+                cf = st.columns(2)
+                cmodel = cf[0].file_uploader(
+                    "CUFSM model (nodes + elements) → J, Cw, y0",
+                    type=["txt", "csv", "dat"], key=f"cufmdl_{sm.id}")
+                csig = cf[1].file_uploader(
+                    "CUFSM signature curve → Pcrl, Pcrd",
+                    type=["csv", "txt"], key=f"cufsig_{sm.id}")
+                cref = st.number_input(
+                    "signature reference × (1.0 if the curve is in load units)",
+                    value=1.0, key=f"cufref_{sm.id}")
+                if st.button("Import CUFSM & update master",
+                             key=f"cufgo_{sm.id}",
+                             disabled=not (cmodel or csig), type="primary"):
+                    model_path = sig_path = None
+                    try:
+                        if cmodel is not None:
+                            tf = tempfile.NamedTemporaryFile(suffix=".txt",
+                                                             delete=False)
+                            tf.write(cmodel.getvalue())
+                            tf.close()
+                            model_path = tf.name
+                        if csig is not None:
+                            sf = tempfile.NamedTemporaryFile(suffix=".csv",
+                                                             delete=False)
+                            sf.write(csig.getvalue())
+                            sf.close()
+                            sig_path = sf.name
+                        data = _cufsm.CufsmData(
+                            model=model_path, signature=sig_path,
+                            reference=float(cref),
+                            Anet=float(canet) or None)
+                        report = sm.apply_cufsm(ctarget, data, overwrite=True)
+                        MSTORE.save(sm)
+                        st.success(f"Updated '{ctarget}' and saved the master.")
+                        upd = sm.sections[ctarget]
+                        dsm = upd.get("dsm") or {}
+                        st.write({
+                            "It_gross (J)": upd.get("It_gross"),
+                            "Iw_gross (Cw)": upd.get("Iw_gross"),
+                            "y0": upd.get("y0"),
+                            "A_eff": upd.get("A_eff"),
+                            "Pcrl": dsm.get("Pcrl"),
+                            "Pcrd": dsm.get("Pcrd")})
+                        if report is not None:
+                            st.caption("CUFSM vs the master values before "
+                                       "the import:")
+                            st.markdown(_cufsm.validation_markdown(report))
+                    except Exception as e:
+                        st.error(f"CUFSM import failed: {e}")
+                    finally:
+                        for _p in (model_path, sig_path):
+                            if _p and os.path.exists(_p):
+                                os.remove(_p)
+
 
 # ------------------------------------------------------------------- router
 with st.sidebar:

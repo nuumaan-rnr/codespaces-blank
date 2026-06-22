@@ -337,6 +337,35 @@ def test_library_attach_cufsm_overwrite_and_override():
     assert m3.sections[name].dsm.Pcrl == pytest.approx(0.9 * Py)
 
 
+def test_master_store_cufsm_import_persists_dsm(tmp_path):
+    """Import CUFSM output onto a stored master upright, then save + reload:
+    the gross J/Cw/y0, effective area and DSMData all persist (DSMData rebuilt
+    as a dataclass, not a dict)."""
+    from rack15512.master_store import MasterStore, StoredMaster
+    from rack15512.library import SectionLibrary
+    from rack15512.model import DSMData
+    name = "UP-100x100x2.0"
+    lib = SectionLibrary.bundled()
+    sm = StoredMaster(id="t", name="t")
+    sm.upsert_section(lib.get(name), fy=355.0)
+    Py = lib.get(name).A * 355.0
+    model_path = os.path.join(os.path.dirname(__file__), "..", "examples",
+                              "cufsm_upright_model.txt")
+    report = sm.apply_cufsm(name, cufsm.CufsmData(
+        model=model_path, signature=(0.6 * Py, 0.7 * Py), Anet=702.0))
+    assert report is not None and any(r.quantity == "A" for r in report.rows)
+    sec = sm.library.get(name)
+    assert sec.It_gross is not None and sec.dsm is not None and sec.A_eff < sec.A
+
+    store = MasterStore(str(tmp_path))
+    store.save(sm)
+    sec2 = store.load("t").library.get(name)
+    assert isinstance(sec2.dsm, DSMData)
+    assert sec2.dsm.Pcrl == pytest.approx(0.6 * Py)
+    assert sec2.It_gross == pytest.approx(sec.It_gross)
+    assert sec2.A_eff == pytest.approx(sec.A_eff)
+
+
 def test_populate_effective_properties_feeds_en_checks():
     """A CUFSM run fills A_eff so the EN 15512 effective-section checks use
     DSM-derived properties; a stocky section keeps the gross area."""
