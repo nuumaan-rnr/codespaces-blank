@@ -279,6 +279,64 @@ def test_populate_gross_properties_for_ft_buckling():
     assert sec.It_gross == pytest.approx(p.J)
 
 
+def test_build_rack_auto_populates_cufsm_from_config():
+    """RackConfig.cufsm: a CUFSM model + signature attached to the upright
+    section auto-fills J/Cw/y0, the effective area/DSMData, and the DSM_BC check
+    runs - no per-section hand wiring."""
+    from rack15512.builder import RackConfig, build_rack
+    from rack15512.analysis import run_all
+    from rack15512.checks.en15512 import run_checks
+    model_path = os.path.join(os.path.dirname(__file__), "..", "examples",
+                              "cufsm_upright_model.txt")
+    props = cufsm.properties_from_cufsm(model_path)
+    name = "UP-100x100x2.0"
+    Py = 780.0 * 355.0                      # A * fy for the bundled upright
+    cfg = RackConfig(n_bays=1, beam_levels=[1800.0],
+                     cufsm={name: cufsm.CufsmData(
+                         model=model_path, signature=(0.6 * Py, 0.7 * Py),
+                         Anet=702.0)})
+    m = build_rack(cfg)
+    up = m.sections[name]
+    assert up.It_gross == pytest.approx(props.J)        # gross from the model
+    assert up.Iw_gross == pytest.approx(props.Cw)
+    assert up.y0 is not None
+    assert up.dsm is not None                           # DSMData from signature
+    assert up.dsm.Pcrl == pytest.approx(0.6 * Py) and up.dsm.Anet == 702.0
+    checks = run_checks(m, run_all(m))
+    assert any(c.check == "DSM_BC" and c.member_set == "uprights"
+               for c in checks)
+
+
+def test_library_attach_cufsm_overwrite_and_override():
+    from rack15512.builder import RackConfig, build_rack
+    from rack15512.library import SectionLibrary
+    name = "UP-100x100x2.0"
+    Py = SectionLibrary.bundled().get(name).A * 355.0
+    sig = (0.6 * Py, 0.7 * Py)              # slender -> A_eff well below master
+
+    # library-attached, no overwrite: master A_eff kept, but DSMData attached
+    lib = SectionLibrary.bundled()
+    lib.attach_cufsm(name, cufsm.CufsmData(signature=sig, Anet=700.0))
+    m = build_rack(RackConfig(n_bays=1, beam_levels=[1800.0], library=lib))
+    assert m.sections[name].A_eff == pytest.approx(660.0)   # master value kept
+    assert m.sections[name].dsm is not None
+
+    # overwrite: the effective area is replaced by the DSM value
+    lib2 = SectionLibrary.bundled()
+    lib2.attach_cufsm(name, cufsm.CufsmData(signature=sig, Anet=700.0))
+    m2 = build_rack(RackConfig(n_bays=1, beam_levels=[1800.0], library=lib2,
+                               cufsm_overwrite=True))
+    assert m2.sections[name].A_eff < 660.0
+
+    # RackConfig.cufsm overrides the library-attached data
+    lib3 = SectionLibrary.bundled()
+    lib3.attach_cufsm(name, cufsm.CufsmData(signature=sig))
+    m3 = build_rack(RackConfig(n_bays=1, beam_levels=[1800.0], library=lib3,
+                               cufsm={name: cufsm.CufsmData(
+                                   signature=(0.9 * Py, 0.95 * Py))}))
+    assert m3.sections[name].dsm.Pcrl == pytest.approx(0.9 * Py)
+
+
 def test_populate_effective_properties_feeds_en_checks():
     """A CUFSM run fills A_eff so the EN 15512 effective-section checks use
     DSM-derived properties; a stocky section keeps the gross area."""

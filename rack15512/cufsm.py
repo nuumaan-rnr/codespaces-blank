@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from . import dsm, section_props
-from .model import CrossSection, Steel
+from .model import CrossSection, DSMData, Steel
 from .section_props import SectionProperties
 
 __all__ = [
@@ -42,6 +42,7 @@ __all__ = [
     "read_cufsm_model", "parse_cufsm_model", "properties_from_cufsm",
     "PropertyCheck", "PropertyReport", "validate_properties",
     "validation_markdown", "populate_gross_properties",
+    "CufsmData", "apply_to_section",
 ]
 
 
@@ -382,4 +383,73 @@ def populate_gross_properties(section: CrossSection, props: SectionProperties,
         section.Iy_gross = c_major if section.Iy >= section.Iz else c_minor
     if overwrite or section.Iz_gross is None:
         section.Iz_gross = c_minor if section.Iy >= section.Iz else c_major
+    return section
+
+
+# =====================================================================
+# CufsmData - CUFSM inputs attached to a section, applied in a build
+# =====================================================================
+@dataclass
+class CufsmData:
+    """CUFSM inputs associated with a section, applied automatically when the
+    section is used in a build (``SectionLibrary.attach_cufsm`` /
+    ``RackConfig.cufsm``).  Both parts are optional:
+
+    model     : a CUFSM model file path, or a ``(nodes, elems)`` tuple -> the
+                gross J / Cw / shear-centre / inertia (EN 15512 9.7.5 inputs).
+    signature : the axial local/distortional source -> effective area + the
+                DSM check.  Accepts a :class:`BucklingLoads`, a signature-curve
+                file path, or a ``(Pcrl, Pcrd)`` pair [N].
+    reference : scale applied to a signature-curve *file* (for load-factor
+                curves; 1.0 when the file is already in load units).
+    Anet      : net cross-section area through the perforations [mm^2].
+    bending_y / bending_z : optional :class:`BucklingLoads` (Mcrl/Mcrd in their
+                Pcrl/Pcrd slots) for the effective moduli and the DSM bending.
+    """
+
+    model: Optional[object] = None
+    signature: Optional[object] = None
+    reference: float = 1.0
+    Anet: Optional[float] = None
+    bending_y: Optional[BucklingLoads] = None
+    bending_z: Optional[BucklingLoads] = None
+
+
+def _resolve_axial(signature, reference: float) -> Optional[BucklingLoads]:
+    """Coerce a CufsmData.signature into BucklingLoads."""
+    if signature is None or isinstance(signature, BucklingLoads):
+        return signature
+    if isinstance(signature, str):
+        hw, val = read_signature_csv(signature)
+        return loads_from_signature(hw, val, reference=reference)
+    pcrl, pcrd = signature                       # (Pcrl, Pcrd) pair
+    return BucklingLoads(Pcrl=float(pcrl), Pcrd=float(pcrd))
+
+
+def apply_to_section(section: CrossSection, steel: Steel, data: "CufsmData",
+                     overwrite: bool = False) -> CrossSection:
+    """Apply a :class:`CufsmData` to a section: populate the gross torsion /
+    warping / shear-centre from the model, and the effective area + the
+    :class:`~rack15512.model.DSMData` (local/distortional) from the signature,
+    so the EN 15512 FT-buckling and the DSM check both pick them up.  Existing
+    values are kept unless ``overwrite`` is set."""
+    if data.model is not None:
+        populate_gross_properties(section, properties_from_cufsm(data.model),
+                                  overwrite=overwrite)
+    axial = _resolve_axial(data.signature, data.reference)
+    if axial is not None:
+        populate_effective_properties(
+            section, steel, axial=axial, bending_y=data.bending_y,
+            bending_z=data.bending_z, Anet=data.Anet, overwrite=overwrite)
+        if overwrite or section.dsm is None:
+            kw = dict(Pcrl=axial.Pcrl, Pcrd=axial.Pcrd)
+            if data.Anet is not None:
+                kw["Anet"] = data.Anet
+            if data.bending_z is not None:
+                kw["Mcrl_z"] = data.bending_z.Pcrl
+                kw["Mcrd_z"] = data.bending_z.Pcrd
+            if data.bending_y is not None:
+                kw["Mcrl_y"] = data.bending_y.Pcrl
+                kw["Mcrd_y"] = data.bending_y.Pcrd
+            section.dsm = DSMData(**kw)
     return section
