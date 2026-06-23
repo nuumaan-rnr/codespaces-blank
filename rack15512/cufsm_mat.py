@@ -25,7 +25,7 @@ import math
 from typing import Dict, List, Optional, Sequence, Tuple
 
 __all__ = ["build_cufsm_vars", "write_cufsm_mat", "cufsm_mat_bytes",
-           "recommend_lengths"]
+           "recommend_lengths", "read_results_mat"]
 
 Point = Tuple[float, float]
 MATNUM = 100                       # material id (mirrors CUFSM's template files)
@@ -101,3 +101,76 @@ def cufsm_mat_bytes(nodes: Dict[int, Point],
     buf = io.BytesIO()
     sio.savemat(buf, build_cufsm_vars(nodes, elems, **kwargs))
     return buf.getvalue()
+
+
+# ---------------------------------------------------------- read CUFSM results
+def _read_curve(curve) -> Tuple[List[float], List[float]]:
+    """Signature curve (half-wavelength, lowest-mode load factor) from CUFSM's
+    ``curve`` results, in either layout: an ``(n_len, 2, n_modes)`` array
+    (``[:,0,0]`` = half-wavelengths, ``[:,1,0]`` = lowest-mode load factor) or
+    the older object/cell array of ``[n_modes, 2]`` matrices."""
+    import numpy as np
+    c = np.array(curve)
+    hw: List[float] = []
+    lf: List[float] = []
+    if c.dtype == object:
+        flat = c.ravel()
+        for cell in flat:
+            cell = np.array(cell)
+            if cell.ndim == 2 and cell.shape[0] >= 1 and cell.shape[1] >= 2:
+                hw.append(float(cell[0, 0]))
+                lf.append(float(cell[0, 1]))
+    elif c.ndim == 3 and c.shape[1] >= 2:
+        hw = [float(x) for x in c[:, 0, 0]]
+        lf = [float(x) for x in c[:, 1, 0]]
+    elif c.ndim == 2 and c.shape[1] >= 2:
+        hw = [float(x) for x in c[:, 0]]
+        lf = [float(x) for x in c[:, 1]]
+    if not hw:
+        raise ValueError("could not parse the CUFSM 'curve' results")
+    return hw, lf
+
+
+def _reference_load(mat: dict) -> Optional[float]:
+    """The applied reference axial load = integral of the node stress over the
+    section (sum of mean-element-stress x thickness x length), so a load factor
+    times this gives the buckling load.  None if node/elem are absent."""
+    import numpy as np
+    if "node" not in mat or "elem" not in mat:
+        return None
+    node = np.array(mat["node"], dtype=float)
+    elem = np.array(mat["elem"], dtype=float)
+    if node.ndim != 2 or node.shape[1] < 3:
+        return None
+    stress = {int(round(r[0])): float(r[-1]) for r in node}
+    coord = {int(round(r[0])): (float(r[1]), float(r[2])) for r in node}
+    total = 0.0
+    for e in elem:
+        i, j, t = int(round(e[1])), int(round(e[2])), float(e[3])
+        if i in coord and j in coord:
+            L = math.hypot(coord[j][0] - coord[i][0], coord[j][1] - coord[i][1])
+            total += 0.5 * (stress.get(i, 0.0) + stress.get(j, 0.0)) * t * L
+    return total if abs(total) > 1e-9 else None
+
+
+def read_results_mat(source) -> dict:
+    """Read a CUFSM **results** ``.mat`` (after you run the analysis in CUFSM)
+    and extract the signature curve.  ``source`` is a path or the file bytes.
+
+    Returns ``{half_wavelengths, signature, reference_load, n_lengths}`` where
+    ``signature`` are the lowest-mode load factors per half-wavelength and
+    ``reference_load`` is the applied axial load (load factor x this = buckling
+    load), computed from the node stresses.  Feed the result to
+    :func:`rack15512.cufsm.loads_from_signature` with ``reference=reference_load``
+    to get ``Pcrl``/``Pcrd``."""
+    sio = _require_scipy()
+    mat = sio.loadmat(io.BytesIO(source) if isinstance(source, (bytes, bytearray))
+                      else source)
+    import numpy as np
+    if "curve" not in mat or np.size(mat["curve"]) == 0:
+        raise ValueError(
+            "no analysis results ('curve') in this .mat - run the analysis in "
+            "CUFSM and save the file, then load that results file here")
+    hw, lf = _read_curve(mat["curve"])
+    return {"half_wavelengths": hw, "signature": lf,
+            "reference_load": _reference_load(mat), "n_lengths": len(hw)}
