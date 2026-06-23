@@ -197,7 +197,22 @@ class DxfMesh:
     nodes: Dict[int, Point]
     elems: List[Tuple[int, int, float]]
     layers: Dict[str, int] = field(default_factory=dict)   # layer -> elem count
+    elem_layers: List[str] = field(default_factory=list)   # source layer / elem
     centroid_removed: Optional[Point] = None               # CG, if recentred
+
+    def with_thicknesses(self, thicknesses: Sequence[float]) -> "DxfMesh":
+        """A copy with each element's thickness replaced (per-element equivalent
+        thickness - e.g. reduced for perforations).  ``thicknesses`` aligns with
+        ``elems``."""
+        if len(thicknesses) != len(self.elems):
+            raise ValueError("one thickness per element required "
+                             f"({len(thicknesses)} given, {len(self.elems)} "
+                             "elements)")
+        elems = [(i, j, float(t)) for (i, j, _t), t in
+                 zip(self.elems, thicknesses)]
+        return DxfMesh(nodes=dict(self.nodes), elems=elems,
+                       layers=dict(self.layers),
+                       elem_layers=list(self.elem_layers))
 
 
 def polylines_to_mesh(polylines: Sequence[Tuple[List[Point], str, bool]],
@@ -210,6 +225,7 @@ def polylines_to_mesh(polylines: Sequence[Tuple[List[Point], str, bool]],
     nodes: Dict[int, Point] = {}
     index: Dict[Tuple[int, int], int] = {}
     elems: List[Tuple[int, int, float]] = []
+    elem_layers: List[str] = []
     seen = set()
     layers: Dict[str, int] = {}
 
@@ -233,11 +249,13 @@ def polylines_to_mesh(polylines: Sequence[Tuple[List[Point], str, bool]],
                 continue                       # de-duplicate shared edges
             seen.add(key)
             elems.append((a, b, t))
+            elem_layers.append(layer)
             layers[layer] = layers.get(layer, 0) + 1
     if not elems:
         raise ValueError("no usable geometry in the DXF (need LINE / "
                          "LWPOLYLINE / POLYLINE / ARC / CIRCLE entities)")
-    return DxfMesh(nodes=nodes, elems=elems, layers=layers)
+    return DxfMesh(nodes=nodes, elems=elems, layers=layers,
+                   elem_layers=elem_layers)
 
 
 def mesh_to_cufsm_text(mesh: DxfMesh) -> str:

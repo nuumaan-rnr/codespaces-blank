@@ -28,6 +28,7 @@ import streamlit as st
 from rack15512 import branding as B
 from rack15512 import cufsm, dsm, io_json, ui
 from rack15512.model import CrossSection, DSMData, Steel
+from rack15512.section_props import recenter_to_centroid as _recenter
 
 st.set_page_config(page_title=f"{B.COMPANY} · CUFSM → DSM",
                    layout="wide", initial_sidebar_state="expanded")
@@ -220,38 +221,70 @@ with tab_geo:
                         f"t · {lay} [mm]", 0.0, 12.0, 0.0, 0.1, key=f"lt_{lay}")
                     if _v > 0:
                         lt[lay] = _v
-            try:
-                mesh = _dx.dxf_to_mesh(dtext, default_t=ddt, layer_thickness=lt,
-                                       seg_angle=dseg, recenter=drec)
+            try:                            # layer thickness = starting value
+                base = _dx.dxf_to_mesh(dtext, default_t=ddt, layer_thickness=lt,
+                                       seg_angle=dseg, recenter=False)
             except Exception as exc:    # noqa: BLE001
                 st.error(f"mesh build failed: {exc}")
-                mesh = None
-            if mesh is not None:
+                base = None
+            if base is not None:
+                st.markdown("**Per-element equivalent thickness** — edit each "
+                            "element's `t_eq`; a perforated region takes a "
+                            "lower thickness than the gross plate. The CG "
+                            "(if recentred) is weighted by these values.")
+                trows = []
+                for k, (i, j, t) in enumerate(base.elems, 1):
+                    (xa, ya), (xb, yb) = base.nodes[i], base.nodes[j]
+                    lay = (base.elem_layers[k - 1]
+                           if k - 1 < len(base.elem_layers) else "")
+                    trows.append({"elem": k, "node_i": i, "node_j": j,
+                                  "layer": lay,
+                                  "length [mm]": round(math.hypot(xb - xa,
+                                                                  yb - ya), 1),
+                                  "t_eq [mm]": float(t)})
+                edited = st.data_editor(
+                    trows, key="dxf_telems", width="stretch", hide_index=True,
+                    disabled=["elem", "node_i", "node_j", "layer",
+                              "length [mm]"],
+                    column_config={"t_eq [mm]": st.column_config.NumberColumn(
+                        "t_eq [mm]", min_value=0.01, max_value=20.0,
+                        step=0.05, format="%.3f")})
+                recs = (edited.to_dict("records")
+                        if hasattr(edited, "to_dict") else edited)
+                t_new = [float(r["t_eq [mm]"]) for r in recs]
+                mesh = base.with_thicknesses(t_new)
+                if drec:                    # recentre AFTER the per-element edit
+                    mesh.nodes, mesh.centroid_removed = \
+                        _recenter(mesh.nodes, mesh.elems)
+                tmax = max(t_new) or 1.0
                 mv1, mv2 = st.columns([0.55, 0.45])
                 with mv1:
                     import plotly.graph_objects as go
                     fig = go.Figure()
-                    for i, j, _t in mesh.elems:
+                    for i, j, t in mesh.elems:
                         fig.add_trace(go.Scatter(
                             x=[mesh.nodes[i][0], mesh.nodes[j][0]],
                             y=[mesh.nodes[i][1], mesh.nodes[j][1]],
-                            mode="lines", line=dict(color=B.TEAL, width=3),
-                            showlegend=False))
+                            mode="lines", showlegend=False,
+                            line=dict(color=B.TEAL,
+                                      width=1.5 + 4.0 * t / tmax)))
                     if drec:
                         fig.add_trace(go.Scatter(
                             x=[0], y=[0], mode="markers+text", text=["CG"],
                             textposition="top center", showlegend=False,
                             marker=dict(size=11, color="#E08A1E", symbol="x")))
                     fig.update_yaxes(scaleanchor="x", scaleratio=1)
-                    fig.update_layout(height=380, title="DXF → CUFSM mesh",
-                                      margin=dict(l=10, r=10, t=30, b=10),
-                                      paper_bgcolor="rgba(0,0,0,0)",
-                                      plot_bgcolor="rgba(0,0,0,0)")
+                    fig.update_layout(
+                        height=380, title="DXF → CUFSM mesh (line width ∝ t_eq)",
+                        margin=dict(l=10, r=10, t=30, b=10),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)")
                     st.plotly_chart(fig, width="stretch")
                 with mv2:
                     ui.stat_strip([("nodes", len(mesh.nodes)),
                                    ("elements", len(mesh.elems)),
-                                   ("layers", len(mesh.layers))])
+                                   ("t_eq range",
+                                    f"{min(t_new):g}–{max(t_new):g} mm")])
                     if mesh.centroid_removed:
                         cgx, cgy = mesh.centroid_removed
                         st.caption(f"recentred — original CG "

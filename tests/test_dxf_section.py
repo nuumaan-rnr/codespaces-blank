@@ -91,6 +91,30 @@ def test_dxf_recenter_option_zeroes_cg():
     assert cg == pytest.approx((0.0, 0.0), abs=1e-6)
 
 
+def test_per_element_layers_and_equivalent_thickness():
+    txt = _dxf(_line(0, 0, 0, 100, layer="web"),
+               _line(0, 100, 60, 100, layer="flange"),
+               _line(0, 0, 60, 0, layer="flange"))
+    mesh = dx.dxf_to_mesh(txt, default_t=2.0)
+    assert len(mesh.elem_layers) == len(mesh.elems) == 3
+    assert mesh.elem_layers.count("flange") == 2
+    # override each element's equivalent (reduced) thickness individually
+    mesh2 = mesh.with_thicknesses([1.0, 1.5, 1.8])
+    assert [t for _i, _j, t in mesh2.elems] == [1.0, 1.5, 1.8]
+    assert [t for _i, _j, t in mesh.elems] == [2.0, 2.0, 2.0]   # original intact
+    with pytest.raises(ValueError):
+        mesh.with_thicknesses([1.0])           # wrong count
+
+
+def test_recenter_uses_per_element_equivalent_thickness():
+    from rack15512.section_props import thickness_weighted_centroid
+    # two equal vertical strips; make the right one's equivalent t larger
+    txt = _dxf(_line(0, 0, 0, 10), _line(10, 0, 10, 10))
+    mesh = dx.dxf_to_mesh(txt, default_t=1.0).with_thicknesses([1.0, 3.0])
+    xc, _yc = thickness_weighted_centroid(mesh.nodes, mesh.elems)
+    assert xc == pytest.approx(7.5)            # pulled toward the thicker element
+
+
 def test_round_trip_into_cufsm_properties():
     from rack15512 import cufsm
     txt = _dxf(_line(0, 0, 0, 100), _line(0, 100, 60, 100),

@@ -372,9 +372,16 @@ open("model.txt", "w").write(dx.mesh_to_cufsm_text(mesh))   # CUFSM-ready
 A dependency-free reader handles `LINE`, `LWPOLYLINE` (incl. bulge arcs),
 `POLYLINE`/`VERTEX`, `ARC` and `CIRCLE` (explode splines/ellipses to polylines
 in CAD first); curves are discretised to strips, coincident endpoints merge
-into shared nodes, and each element's thickness comes from its CAD layer (or a
-default). The **recentre** option translates every node so the section's CG —
-weighted by each element's thickness — sits at the origin.
+into shared nodes, and each element's thickness starts from its CAD layer (or a
+default).
+
+**Per-element equivalent thickness:** a perforated upright has a different
+*equivalent (reduced) thickness* on each element — the slotted web differs from
+the flange and the lip — so thickness is editable at the element level (an
+editable table in the app, or `mesh.with_thicknesses([...])` in the API). The
+**recentre** option then translates every node so the section's CG — weighted
+by each element's (equivalent) thickness × length — sits at the origin, so it
+reflects the perforated section, not the gross plate.
 
 ### Section properties & §9.7.5 validation from the CUFSM model
 
