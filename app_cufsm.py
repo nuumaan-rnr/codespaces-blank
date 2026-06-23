@@ -302,6 +302,9 @@ with tab_geo:
                 if drec:                    # recentre AFTER the per-element edit
                     mesh.nodes, mesh.centroid_removed = \
                         _recenter(mesh.nodes, mesh.elems)
+                # remember the geometry so the master handoff can write J/Cw/y0
+                ss["cufsm_geom"] = (dict(mesh.nodes),
+                                    [tuple(e) for e in mesh.elems])
                 tmax = max(t_new) or 1.0
                 mv1, mv2 = st.columns([0.55, 0.45])
                 with mv1:
@@ -431,6 +434,7 @@ with tab_geo:
             nn, ee = cufsm.parse_cufsm_model(
                 mdl.getvalue().decode("utf-8", errors="ignore").splitlines())
             props = cufsm.properties_from_cufsm((nn, ee))
+            ss["cufsm_geom"] = (nn, ee)     # for the master handoff (J/Cw/y0)
         except (ValueError, KeyError) as exc:
             st.error(f"could not read the CUFSM model: {exc}")
             props = None
@@ -581,6 +585,22 @@ with tab_sig:
                            width="stretch")
             ui.stat_strip([("P_crl (local)", f"{_fmt(Pcrl/1e3)} kN"),
                            ("P_crd (distortional)", f"{_fmt(Pcrd/1e3)} kN")])
+            # the distortional minimum should be at an intermediate half-
+            # wavelength; if it is far longer than the local one (or sits on
+            # the descending tail), it is the GLOBAL branch - which this app
+            # takes from the frame analysis, not CUFSM. Feeding it as Pcrd
+            # double-penalises the section and collapses the effective area.
+            if dist[0] > 8.0 * local[0]:
+                st.warning(
+                    f"The distortional minimum is at {dist[0]:g} mm — "
+                    f"{dist[0]/local[0]:.0f}× the local half-wavelength. That "
+                    "is likely the **global / long-wavelength** branch, not a "
+                    "true distortional mode. This app takes global buckling "
+                    "from the frame analysis, so using it as P_crd double-"
+                    "counts global and drives the effective area artificially "
+                    "low. Pick the genuine intermediate-wavelength distortional "
+                    "dip above — or, if there is none, set the distortional "
+                    "minimum to the local one (local-dominated section).")
     else:
         st.caption("Provide the signature curve or enter the two minima.")
 
@@ -661,67 +681,19 @@ with tab_out:
             "    section, steel,\n"
             f"    axial=cufsm.BucklingLoads(Pcrl={Pcrl:g}, Pcrd={Pcrd:g}),\n"
             f"    Anet={Anet:g})")
-        st.markdown("**Python** — attach to a `CrossSection` in the library:")
-        st.code(snippet, language="python")
-
-        st.markdown("**JSON** — the section's `dsm` field (paste into a model "
-                    "file, or use the writer below):")
-        st.code(json.dumps(dsm_kwargs, indent=2), language="json")
-        st.download_button(
-            f"Download {name}.dsm.json",
-            json.dumps({"section": name, "dsm": dsm_kwargs}, indent=2),
-            file_name=f"{name}.dsm.json", mime="application/json")
-
-        st.divider()
-        st.markdown("**Write into a rack model JSON** — upload a model, choose "
-                    "a section, and download it with the `dsm` data attached:")
-        mfile = st.file_uploader("rack model JSON (rack15512 io_json format)",
-                                type=["json"], key="modeljson")
-        if mfile is not None:
-            try:
-                model = io_json.model_from_dict(
-                    json.loads(mfile.getvalue().decode("utf-8")))
-            except (ValueError, KeyError, json.JSONDecodeError) as exc:
-                st.error(f"could not read model: {exc}")
-                model = None
-            if model and model.sections:
-                target = st.selectbox("section to update",
-                                     sorted(model.sections))
-                also_eff = st.checkbox(
-                    "also populate A_eff (effective-section checks)", True)
-                if st.button("Attach DSM data and prepare download",
-                            type="primary"):
-                    sec = model.sections[target]
-                    sec.dsm = DSMData(**dsm_kwargs)
-                    if also_eff:
-                        steel = model.materials.get(sec.material) \
-                            or Steel(sec.material, fy=fy)
-                        cufsm.populate_effective_properties(
-                            sec, steel,
-                            axial=cufsm.BucklingLoads(Pcrl=Pcrl, Pcrd=Pcrd),
-                            Anet=Anet, overwrite=True)
-                    out = json.dumps(io_json.model_to_dict(model), indent=2)
-                    st.success(f"DSM data attached to '{target}'"
-                               + (f"; A_eff set to {sec.A_eff:.0f} mm²"
-                                  if also_eff and sec.A_eff else ""))
-                    st.download_button("Download updated model JSON", out,
-                                      file_name=mfile.name.replace(
-                                          ".json", "") + "_dsm.json",
-                                      mime="application/json")
-            elif model:
-                st.warning("the uploaded model has no sections")
-
-        st.divider()
-        st.markdown("**Write into a stored master** — pick a saved master and "
-                    "upright; the Pcrl/Pcrd (A_eff + DSM) above, plus J/Cw/y0 "
-                    "from an optional CUFSM model, are imported and saved for "
-                    "the main app.")
+        # ---- PRIMARY: save the DSM data + properties onto the master -----
+        st.markdown("### Save into the upright master")
+        st.caption("Store the DSM data (Pcrl/Pcrd → A_eff + DSMData) **and** the "
+                   "section properties (J/Cw/y0 from the CUFSM geometry) onto "
+                   "the upright in a saved master, so every project built from "
+                   "that master uses them. This is the normal path.")
         from rack15512.master_store import MasterStore
         store = MasterStore("masters")
         mids = [m.id for m in store.list()]
         if not mids:
-            st.caption("No stored masters found — import one in the main app's "
-                       "**Section masters** page first.")
+            st.info("No stored masters found in ./masters — import one on the "
+                    "main app's **Section masters** page and run this app from "
+                    "the same folder.")
         else:
             smid = st.selectbox("Stored master", mids, key="storemaster")
             sm = store.load(smid)
@@ -729,35 +701,100 @@ with tab_out:
             if not ups:
                 st.warning("this master has no sections")
             else:
-                up_t = st.selectbox("Upright section", ups, key="storeup")
+                up_idx = ups.index(name) if name in ups else 0
+                up_t = st.selectbox("Upright section", ups, index=up_idx,
+                                    key="storeup")
+                geom = ss.get("cufsm_geom")     # (nodes, elems) from tab 2
+                write_props = st.checkbox(
+                    "also write the section properties J/Cw/y0",
+                    value=bool(geom),
+                    help="Computed from the mesh built on the CUFSM geometry "
+                         "tab, or an optional model file below.")
                 modelf = st.file_uploader(
-                    "CUFSM model for J/Cw/y0 (optional)",
+                    "CUFSM model/geometry for J/Cw/y0 — optional"
+                    + (" (the CUFSM geometry tab's mesh is used if left empty)"
+                       if geom else ""),
                     type=["txt", "csv", "dat"], key="storemodel")
-                if st.button("Import to master & save", type="primary",
+                if st.button("💾  Import to master & save", type="primary",
                              key="storego"):
                     mpath = None
                     try:
-                        if modelf is not None:
+                        model_arg = None
+                        if write_props and modelf is not None:
                             tf = tempfile.NamedTemporaryFile(suffix=".txt",
                                                              delete=False)
                             tf.write(modelf.getvalue())
                             tf.close()
                             mpath = tf.name
+                            model_arg = mpath
+                        elif write_props and geom is not None:
+                            model_arg = geom            # (nodes, elems) tuple
                         data = cufsm.CufsmData(
-                            model=mpath,
+                            model=model_arg,
                             signature=(float(Pcrl), float(Pcrd)),
                             Anet=float(Anet) or None)
                         report = sm.apply_cufsm(up_t, data, overwrite=True)
                         store.save(sm)
-                        st.success(f"Imported into '{up_t}' of master "
-                                   f"'{smid}' and saved.")
+                        upd = sm.sections[up_t]
+                        d = upd.get("dsm") or {}
+                        st.success(f"Saved to '{up_t}' in master '{smid}'.")
+                        st.write({
+                            "A_eff [mm²]": upd.get("A_eff"),
+                            "It_gross / J [mm⁴]": upd.get("It_gross"),
+                            "Iw_gross / Cw [mm⁶]": upd.get("Iw_gross"),
+                            "y0 [mm]": upd.get("y0"),
+                            "Pcrl [N]": d.get("Pcrl"),
+                            "Pcrd [N]": d.get("Pcrd")})
                         if report is not None:
+                            st.caption("CUFSM vs the master values, before:")
                             st.markdown(cufsm.validation_markdown(report))
                     except Exception as exc:
                         st.error(f"import failed: {exc}")
                     finally:
                         if mpath and os.path.exists(mpath):
                             os.remove(mpath)
+
+        # ---- secondary: snippets and the rack-model JSON writer ----------
+        with st.expander("Other handoff options — code snippet, .dsm.json, or "
+                         "write into a rack model JSON"):
+            st.markdown("**Python** — attach to a `CrossSection` in the library:")
+            st.code(snippet, language="python")
+            st.code(json.dumps(dsm_kwargs, indent=2), language="json")
+            st.download_button(
+                f"Download {name}.dsm.json",
+                json.dumps({"section": name, "dsm": dsm_kwargs}, indent=2),
+                file_name=f"{name}.dsm.json", mime="application/json")
+            st.markdown("**Write into a rack model JSON** — upload a model, "
+                        "choose a section, download it with `dsm` attached:")
+            mfile = st.file_uploader("rack model JSON (rack15512 io_json format)",
+                                    type=["json"], key="modeljson")
+            if mfile is not None:
+                try:
+                    model = io_json.model_from_dict(
+                        json.loads(mfile.getvalue().decode("utf-8")))
+                except (ValueError, KeyError, json.JSONDecodeError) as exc:
+                    st.error(f"could not read model: {exc}")
+                    model = None
+                if model and model.sections:
+                    target = st.selectbox("section to update",
+                                         sorted(model.sections))
+                    if st.button("Attach DSM data and prepare download"):
+                        sec = model.sections[target]
+                        sec.dsm = DSMData(**dsm_kwargs)
+                        steel = model.materials.get(sec.material) \
+                            or Steel(sec.material, fy=fy)
+                        cufsm.populate_effective_properties(
+                            sec, steel,
+                            axial=cufsm.BucklingLoads(Pcrl=Pcrl, Pcrd=Pcrd),
+                            Anet=Anet, overwrite=True)
+                        out = json.dumps(io_json.model_to_dict(model), indent=2)
+                        st.success(f"DSM data attached to '{target}'")
+                        st.download_button("Download updated model JSON", out,
+                                          file_name=mfile.name.replace(
+                                              ".json", "") + "_dsm.json",
+                                          mime="application/json")
+                elif model:
+                    st.warning("the uploaded model has no sections")
 
 st.caption("DSM is a validated analytical route, but does not remove "
            "EN 15512's requirement to type-test the final perforated section. "
