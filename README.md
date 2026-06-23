@@ -354,6 +354,28 @@ compute the DSM resistances and effective area, then **hand off** — copy a
 `DSMData` snippet / JSON, or upload a rack model JSON and write the `dsm` data
 straight into a chosen section so the EN 15512 checks use it.
 
+### DXF → CUFSM mesh (faster model creation)
+
+Draw or export the section **midline** in CAD and import the DXF to build the
+CUFSM node/element mesh automatically — no hand entry. The geometry tab of
+`app_cufsm.py` takes a DXF, or via the API:
+
+```python
+from rack15512 import dxf_section as dx
+mesh = dx.dxf_to_mesh(open("upright.dxf").read(),
+                      default_t=2.0,
+                      layer_thickness={"reinforcement": 2.5},  # per CAD layer
+                      recenter=True)        # move to the thickness-weighted CG
+open("model.txt", "w").write(dx.mesh_to_cufsm_text(mesh))   # CUFSM-ready
+```
+
+A dependency-free reader handles `LINE`, `LWPOLYLINE` (incl. bulge arcs),
+`POLYLINE`/`VERTEX`, `ARC` and `CIRCLE` (explode splines/ellipses to polylines
+in CAD first); curves are discretised to strips, coincident endpoints merge
+into shared nodes, and each element's thickness comes from its CAD layer (or a
+default). The **recentre** option translates every node so the section's CG —
+weighted by each element's thickness — sits at the origin.
+
 ### Section properties & §9.7.5 validation from the CUFSM model
 
 The CUFSM *model* (the node + element mesh) also yields the full thin-walled

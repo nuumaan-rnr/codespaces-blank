@@ -26,7 +26,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Sequence, Tuple
 
-__all__ = ["SectionProperties", "thin_walled_properties"]
+__all__ = ["SectionProperties", "thin_walled_properties",
+           "thickness_weighted_centroid", "recenter_to_centroid"]
 
 
 @dataclass
@@ -178,3 +179,35 @@ def thin_walled_properties(nodes: Dict[int, Tuple[float, float]],
     return SectionProperties(
         A=A, xc=xc, yc=yc, Ix=Ix, Iy=Iy, Ixy=Ixy, I1=I1, I2=I2, theta=theta,
         J=J, Cw=Cw, x_sc=x_sc, y_sc=y_sc, i0=i0, closed=closed)
+
+
+def thickness_weighted_centroid(nodes: Dict[int, Tuple[float, float]],
+                                elems: Sequence[Tuple[int, int, float]]
+                                ) -> Tuple[float, float]:
+    """Centre of gravity of a node/element mesh, weighting each element by its
+    *area* (thickness x length) - so thicker plates pull the CG toward them."""
+    A = Sx = Sy = 0.0
+    for ni, nj, t in elems:
+        (xa, ya), (xb, yb) = nodes[ni], nodes[nj]
+        L = math.hypot(xb - xa, yb - ya)
+        if L <= 0.0:
+            continue
+        a = t * L
+        A += a
+        Sx += a * (xa + xb) / 2.0
+        Sy += a * (ya + yb) / 2.0
+    if A <= 0.0:
+        raise ValueError("degenerate section: zero area")
+    return Sx / A, Sy / A
+
+
+def recenter_to_centroid(nodes: Dict[int, Tuple[float, float]],
+                         elems: Sequence[Tuple[int, int, float]]
+                         ) -> Tuple[Dict[int, Tuple[float, float]],
+                                    Tuple[float, float]]:
+    """Translate every node so the thickness-weighted CG is at the origin.
+    Returns ``(recentred_nodes, (xc, yc))`` - the original CG that was removed."""
+    xc, yc = thickness_weighted_centroid(nodes, elems)
+    moved = {i: (round(x - xc, 6), round(y - yc, 6))
+             for i, (x, y) in nodes.items()}
+    return moved, (xc, yc)
