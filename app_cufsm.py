@@ -150,33 +150,79 @@ tab_sec, tab_geo, tab_sig, tab_dsm, tab_out = st.tabs(
 # ----------------------------------------------------------------- 1 · section
 with tab_sec:
     ui.section("◫", "Upright section & material")
+    # session_state is the single source of truth, so 'Load from master' can
+    # prefill the form (and no default-value-vs-session warnings).
+    for _k, _v in {"name": "UP-100x90x2.0", "fy": 450.0, "E": 210000.0,
+                   "A": 600.0, "Wely": 21000.0, "Welz": 14000.0,
+                   "Iy": 1.05e6, "Iz": 0.62e6, "Anet": 540.0,
+                   "Wnetz": 0.0, "Wnety": 0.0}.items():
+        ss.setdefault(_k, _v)
+    with st.expander("📚 Load from a stored master (your upright masters)",
+                     expanded=False):
+        from rack15512.master_store import MasterStore
+        _store = MasterStore("masters")
+        _ms = _store.list()
+        if not _ms:
+            st.caption("No stored masters found in ./masters — import one on the "
+                       "main app's **Section masters** page, and run this app "
+                       "from the same folder so it shares ./masters.")
+        else:
+            mc = st.columns([2, 2, 1])
+            _mid = mc[0].selectbox(
+                "Master", [m.id for m in _ms],
+                format_func=lambda i: next((f"{m.name} · {m.company}"
+                                            for m in _ms if m.id == i), i),
+                key="secmaster")
+            _sm = _store.load(_mid)
+            _ups = _sm.names("upright") or _sm.names()
+            if not _ups:
+                st.warning("this master has no sections")
+            else:
+                _upn = mc[1].selectbox("Upright section", _ups, key="secupright")
+                if mc[2].button("Load into form", key="secload"):
+                    d = _sm.sections[_upn]
+                    ss["name"] = _upn
+                    ss["fy"] = float(_sm.fy.get(_upn, 355.0))
+                    ss["A"] = float(d.get("A") or 1.0)
+                    ss["Wely"] = float(d.get("Wely") or 0.0)
+                    ss["Welz"] = float(d.get("Welz") or 0.0)
+                    ss["Iy"] = float(d.get("Iy") or 0.0)
+                    ss["Iz"] = float(d.get("Iz") or 0.0)
+                    ss["Anet"] = float(d.get("A_eff") or d.get("A") or 1.0)
+                    st.success(f"Loaded '{_upn}' from '{_sm.name}'.")
+                    st.rerun()
     c1, c2, c3 = st.columns(3)
     with c1:
-        name = st.text_input("Section name", "UP-100x90x2.0", key="name")
-        fy = st.number_input("f_y [MPa]", 100.0, 1200.0, 450.0, 5.0, key="fy")
-        E = st.number_input("E [MPa]", 100000.0, 250000.0, 210000.0, 1000.0,
-                            key="E")
+        name = st.text_input("Section name", key="name")
+        fy = st.number_input("f_y [MPa]", min_value=100.0, max_value=1200.0,
+                             step=5.0, key="fy")
+        E = st.number_input("E [MPa]", min_value=100000.0, max_value=250000.0,
+                            step=1000.0, key="E")
     with c2:
-        A = st.number_input("Gross area A [mm²]", 1.0, 1e5, 600.0, 10.0, key="A")
-        Wely = st.number_input("W_el,y (local y) [mm³]", 0.0, 1e7, 21000.0,
-                              500.0, key="Wely")
-        Welz = st.number_input("W_el,z (local z) [mm³]", 0.0, 1e7, 14000.0,
-                              500.0, key="Welz")
+        A = st.number_input("Gross area A [mm²]", min_value=1.0, max_value=1e6,
+                            step=10.0, key="A")
+        Wely = st.number_input("W_el,y (local y) [mm³]", min_value=0.0,
+                               max_value=1e8, step=500.0, key="Wely")
+        Welz = st.number_input("W_el,z (local z) [mm³]", min_value=0.0,
+                               max_value=1e8, step=500.0, key="Welz")
     with c3:
-        Iy = st.number_input("I_y [mm⁴]", 0.0, 1e9, 1.05e6, 1e4, key="Iy")
-        Iz = st.number_input("I_z [mm⁴]", 0.0, 1e9, 0.62e6, 1e4, key="Iz")
-        Anet = st.number_input("Net area A_net [mm²] (perforations)", 1.0, 1e5,
-                              540.0, 10.0, key="Anet",
-                              help="Minimum net cross-section through a "
-                                   "perforation. Set = A for an unperforated "
-                                   "section.")
+        Iy = st.number_input("I_y [mm⁴]", min_value=0.0, max_value=1e10,
+                             step=1e4, key="Iy")
+        Iz = st.number_input("I_z [mm⁴]", min_value=0.0, max_value=1e10,
+                             step=1e4, key="Iz")
+        Anet = st.number_input("Net area A_net [mm²] (perforations)",
+                               min_value=1.0, max_value=1e6, step=10.0,
+                               key="Anet",
+                               help="Minimum net cross-section through a "
+                                    "perforation. Set = A for an unperforated "
+                                    "section.")
     cc1, cc2 = st.columns(2)
     with cc1:
-        Wnet_z = st.number_input("W_net,z [mm³] (0 = use gross)", 0.0, 1e7, 0.0,
-                               500.0, key="Wnetz")
+        Wnet_z = st.number_input("W_net,z [mm³] (0 = use gross)", min_value=0.0,
+                                 max_value=1e8, step=500.0, key="Wnetz")
     with cc2:
-        Wnet_y = st.number_input("W_net,y [mm³] (0 = use gross)", 0.0, 1e7, 0.0,
-                               500.0, key="Wnety")
+        Wnet_y = st.number_input("W_net,y [mm³] (0 = use gross)", min_value=0.0,
+                                 max_value=1e8, step=500.0, key="Wnety")
     ui.stat_strip([("P_y = A·f_y", f"{_fmt(A*fy/1e3)} kN"),
                    ("P_ynet = A_net·f_y", f"{_fmt(Anet*fy/1e3)} kN"),
                    ("hole loss", f"{_fmt((1-Anet/A)*100,1)} %")])
