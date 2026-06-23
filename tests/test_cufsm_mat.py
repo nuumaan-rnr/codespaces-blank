@@ -69,3 +69,55 @@ def test_write_to_path(tmp_path):
     cufsm_mat.write_cufsm_mat(str(p), nodes, elems)
     assert p.exists()
     assert "elem" in sio.loadmat(str(p))
+
+
+def _results_mat_bytes(curve, with_geometry=True):
+    import numpy as np
+    data = {"curve": curve, "lengths": np.array([c[0, 0] for c in curve])}
+    if with_geometry:
+        # our exported .mat geometry: uniform stress = 100 (so P_ref = 100*A)
+        data["node"] = np.array([[1, 0, 0, 1, 1, 1, 1, 100.0],
+                                 [2, 0, 100, 1, 1, 1, 1, 100.0]])
+        data["elem"] = np.array([[1, 1, 2, 2.0, 100]])      # A = 2*100 = 200
+    buf = io.BytesIO()
+    sio.savemat(buf, data)
+    return buf.getvalue()
+
+
+def test_read_results_array_curve():
+    import numpy as np
+    # (n_len, 2, n_modes): [:,0,0]=half-wavelength, [:,1,0]=lowest-mode LF
+    hw = [10.0, 50.0, 90.0, 200.0, 400.0]
+    lf = [2.0, 0.9, 1.5, 1.1, 1.3]            # local min at hw=50
+    curve = np.zeros((5, 2, 4))
+    for i in range(5):
+        curve[i, 0, :] = hw[i]
+        curve[i, 1, :] = lf[i] + np.arange(4)  # mode 0 lowest
+    res = cufsm_mat.read_results_mat(_results_mat_bytes(curve))
+    assert res["half_wavelengths"] == pytest.approx(hw)
+    assert res["signature"] == pytest.approx(lf)
+    assert res["reference_load"] == pytest.approx(100.0 * 200.0)   # fy * A
+
+    # the signature feeds the usual minima extraction -> Pcr
+    from rack15512 import cufsm
+    loads = cufsm.loads_from_signature(res["half_wavelengths"], res["signature"],
+                                       reference=res["reference_load"])
+    assert loads.Pcrl == pytest.approx(0.9 * 100.0 * 200.0)         # LF_local * P_ref
+
+
+def test_read_curve_object_cell_format():
+    # CUFSM's older object/cell layout: curve[i] = [[hw, lf_mode0], [hw, lf1]...]
+    import numpy as np
+    cells = np.empty(3, dtype=object)
+    for i, (h, v) in enumerate([(20.0, 1.4), (60.0, 0.8), (300.0, 1.2)]):
+        cells[i] = np.array([[h, v], [h, v + 1.0]])      # lowest mode first
+    hw, lf = cufsm_mat._read_curve(cells.reshape(3, 1))
+    assert hw == pytest.approx([20.0, 60.0, 300.0])
+    assert lf == pytest.approx([1.4, 0.8, 1.2])
+
+
+def test_read_results_requires_curve():
+    buf = io.BytesIO()
+    sio.savemat(buf, {"node": [[1, 0, 0, 1, 1, 1, 1, 1]]})
+    with pytest.raises(ValueError):
+        cufsm_mat.read_results_mat(buf.getvalue())

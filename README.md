@@ -395,6 +395,14 @@ cufsm_mat.write_cufsm_mat("upright.mat", mesh.nodes, mesh.elems,
                           E=210000, fy=450)   # elem thickness = effective t
 ```
 
+**Read the CUFSM results back:** after you run the analysis in CUFSM and save
+the file, load that *results* `.mat` on the **Signature curve** tab (or
+`cufsm_mat.read_results_mat`). It extracts the signature curve (the `curve`
+results - lowest-mode load factor per half-wavelength) and the reference load
+from the node stresses, so the local/distortional minima → `Pcrl`/`Pcrd` →
+DSM, with no manual CSV step. Both CUFSM `curve` layouts (array and cell) are
+handled.
+
 ### Section properties & §9.7.5 validation from the CUFSM model
 
 The CUFSM *model* (the node + element mesh) also yields the full thin-walled

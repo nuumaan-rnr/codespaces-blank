@@ -497,20 +497,45 @@ with tab_geo:
 # ----------------------------------------------------------- 3 · signature curve
 with tab_sig:
     ui.section("∿", "CUFSM signature curve → local & distortional")
-    mode = st.radio("Input", ["Upload CSV/TXT", "Paste two columns",
-                              "Enter the two minima directly"],
+    mode = st.radio("Input", ["Upload CUFSM results (.mat)", "Upload CSV/TXT",
+                              "Paste two columns", "Enter the two minima directly"],
                     horizontal=True, key="sigmode")
-    unit = st.radio("Value column is",
-                    ["buckling load / moment (already in N or N·mm)",
-                     "load factor × reference"], horizontal=True, key="unit")
     reference = 1.0
-    if unit.startswith("load factor"):
-        reference = st.number_input("reference load/moment", 0.0, 1e12, 1.0,
-                                   key="ref")
+    if mode in ("Upload CSV/TXT", "Paste two columns"):
+        unit = st.radio("Value column is",
+                        ["buckling load / moment (already in N or N·mm)",
+                         "load factor × reference"], horizontal=True, key="unit")
+        if unit.startswith("load factor"):
+            reference = st.number_input("reference load/moment", 0.0, 1e12, 1.0,
+                                       key="ref")
 
     hw, val = [], []
     direct = None
-    if mode == "Upload CSV/TXT":
+    if mode == "Upload CUFSM results (.mat)":
+        upm = st.file_uploader(
+            "CUFSM results .mat — the file CUFSM saves *after* you run the "
+            "analysis (must contain the 'curve' results)", type=["mat"],
+            key="resmat")
+        if upm is not None:
+            try:
+                from rack15512 import cufsm_mat as _cmat
+                res = _cmat.read_results_mat(upm.getvalue())
+                hw, val = res["half_wavelengths"], res["signature"]
+                rl = res["reference_load"]
+                reference = st.number_input(
+                    "reference load P_ref [N]  (load factor × P_ref = P_cr)",
+                    0.0, 1e12,
+                    float(rl) if rl else float(A * fy), key="matref",
+                    help="From the node stresses saved in the .mat; for our "
+                         "export that is f_y·A = P_y.")
+                st.caption(
+                    f"Read {res['n_lengths']} half-wavelengths; signature = "
+                    "lowest-mode load factor. "
+                    + (f"P_ref from the .mat = {rl:,.0f} N"
+                       if rl else "no geometry in the .mat — using A·f_y"))
+            except Exception as exc:    # noqa: BLE001
+                st.error(f"could not read the results .mat: {exc}")
+    elif mode == "Upload CSV/TXT":
         up = st.file_uploader("CUFSM signature export (2 columns: "
                               "half-wavelength, value)", type=["csv", "txt"])
         if up is not None:
