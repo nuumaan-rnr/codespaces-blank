@@ -378,7 +378,11 @@ _ARCH_PATH = os.path.join(os.path.dirname(__file__), "..", "examples",
 MODEL_BEAM = "RHS112X50X1.6"
 MODEL_NLEV = 1
 MODEL_NBAYS = 3
-MODEL_DA = list(range(250, 4001, 50))      # beam gap = Lcr_DA [mm], 50 mm steps
+MODEL_DA = list(range(250, 4001, 100))     # beam gap = Lcr_DA [mm], 100 mm steps
+# load / resistance factors used by the model-based chart (overridable):
+CHART_GAMMA_G = 1.2         # dead load factor at ULS (was 1.3)
+CHART_GAMMA_Q = 1.2         # imposed (pallet) load factor at ULS (was 1.4)
+CHART_GAMMA_M1 = 1.0        # member buckling resistance factor (was 1.1)
 # (label, bracing_type, pitch, with-stiffener) - 600 mm pitch only
 MODEL_CONFIGS = [
     ("X-600", "X", 600.0, False),
@@ -414,6 +418,8 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
               bracing_type=btype, bracing_pitch=pitch, frame_height=h,
               pallet_load_per_level=load, ca_brace_zones=(), ca_x_height=None,
               steel_fy=FY_UPRIGHT, fy_override=True,
+              gamma_G=CHART_GAMMA_G, gamma_G_uls=CHART_GAMMA_G,
+              gamma_Q=CHART_GAMMA_Q, pay_placement_factor=CHART_GAMMA_Q,
               include_self_weight=False)   # pallet capacity; self-wt negligible
     if xs:
         depth = round(mw.library.get(section).depth_h or 0.0)
@@ -422,6 +428,7 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
             return None
         kw.update(stiffener_section=st, reinforce_height=h, stiffener_type=1)
     m = build_rack(RackConfig(**kw))
+    m.checks.gamma_M1 = CHART_GAMMA_M1               # resistance factor (no E reduction)
     m.analysis.compute_alpha_cr = False
     # lean solver for the sweep: a single fast attempt that fails quickly when
     # the load is above the stability limit (the search then reduces the load)
@@ -1136,18 +1143,20 @@ def _read_level_seeds(path):
 
 
 def generate_util_based(master_path, out_dir, seeds_file=None,
-                        checkpoint=None, workers=None):
+                        checkpoint=None, workers=None, sections=None):
     """Resumable, parallel utilisation-targeted chart: for every case tune the
     soft load per level (and slightly the level count) so the governing upright
     util (max of STRESS and BUCKLING) lands in 0.97..0.99.  Level counts are
-    seeded from a prior chart (seeds_file) when given."""
+    seeded from a prior chart (seeds_file) when given.  `sections` restricts the
+    upright list (default: all in the master)."""
     import multiprocessing as mp
     os.makedirs(out_dir, exist_ok=True)
     checkpoint = checkpoint or os.path.join(out_dir, "_util_checkpoint.json")
     done = {}
     if os.path.exists(checkpoint):
         done = _json.load(open(checkpoint, encoding="utf-8"))
-    sections = load_master(master_path).library.names("upright")
+    all_secs = load_master(master_path).library.names("upright")
+    sections = [s for s in all_secs if s in sections] if sections else all_secs
     seeds = _read_level_seeds(seeds_file)
     todo = []
     for s in sections:
