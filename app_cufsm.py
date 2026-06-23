@@ -183,7 +183,88 @@ with tab_sec:
 
 # ------------------------------------------------------------ 2 · CUFSM geometry
 with tab_geo:
-    ui.section("⊏", "Starting geometry for CUFSM (optional)")
+    ui.section("⇪", "Import a DXF → CUFSM nodes & elements")
+    st.write("Draw or export the section **midline** in CAD (lines, polylines, "
+             "arcs) and import it to build the CUFSM mesh — far faster than "
+             "entering nodes by hand. Thickness is assigned per CAD layer.")
+    from rack15512 import dxf_section as _dx
+    dxf_up = st.file_uploader(
+        "DXF (LINE / LWPOLYLINE / POLYLINE / ARC / CIRCLE; explode splines "
+        "first)", type=["dxf"], key="dxf")
+    if dxf_up is not None:
+        dtext = dxf_up.getvalue().decode("utf-8", errors="ignore")
+        try:
+            _polys = _dx.entity_polylines(_dx.parse_dxf_entities(dtext))
+            _layers = sorted({lay for _p, lay, _c in _polys})
+        except Exception as exc:        # noqa: BLE001 - surface any parse error
+            st.error(f"could not read the DXF: {exc}")
+            _polys, _layers = [], []
+        if _polys:
+            d1, d2, d3 = st.columns(3)
+            ddt = d1.number_input("default thickness [mm]", 0.1, 12.0, 2.0,
+                                  0.1, key="dxft")
+            dseg = d2.number_input("arc segment angle [°]", 2.0, 45.0, 12.0,
+                                   1.0, key="dxfseg")
+            drec = d3.checkbox("recentre to CG (thickness-weighted)",
+                               value=False, key="dxfcg",
+                               help="Translate every node so the section's "
+                                    "centre of gravity sits at the origin; the "
+                                    "CG is weighted by each element's thickness.")
+            lt = {}
+            if _layers:
+                st.caption(f"Layers: {', '.join(_layers)} — set a thickness per "
+                           "layer (0 = use the default).")
+                lc = st.columns(min(len(_layers), 4))
+                for _i, lay in enumerate(_layers):
+                    _v = lc[_i % len(lc)].number_input(
+                        f"t · {lay} [mm]", 0.0, 12.0, 0.0, 0.1, key=f"lt_{lay}")
+                    if _v > 0:
+                        lt[lay] = _v
+            try:
+                mesh = _dx.dxf_to_mesh(dtext, default_t=ddt, layer_thickness=lt,
+                                       seg_angle=dseg, recenter=drec)
+            except Exception as exc:    # noqa: BLE001
+                st.error(f"mesh build failed: {exc}")
+                mesh = None
+            if mesh is not None:
+                mv1, mv2 = st.columns([0.55, 0.45])
+                with mv1:
+                    import plotly.graph_objects as go
+                    fig = go.Figure()
+                    for i, j, _t in mesh.elems:
+                        fig.add_trace(go.Scatter(
+                            x=[mesh.nodes[i][0], mesh.nodes[j][0]],
+                            y=[mesh.nodes[i][1], mesh.nodes[j][1]],
+                            mode="lines", line=dict(color=B.TEAL, width=3),
+                            showlegend=False))
+                    if drec:
+                        fig.add_trace(go.Scatter(
+                            x=[0], y=[0], mode="markers+text", text=["CG"],
+                            textposition="top center", showlegend=False,
+                            marker=dict(size=11, color="#E08A1E", symbol="x")))
+                    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+                    fig.update_layout(height=380, title="DXF → CUFSM mesh",
+                                      margin=dict(l=10, r=10, t=30, b=10),
+                                      paper_bgcolor="rgba(0,0,0,0)",
+                                      plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, width="stretch")
+                with mv2:
+                    ui.stat_strip([("nodes", len(mesh.nodes)),
+                                   ("elements", len(mesh.elems)),
+                                   ("layers", len(mesh.layers))])
+                    if mesh.centroid_removed:
+                        cgx, cgy = mesh.centroid_removed
+                        st.caption(f"recentred — original CG "
+                                   f"({cgx:.2f}, {cgy:.2f}) mm")
+                    cufsm_text = _dx.mesh_to_cufsm_text(mesh)
+                    st.download_button("Download CUFSM model (.txt)", cufsm_text,
+                                       file_name="cufsm_model.txt",
+                                       mime="text/plain")
+                    st.text_area("CUFSM nodes & elements", cufsm_text,
+                                 height=190)
+    st.divider()
+
+    ui.section("⊏", "Or generate a plain lipped-channel geometry (optional)")
     st.write("Generate the midline node/strip geometry of a **plain** lipped "
              "channel to seed the CUFSM model, then add corner radii and the "
              "perforation pattern inside CUFSM.")
