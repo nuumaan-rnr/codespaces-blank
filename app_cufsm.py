@@ -335,12 +335,29 @@ with tab_geo:
                         cgx, cgy = mesh.centroid_removed
                         st.caption(f"recentred — original CG "
                                    f"({cgx:.2f}, {cgy:.2f}) mm")
+                    # CUFSM-native .mat (opens directly in MATLAB CUFSM), with
+                    # each element's effective thickness in the elem matrix
+                    try:
+                        from rack15512 import cufsm_mat as _cmat
+                        st.download_button(
+                            "⬇ Download CUFSM model (.mat) — opens in CUFSM",
+                            _cmat.cufsm_mat_bytes(mesh.nodes, mesh.elems,
+                                                  E=E, nu=0.3, fy=fy),
+                            file_name=f"{(name or 'upright').replace(' ', '_')}"
+                                      ".mat",
+                            mime="application/octet-stream", type="primary",
+                            help="MATLAB .mat with prop / node / elem / lengths; "
+                                 "elem thickness = the per-element effective "
+                                 "thickness, reference stress = f_y.")
+                    except ImportError:
+                        st.caption("Install SciPy (`pip install scipy`) to "
+                                   "export a CUFSM .mat.")
                     cufsm_text = _dx.mesh_to_cufsm_text(mesh)
                     st.download_button("Download CUFSM model (.txt)", cufsm_text,
                                        file_name="cufsm_model.txt",
                                        mime="text/plain")
                     st.text_area("CUFSM nodes & elements", cufsm_text,
-                                 height=190)
+                                 height=160)
     st.divider()
 
     ui.section("⊏", "Or generate a plain lipped-channel geometry (optional)")

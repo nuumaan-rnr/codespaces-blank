@@ -6,6 +6,7 @@ plotly>=5.18     # interactive 3D viewer (UI)
 python-docx>=1.1   # editable DOCX report
 reportlab>=4.0    # PDF report
 pillow>=10.0      # image sizing for PDF
+scipy>=1.10       # write CUFSM .mat export (rack15512.cufsm_mat)
 
 # interactive web UI (optional):
 #   pip install streamlit

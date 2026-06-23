@@ -383,6 +383,18 @@ editable table in the app, or `mesh.with_thicknesses([...])` in the API). The
 by each element's (equivalent) thickness × length — sits at the origin, so it
 reflects the perforated section, not the gross plate.
 
+**Export a CUFSM `.mat`:** the geometry tab writes a CUFSM-native `.mat`
+(`rack15512.cufsm_mat`) that opens directly in the MATLAB CUFSM GUI — `prop`
+(material), `node` (free DOFs, reference stress = f_y), `elem` (with each
+element's **effective thickness**), `lengths`, `springs`/`constraints`, 1-based
+numbering, verified against CUFSM's own example files. Needs SciPy.
+
+```python
+from rack15512 import cufsm_mat
+cufsm_mat.write_cufsm_mat("upright.mat", mesh.nodes, mesh.elems,
+                          E=210000, fy=450)   # elem thickness = effective t
+```
+
 ### Section properties & §9.7.5 validation from the CUFSM model
 
 The CUFSM *model* (the node + element mesh) also yields the full thin-walled

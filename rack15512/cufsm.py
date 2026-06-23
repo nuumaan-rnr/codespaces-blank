@@ -244,6 +244,8 @@ def parse_cufsm_model(lines: Sequence[str]):
                 mode = "elem"
             elif "node" in low:
                 mode = "node"
+            elif "mat" in low or "prop" in low or "length" in low:
+                mode = "skip"                     # material / lengths blocks
             continue                          # never parse an alpha line as data
         vals = []
         ok = True
