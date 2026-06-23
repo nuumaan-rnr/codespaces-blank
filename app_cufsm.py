@@ -398,6 +398,19 @@ with tab_geo:
                           file_name="cufsm_nodes.csv", mime="text/csv")
         st.download_button("Download strips.csv", elem_csv,
                           file_name="cufsm_strips.csv", mime="text/csv")
+        # CUFSM-native .mat for this generated section (opens in MATLAB CUFSM)
+        try:
+            from rack15512 import cufsm_mat as _cmat
+            _nd = {k: (x, y) for k, (x, y) in enumerate(nodes)}
+            st.download_button(
+                "⬇ Download CUFSM model (.mat) — opens in CUFSM",
+                _cmat.cufsm_mat_bytes(_nd, list(strips), E=E, nu=0.3, fy=fy),
+                file_name=f"{(name or 'upright').replace(' ', '_')}.mat",
+                mime="application/octet-stream", type="primary",
+                help="prop / node / elem / lengths; elem thickness = t above, "
+                     "reference stress = f_y from the Section tab.")
+        except ImportError:
+            st.caption("Install SciPy (`pip install scipy`) for the .mat export.")
     st.info("This is a plain (unperforated, sharp-corner) starting geometry. "
             "Reproduce it in CUFSM, add the rounded corners and the upright's "
             "perforation pattern (or an equivalent reduced thickness), then run "
