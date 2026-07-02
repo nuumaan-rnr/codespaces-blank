@@ -213,3 +213,42 @@ def test_plastic_connector_law():
     b2 = next(mm for mm in io_json.load(p).members.values()
               if mm.member_set == "pallet beams")
     assert b2.hinge_i.plastic is True and b2.hinge_i.phi_u == 0.06
+
+
+def test_rstab_behavior_defaults():
+    """RSTAB-matching behaviors (validated on the Zepto model, <=2%):
+    SLS combinations linear, stepped axial-dependent base from the master,
+    EN1993 flat imperfection 1/300 DA / 1/200 CA, connector interpolation."""
+    from rack15512.master_xlsx import load_master
+    mw = load_master("examples/Master_Template_FINAL_mount_offset.xlsx")
+    m = build_rack(RackConfig(master=mw, module="single", n_bays=2,
+                              bay_width=2300.0, frame_height=2000.0,
+                              levels=[LevelSpec(gap=1500.0,
+                                                beam_section="RHS60X40X1.6",
+                                                pallet_load=5000.0)],
+                              upright_section="UP0010",
+                              steel_E=200000.0, steel_G=76900.0))
+    # SLS combos run geometrically linear (RSTAB), ULS at the model order
+    assert all(c.order == 1 for c in m.combinations if c.kind == "SLS")
+    assert all(c.order in (None, 2) for c in m.combinations if c.kind == "ULS")
+    # base 'auto' -> stepped axial-dependent table from the master, tearing at 0
+    assert m.base_axial_table is not None
+    assert m.base_axial_table[0][0] == 0.0 and m.base_axial_table[1][0] == 30.0
+    # EN1993 flat imperfection defaults
+    assert m.imperfection.standard == "EN1993"
+    assert abs(1 / m.imperfection.value_for("+x") - 300) < 1
+    assert abs(1 / m.imperfection.value_for("+y") - 200) < 1
+    # steel E/G override
+    assert all(mat.E == 200000.0 and mat.G == 76900.0
+               for mat in m.materials.values())
+    # connector stiffness interpolates between tested upright thicknesses
+    s = mw.library.get("RHS60X40X1.6")
+    k16, k18, k20 = (s.connector_k_for(t) for t in (1.6, 1.8, 2.0))
+    assert k16 < k18 < k20 and abs(k18 - (k16 + k20) / 2) < 1e3
+    # order round-trips through json
+    import os, tempfile
+    from rack15512 import io_json
+    p = os.path.join(tempfile.mkdtemp(), "m.json")
+    io_json.save(m, p)
+    m2 = io_json.load(p)
+    assert all(c.order == 1 for c in m2.combinations if c.kind == "SLS")

@@ -151,12 +151,21 @@ class CrossSection:
 
     def connector_k_for(self, upright_t: Optional[float]) -> Optional[float]:
         """Beam-to-upright connector stiffness [N*mm/rad] for the upright wall
-        thickness it bolts to: the closest UPL row of connector_k_by_upl when
-        present (and a thickness is known), else the single connector_k."""
+        thickness it bolts to: linear interpolation over the UPL rows of
+        connector_k_by_upl when present (exact at a tested thickness, clamped
+        at the table ends), else the single connector_k."""
         tbl = self.connector_k_by_upl
         if tbl and upright_t:
-            row = min(tbl, key=lambda r: abs(r[0] - upright_t))
-            return row[1]
+            rows = sorted((float(t), float(k)) for t, k in tbl)
+            t = float(upright_t)
+            if t <= rows[0][0]:
+                return rows[0][1]
+            if t >= rows[-1][0]:
+                return rows[-1][1]
+            for (t0, k0), (t1, k1) in zip(rows, rows[1:]):
+                if t0 <= t <= t1:
+                    f = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+                    return k0 + f * (k1 - k0)
         if tbl:
             # no upright thickness known: use the middle UPL row
             return sorted(tbl, key=lambda r: r[0])[len(tbl) // 2][1]
@@ -411,6 +420,10 @@ class Combination:
     factors: Dict[str, float]
     imperfection: bool = True
     imp_directions: Optional[List[str]] = None
+    # per-combination analysis order override: None -> model.analysis.order.
+    # RSTAB practice (and the default via RackConfig.sls_first_order): ULS
+    # combinations run second-order (P-Delta), SLS run geometrically linear.
+    order: Optional[int] = None
 
 
 @dataclass

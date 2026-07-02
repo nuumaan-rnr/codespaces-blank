@@ -140,7 +140,10 @@ def test_full_pipeline_and_json_roundtrip(tmp_path):
     cx = next(c for c in uls if c.combo == "ULS1" and c.imp_direction == "+x")
     cy = next(c for c in uls if c.combo == "ULS1" and c.imp_direction == "+y")
     assert cx.max_sway_x > cx.max_sway_y
-    assert cx.max_sway_x > 5.0 * cy.max_sway_y
+    # with the EN1993 default imperfection (DA 1/300, CA 1/200) the DA sway
+    # still dominates the braced cross-aisle, but by a smaller margin than the
+    # old EN15512-amplified default (ratio ~3.9x on this model)
+    assert cx.max_sway_x > 3.0 * cy.max_sway_y
 
     checks = run_checks(model2, cases)
     kinds = {c.check for c in checks}

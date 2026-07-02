@@ -337,11 +337,14 @@ class RackConfig:
     # design
     gamma_G: float = 1.3
     gamma_Q: float = 1.4
-    phi_s: float = 1.0 / 350.0              # out-of-plumb tolerance (down-aisle)
-    phi_s_cross: Optional[float] = None     # cross-aisle out-of-plumb; None=phi_s
+    phi_s: float = 1.0 / 300.0              # out-of-plumb tolerance (down-aisle)
+    phi_s_cross: Optional[float] = 1.0 / 200.0  # cross-aisle out-of-plumb
     # 'EN15512' -> phi = sqrt(0.5+1/n)*(2*phi_s+phi_l) (amplified rack value);
-    # 'EN1993'  -> phi = phi_s directly (plain out-of-plumb, e.g. 1/300; RSTAB-style)
-    imperfection_standard: str = "EN15512"
+    # 'EN1993'  -> phi = phi_s directly (plain out-of-plumb; RSTAB-style).
+    # Default 'EN1993' with 1/300 DA and 1/200 CA reproduces the RSTAB reference
+    # models (validated on SPR_RSTAB and Zepto); switch to 'EN15512' for the
+    # amplified rack-code imperfection.
+    imperfection_standard: str = "EN1993"
     # design-stiffness reduction E/gamma_M1 for the 2nd-order stability analysis
     # (EN 1993-1-1 / EN 15512; RSTAB "Materials (partial factor gamma_M)").
     # 1.0 = full stiffness; 1.1 = E/1.1 (gamma_M1).
@@ -351,6 +354,18 @@ class RackConfig:
     # alpha_h from the frame height, alpha_m from the columns in a row (n_cols).
     imperfection_alpha_hm: bool = False
     imperfection_method: str = "EHF"        # 'EHF' notional forces | 'geometry'
+    # SLS combinations run geometrically LINEAR (RSTAB practice: ULS second
+    # order, SLS 1st order); False runs everything at analysis.order.
+    sls_first_order: bool = True
+    # base_stiffness='auto': apply the master's tested BASE_STIFFNESS table as a
+    # stepped AXIAL-DEPENDENT rotational spring per column (RSTAB stiffness
+    # diagram, with tearing toward zero axial), instead of one value
+    # interpolated at the estimated axial.  False keeps the single value.
+    base_axial_dependent: bool = True
+    # steel elastic constants override applied to every material (e.g. IS 2062:
+    # E=200000, G=76900); None keeps the default 210000/81000.
+    steel_E: Optional[float] = None
+    steel_G: Optional[float] = None
     # explicit beam-to-upright connector stiffness [N*mm/rad]; when set it
     # overrides the per-section master value (use to match a specific test/solver)
     connector_stiffness_override: Optional[float] = None
@@ -1131,6 +1146,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
 
     # ---- semi-rigid floor connections ---------------------------------------
     n_uprights = len(sides) * n_lines
+    auto_base_table = None
     if cfg.base_stiffness == "auto":
         if cfg.master:
             n_modules = len(rack_pairs)
@@ -1138,6 +1154,13 @@ def build_rack(cfg: RackConfig) -> RackModel:
             N_est = (cfg.gamma_Q * total_pallets * cfg.n_bays
                      * n_modules) / n_uprights
             k_base, _ = cfg.master.base_stiffness(up.name, N_est)
+            # stepped axial-dependent base (RSTAB stiffness diagram): the full
+            # tested table [[P_kN, C_Nmm/rad], ...] with tearing toward P=0;
+            # the engine updates each column base from its own axial.
+            if cfg.base_axial_dependent and up.name in cfg.master.base_tables:
+                auto_base_table = ([[0.0, 1.0e3]] +
+                                   [[row[0] / 1.0e3, row[1]]
+                                    for row in cfg.master.base_tables[up.name]])
         else:
             # no test data: keep the historical selective default
             k_base = 5.0e8
@@ -1296,9 +1319,21 @@ def build_rack(cfg: RackConfig) -> RackModel:
         standard=cfg.imperfection_standard,
         alpha_hm=cfg.imperfection_alpha_hm, height=H,
         directions=["+x", "-x", "+y", "-y"])
-    m.base_axial_table = cfg.base_axial_table
+    m.base_axial_table = cfg.base_axial_table or auto_base_table
     m.model_connector_looseness = cfg.model_connector_looseness
     m.analysis.stiffness_gamma_m = cfg.stiffness_gamma_m
+    # steel elastic constants override (e.g. IS 2062: E=200000, G=76900)
+    if cfg.steel_E or cfg.steel_G:
+        for _mat in m.materials.values():
+            if cfg.steel_E:
+                _mat.E = cfg.steel_E
+            if cfg.steel_G:
+                _mat.G = cfg.steel_G
+    # SLS combinations geometrically linear (RSTAB practice)
+    if cfg.sls_first_order:
+        for _c in m.combinations:
+            if _c.kind == "SLS":
+                _c.order = 1
 
     # ---- seismic settings (IS 1893) -----------------------------------------
     if cfg.seismic:

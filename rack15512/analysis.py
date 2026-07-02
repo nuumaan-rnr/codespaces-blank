@@ -54,6 +54,8 @@ def run_all(model: RackModel, progress=None, should_cancel=None) -> List[CaseRes
         _check_cancel()
         step(f"Running {combo.kind} combination {combo.name}",
              0.30 + 0.14 * ci / n_combo)
+        # per-combination analysis order (RSTAB: ULS second-order, SLS linear)
+        order_c = getattr(combo, "order", None) or order
         base_loads = assemble(model, combo)
         apply_imp = combo.imperfection and (combo.kind == "ULS"
                                             or combo.imp_directions)
@@ -77,13 +79,13 @@ def run_all(model: RackModel, progress=None, should_cancel=None) -> List[CaseRes
                 name = f"{combo.name} (imp {direction})"
 
             case = engine.run_case(model, loads, name=name, combo=combo.name,
-                                   kind=combo.kind, order=order,
+                                   kind=combo.kind, order=order_c,
                                    imp_direction=direction,
                                    geom_sway=geom_sway)
             # report convergence pass/fail for THIS run (per combination/direction)
             mark = "converged ✓" if case.converged else "DID NOT CONVERGE ✗"
             step(f"   {name}: {mark}", 0.30 + 0.14 * (ci + 1) / n_combo)
-            if order == 2 and case.converged and model.analysis.compute_alpha_cr:
+            if order_c == 2 and case.converged and model.analysis.compute_alpha_cr:
                 # first-order companion for the alpha_cr / sway-amplification
                 # estimate (skipped when compute_alpha_cr is off, to save a solve)
                 lin = engine.run_case(model, loads, name=name + " [1st]",
