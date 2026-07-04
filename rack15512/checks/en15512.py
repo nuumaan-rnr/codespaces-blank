@@ -266,31 +266,45 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         # flexural-torsional buckling (EN 15512 9.7.5) when the gross
         # torsion / warping / shear-centre data is available
         ft_txt = ""
-        # torsional restraint at the cross-aisle bracing nodes: the
-        # torsional length is the bracing-node spacing (Lcr_z)
-        L_tors = m.L_buckling_y or mr.length
+        # torsional restraint spacing: cross-aisle brace nodes AND beam levels
+        # both prevent twist (member L_torsion, set by the builder); falls back
+        # to the cross-aisle flexural length for hand-built models
+        L_tors = (getattr(m, "L_torsion", None) or m.L_buckling_y or mr.length)
         chi_ft = _chi_ft(sec, mat, L_tors, Ncr_y, model.checks.beta_T)
         if chi_ft is not None and chi_ft < chi_min:
             chi_min, gov = chi_ft, "FT"
-            ft_txt = f", chi_FT={chi_ft:.3f}"
+            ft_txt = f", chi_FT={chi_ft:.3f} (L_T={L_tors:.0f} mm)"
         Nb_rd = chi_min * sec.area_eff * mat.fy / g
         My_rd = sec.mod_y_eff * mat.fy / g
         Mz_rd = sec.mod_z_eff * mat.fy / g
-        Nc = abs(mr.N_min)
-        eta = Nc / Nb_rd
-        if m.mtype == "beam":
-            eta += kM * mr.My_absmax / My_rd + kM * mr.Mz_absmax / Mz_rd
-        detail = (f"Nc={Nc/1e3:.1f} kN, My={mr.My_absmax/1e6:.2f} kNm, "
-                  f"Mz={mr.Mz_absmax/1e6:.2f} kNm; "
+        # interaction per STATION with that station's CONCURRENT (N, My, Mz):
+        # the governing location (max N, max My or max Mz) is verified with its
+        # own simultaneous forces, never a mix of maxima from different points
+        eta, st_g = -1.0, None
+        for st in mr.stations:
+            if st.N >= 0.0:
+                continue                   # tension: no flexural buckling term
+            e = abs(st.N) / Nb_rd
+            if m.mtype == "beam":
+                e += kM * abs(st.My) / My_rd + kM * abs(st.Mz) / Mz_rd
+            if e > eta:
+                eta, st_g = e, st
+        if st_g is None:
+            continue                       # no compressed station
+        Nc, My_g, Mz_g = abs(st_g.N), abs(st_g.My), abs(st_g.Mz)
+        detail = (f"Nc={Nc/1e3:.1f} kN, My={My_g/1e6:.2f} kNm, "
+                  f"Mz={Mz_g/1e6:.2f} kNm (concurrent, x={st_g.x:.0f} mm); "
                   f"Lcr_y={Lcr_y:.0f}, Lcr_z={Lcr_z:.0f} mm, "
                   f"lambda_y={lam_y:.2f}, lambda_z={lam_z:.2f}, "
                   f"chi_min={chi_min:.3f} (gov {gov}){ft_txt}, "
                   f"Nb_Rd={Nb_rd/1e3:.1f} kN")
         res.append(CheckResult("BUCKLING", case.name, f"member {mid}",
                                m.member_set, eta, detail,
-                               extra={"N": Nc, "My": mr.My_absmax,
-                                      "Mz": mr.Mz_absmax,
-                                      "Lcr_y": Lcr_y, "Lcr_z": Lcr_z}))
+                               extra={"N": Nc, "My": My_g, "Mz": Mz_g,
+                                      "Lcr_y": Lcr_y, "Lcr_z": Lcr_z,
+                                      "N_max": abs(mr.N_min),
+                                      "My_max": mr.My_absmax,
+                                      "Mz_max": mr.Mz_absmax}))
     return res
 
 
@@ -1235,10 +1249,14 @@ def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
 
     Each set's down-aisle buckling length Lcr,DA is the segment length and
     Lcr,CA is the cross-aisle (minor-axis) length; the governing (worst-
-    utilisation) element represents the set, with its N, My, Mz.  Returns rows
-    sorted worst-first: {set, Lcr_DA_mm, Lcr_CA_mm, N_kN, My_kNm, Mz_kNm,
-    member, util, case, status}."""
+    utilisation) element represents the set, with its CONCURRENT N, My, Mz.
+    Each row also carries the three per-level candidates of the manual method
+    under 'candidates': the member of max N, of max My, and of max Mz, each
+    verified with its own concurrent triplet.  Returns rows sorted worst-first:
+    {set, Lcr_DA_mm, Lcr_CA_mm, N_kN, My_kNm, Mz_kNm, member, util, case,
+    status, candidates}."""
     best: dict = {}
+    cands: dict = {}          # set label -> {'max N'|'max My'|'max Mz': row}
     for c in checks:
         if c.check != "BUCKLING" or c.informative:
             continue
@@ -1249,9 +1267,9 @@ def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
         lbl = getattr(m, "set_label", None) if m else None
         if not lbl:
             continue
+        x = c.extra or {}
         cur = best.get(lbl)
         if cur is None or c.utilization > cur["util"]:
-            x = c.extra or {}
             lcr_da = x.get("Lcr_z") or (m.L_buckling_z or 0.0)
             lcr_ca = x.get("Lcr_y") or (m.L_buckling_y or 0.0)
             best[lbl] = {"set": lbl,
@@ -1262,9 +1280,24 @@ def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
                          "Mz_kNm": round((x.get("Mz") or 0.0) / 1e6, 2),
                          "member": mid, "util": round(c.utilization, 3),
                          "case": c.case}
+        # per-level candidates (manual method): track the member holding the
+        # set's max N / max My / max Mz, each with its concurrent check values
+        cs = cands.setdefault(lbl, {})
+        for crit, key in (("max N", "N_max"), ("max My", "My_max"),
+                          ("max Mz", "Mz_max")):
+            v = x.get(key) or 0.0
+            if crit not in cs or v > cs[crit]["_crit_val"]:
+                cs[crit] = {"_crit_val": v, "member": mid, "case": c.case,
+                            "N_kN": round((x.get("N") or 0.0) / 1e3, 2),
+                            "My_kNm": round((x.get("My") or 0.0) / 1e6, 2),
+                            "Mz_kNm": round((x.get("Mz") or 0.0) / 1e6, 2),
+                            "util": round(c.utilization, 3)}
     rows = list(best.values())
     for r in rows:
         r["status"] = "FAIL" if r["util"] > 1.0 + 1e-9 else "PASS"
+        r["candidates"] = {crit: {k: v for k, v in row.items()
+                                  if k != "_crit_val"}
+                           for crit, row in cands.get(r["set"], {}).items()}
     rows.sort(key=lambda r: (-r["util"], r["set"]))
     return rows
 

@@ -252,3 +252,43 @@ def test_rstab_behavior_defaults():
     io_json.save(m, p)
     m2 = io_json.load(p)
     assert all(c.order == 1 for c in m2.combinations if c.kind == "SLS")
+
+
+def test_torsional_restraint_includes_beam_levels():
+    """Beam levels restrain twist: L_torsion uses brace nodes AND beam levels,
+    while the cross-aisle flexural length L_buckling_y stays on the braces."""
+    m = build_rack(RackConfig(module="single", n_bays=2, bay_width=2300.0,
+                              levels=[LevelSpec(gap=700.0), LevelSpec(gap=500.0),
+                                      LevelSpec(gap=800.0)],
+                              frame_height=2200.0, bracing_type="D",
+                              bracing_pitch=600.0, bracing_start=150.0))
+    ups = [mm for mm in m.members.values() if mm.member_set == "uprights"]
+    assert all(mm.L_torsion is not None for mm in ups)
+    # twist restraints are a superset of the flexural ones -> never longer
+    assert all(mm.L_torsion <= mm.L_buckling_y + 1.0 for mm in ups)
+    # somewhere a beam level splits a brace gap -> strictly shorter
+    assert any(mm.L_torsion < mm.L_buckling_y - 1.0 for mm in ups)
+
+
+def test_buckling_interaction_uses_concurrent_station_forces():
+    """The buckling interaction takes N, My, Mz from ONE station (concurrent),
+    not a mix of maxima; the per-level candidate rows expose the manual
+    max-N / max-My / max-Mz method."""
+    from rack15512.analysis import run_all
+    from rack15512.checks.en15512 import run_checks, upright_set_buckling_rows
+    m = build_rack(RackConfig(module="single", n_bays=2, bay_width=2300.0,
+                              levels=[LevelSpec(gap=1500.0)],
+                              frame_height=1800.0))
+    checks = run_checks(m, run_all(m))
+    bucks = [c for c in checks if c.check == "BUCKLING" and not c.informative]
+    assert bucks
+    for c in bucks:
+        x = c.extra
+        assert "concurrent" in c.detail
+        # concurrent values never exceed the member envelopes
+        assert x["N"] <= x["N_max"] + 1.0
+        assert x["My"] <= x["My_max"] + 1.0
+        assert x["Mz"] <= x["Mz_max"] + 1.0
+    rows = upright_set_buckling_rows(m, checks)
+    assert rows and all(set(r["candidates"]) == {"max N", "max My", "max Mz"}
+                        for r in rows)

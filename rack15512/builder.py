@@ -994,15 +994,29 @@ def build_rack(cfg: RackConfig) -> RackModel:
     for (i, s), ids in upright_members.items():
         pts = sorted(set(brace_points[(i, s)]))
         gaps = list(zip(pts, pts[1:]))
+        # TWIST restraints: the cross-aisle brace nodes AND the beam levels
+        # (beam-end connectors clamp the upright face) both prevent twist, so
+        # the flexural-torsional buckling length uses their combined spacing;
+        # a down-aisle beam does NOT brace cross-aisle flexure, so L_buckling_y
+        # stays on the brace points alone (EN 15512 9.7.5).
+        t_pts = sorted(set(pts) | set(beam_levels) | {0.0, H})
         for mem_id in ids:
             mem = m.members[mem_id]
-            z_mid = (m.nodes[mem.node_i].z + m.nodes[mem.node_j].z) / 2.0
+            n_i, n_j = m.nodes[mem.node_i], m.nodes[mem.node_j]
+            z_mid = (n_i.z + n_j.z) / 2.0
             lo, hi = band_of(z_mid)
             mem.L_buckling_z = hi - lo
             mem.set_label = f"Upright {_line_label(i, s)} · {_seg_name(lo, hi)}"
             overlapping = [b - a for a, b in gaps
                            if b > lo + _TOL and a < hi - _TOL]
             mem.L_buckling_y = max(overlapping) if overlapping else hi - lo
+            z_lo, z_hi = min(n_i.z, n_j.z), max(n_i.z, n_j.z)
+            for a, b in zip(t_pts, t_pts[1:]):      # containing restraint gap
+                if a - _TOL <= z_lo and z_hi <= b + _TOL:
+                    mem.L_torsion = b - a
+                    break
+            else:
+                mem.L_torsion = mem.L_buckling_y
 
     # upright stiffener: a SEPARATE member on its own centroid line (offset from
     # the upright per type), tied to the upright at each bolt row by interface

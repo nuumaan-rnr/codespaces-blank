@@ -266,6 +266,12 @@ class Member:
     k_buckling_z: float = 1.0
     L_buckling_y: Optional[float] = None
     L_buckling_z: Optional[float] = None
+    # spacing of the TWIST restraints bounding this member (cross-aisle brace
+    # nodes AND beam levels both prevent twist of an upright), used for the
+    # flexural-torsional buckling length (EN 15512 9.7.5); None -> falls back
+    # to L_buckling_y.  Distinct from L_buckling_y because a down-aisle beam
+    # restrains twist but not cross-aisle flexure.
+    L_torsion: Optional[float] = None
     mesh: int = 2
     member_set: str = "default"
     area_factor: float = 1.0
