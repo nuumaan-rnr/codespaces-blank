@@ -64,6 +64,12 @@ def rackconfig_from_dict(d: Dict[str, Any], *, master=None,
     known = {f.name for f in fields(RackConfig)}
     data = {k: v for k, v in d.items() if k in known and k not in _CFG_SKIP}
     levels = data.pop("levels", None)
+    # imperfections are handled ONE way app-wide (RSTAB basis): the flat
+    # EN 1993 inclination with the stored phi values.  Legacy projects that
+    # saved 'EN15512' (amplified) or the alpha_h*alpha_m reduction are
+    # normalised so every run uses the same single method.
+    data["imperfection_standard"] = "EN1993"
+    data["imperfection_alpha_hm"] = False
     cfg = RackConfig(**data)
     if levels:
         cfg.levels = [LevelSpec(**ls) for ls in levels]

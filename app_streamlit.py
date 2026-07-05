@@ -873,17 +873,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Out-of-plumb cross-aisle (1/x)", 100.0, 1000.0, 200.0,
             help="Cross-aisle (Y) sway imperfection 1/x. Drive-in default 1/200; "
                  "ignored for selective racking.")
-        _imp_opts = ["EN 1993 flat (RSTAB)", "EN 15512 amplified"]
-        _imp_saved = str(g("imperfection_standard", "EN1993"))
-        imp_std_lbl = c[3].selectbox(
-            "Imperfection standard", _imp_opts,
-            index=1 if _imp_saved.upper() == "EN15512" else 0,
-            help="EN 1993 flat = the out-of-plumb values above applied directly "
-                 "(matches RSTAB; validated on the reference models). "
-                 "EN 15512 amplified = sqrt(0.5+1/n)*(2*phi_s+phi_l), the rack "
-                 "code's larger sway imperfection.")
-        imperfection_standard = ("EN15512" if imp_std_lbl.startswith("EN 15512")
-                                 else "EN1993")
+        # Imperfections are handled ONE way (RSTAB basis, no user option):
+        # the out-of-plumb values above are applied directly as a flat
+        # EN 1993 inclination (default 1/300 down-aisle, 1/200 cross-aisle).
         c = st.columns(4)
         ax = c[1].number_input("Accidental X [kN]", 0.0, 10.0,
                                float(g("accidental_load_x", 1250.0) / 1e3))
@@ -1092,7 +1084,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),
         gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,
-        imperfection_standard=imperfection_standard,
+        imperfection_standard="EN1993",     # single basis (RSTAB), no app option
         stiffness_gamma_m=stiffness_gamma_m_val,
         connector_stiffness=connector_stiffness_val,
         connector_stiffness_source=connector_stiffness_source,
