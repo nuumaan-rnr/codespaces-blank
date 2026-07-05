@@ -313,3 +313,31 @@ def test_separate_uls_factors_dl_ll_placement():
                                frame_height=2200.0))
     f2l = next(c.factors for c in m2.combinations if c.name == "ULS2")
     assert f2l == {"dead": 1.3, "pallets": 1.4, "placement": 1.26}
+
+
+def test_per_role_material_fy_overrides():
+    """fy_upright / fy_beam / fy_bracing override the master fy per section
+    ROLE; roles sharing a master steel grade are not dragged along; None keeps
+    the master value; the role override wins over the fy_override global."""
+    from rack15512.master_xlsx import load_master
+    mw = load_master("examples/Master_Template_FINAL_mount_offset.xlsx")
+    base = dict(master=mw, module="single", n_bays=2, bay_width=2300.0,
+                levels=[LevelSpec(gap=1500.0, beam_section="RHS60X40X1.6",
+                                  pallet_load=5000.0)],
+                frame_height=2000.0, upright_section="UP0010")
+
+    def fy_of(m, name):
+        return m.materials[m.sections[name].material].fy
+
+    m = build_rack(RackConfig(**base, fy_upright=250.0, fy_beam=350.0))
+    assert fy_of(m, "UP0010") == 250.0            # upright overridden
+    assert fy_of(m, "RHS60X40X1.6") == 350.0      # beam overridden
+    assert fy_of(m, "1C26X21X1.2") == 270.0       # brace keeps master 270
+    m0 = build_rack(RackConfig(**base))           # no overrides -> master fy
+    assert fy_of(m0, "UP0010") == 355.0
+    assert fy_of(m0, "RHS60X40X1.6") == 270.0
+    # role override beats the apply-to-all fy_override global
+    m1 = build_rack(RackConfig(**base, steel_fy=355.0, fy_override=True,
+                               fy_bracing=235.0))
+    assert fy_of(m1, "1C26X21X1.2") == 235.0
+    assert fy_of(m1, "RHS60X40X1.6") == 355.0     # global still on the rest

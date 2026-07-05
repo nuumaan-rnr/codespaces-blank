@@ -397,6 +397,14 @@ class RackConfig:
     # gamma_Q (LL): the placement combinations use gamma_G*DL + gamma_Q*LL +
     # gamma_PL*PL.  None -> falls back to pay_placement_factor (legacy).
     gamma_PL: Optional[float] = None
+    # per-role steel grade overrides [MPa]: when entered they override the
+    # master / default fy for EVERY section of that role (upright / beam /
+    # bracing); None keeps the master per-section fy.  Each overridden role
+    # gets its own material clone, so roles sharing a steel grade in the
+    # master are not dragged along.
+    fy_upright: Optional[float] = None
+    fy_beam: Optional[float] = None
+    fy_bracing: Optional[float] = None
     mesh_beam: int = 4
     mesh_upright: int = 1                   # per segment between elevations
     # ---- seismic (IS 1893:2016); see model.SeismicSettings ----------------
@@ -521,10 +529,34 @@ def _pick(lib: SectionLibrary, name: str, role: str) -> str:
     return candidates[0]
 
 
+def _apply_role_fy(m: RackModel, cfg: "RackConfig") -> None:
+    """Per-role steel grade overrides (fy_upright / fy_beam / fy_bracing):
+    every section whose master role matches gets its own material clone at the
+    entered fy, so roles sharing a steel grade in the master stay unaffected.
+    Applied last - wins over the master fy and the fy_override global."""
+    ov = {"upright": cfg.fy_upright, "beam": cfg.fy_beam,
+          "bracing": cfg.fy_bracing}
+    for sec in m.sections.values():
+        fy = ov.get((sec.role or "").lower())
+        if not fy:
+            continue
+        src = m.materials.get(sec.material)
+        name = f"steel_{(sec.role or 'x').lower()}_fy{float(fy):g}"
+        if name not in m.materials:
+            m.materials[name] = Steel(
+                name, fy=float(fy),
+                E=src.E if src else 210000.0,
+                G=src.G if src else 81000.0,
+                nu=src.nu if src else 0.3)
+        sec.material = name
+
+
 def build_rack(cfg: RackConfig) -> RackModel:
     if getattr(cfg, "system_type", "selective") != "selective":
         from .drive_in import build_drive_in
-        return build_drive_in(cfg)
+        m = build_drive_in(cfg)
+        _apply_role_fy(m, cfg)
+        return m
     lib = cfg.master.library if cfg.master else (cfg.library
                                                  or SectionLibrary.bundled())
     m = RackModel(name=cfg.name)
@@ -1377,4 +1409,5 @@ def build_rack(cfg: RackConfig) -> RackModel:
         if not sec.J or sec.J <= 0:
             sec.J = max(sec.A * (sec.t or 2.0) ** 2 / 3.0, 1.0)
 
+    _apply_role_fy(m, cfg)          # per-role fy overrides (entered wins)
     return m

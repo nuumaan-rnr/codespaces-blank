@@ -696,6 +696,25 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         connector_stiffness_source = g("connector_stiffness_source", "master")
         connector_calc_factor = float(g("connector_calc_factor", 2.0))
         connector_stiffness_val = float(g("connector_stiffness", 1.0e8))
+        # per-role material (fy) overrides: entered value wins over the master
+        # per-section fy; 0 keeps the master / default grade
+        ui.section("🧪", "Material per member type (0 = master / default)")
+        cm = st.columns(3)
+        fy_up_in = cm[0].number_input(
+            "fy Upright [MPa]", 0.0, 700.0,
+            float(g("fy_upright", None) or 0.0), 5.0,
+            help="Overrides the master fy for every UPRIGHT section "
+                 "(e.g. 250 for IS 2062 E250). 0 = keep the master value.")
+        fy_bm_in = cm[1].number_input(
+            "fy Beam [MPa]", 0.0, 700.0,
+            float(g("fy_beam", None) or 0.0), 5.0,
+            help="Overrides the master fy for every BEAM section "
+                 "(e.g. 350 for E350). 0 = keep the master value (270/310...).")
+        fy_br_in = cm[2].number_input(
+            "fy Bracing [MPa]", 0.0, 700.0,
+            float(g("fy_bracing", None) or 0.0), 5.0,
+            help="Overrides the master fy for every BRACING section. "
+                 "0 = keep the master value.")
         if is_di:
             # drive-in: steel grade, semi-rigid base, and the brace bolt
             # connection (no footplate / anchor check).
@@ -1098,6 +1117,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         beam_laterally_restrained=bool(beam_restrained),
         pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),
         gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, gamma_PL=float(gPL),
+        fy_upright=float(fy_up_in) or None, fy_beam=float(fy_bm_in) or None,
+        fy_bracing=float(fy_br_in) or None,
         phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,
         imperfection_standard="EN1993",     # single basis (RSTAB), no app option
