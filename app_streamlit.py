@@ -914,11 +914,26 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                  "compute χ_LT and verify lateral-torsional buckling.")
         c = st.columns(3)
         # drive-in ULS uses gamma_G = 1.35 (RSTAB); selective uses 1.3
+        # separate ULS factor per action: gamma_G*DL + gamma_Q*LL + gamma_PL*PL
         gG = c[0].number_input(
-            "gamma_G (ULS)", 1.0, 2.0,
+            "gamma DL (ULS)", 1.0, 2.0,
             gn("gamma_G_uls" if is_di else "gamma_G",
-               1.35 if is_di else 1.3, 1.0, 2.0))
-        gQ = c[1].number_input("gamma_Q", 1.0, 2.0, gn("gamma_Q", 1.4, 1.0, 2.0))
+               1.35 if is_di else 1.3, 1.0, 2.0),
+            help="Dead-load ULS factor, applied to DL in every ULS combination.")
+        gQ = c[1].number_input(
+            "gamma LL (ULS)", 1.0, 2.0, gn("gamma_Q", 1.4, 1.0, 2.0),
+            help="Live (pallet) load ULS factor, applied to LL in every ULS "
+                 "combination (pay, placement and pattern).")
+        _gpl_saved = g("gamma_PL", None)
+        if _gpl_saved is None:
+            _gpl_saved = g("pay_placement_factor", 1.26)   # legacy fallback
+        gPL = c[2].number_input(
+            "gamma Placement (ULS)", 1.0, 2.0,
+            float(min(max(float(_gpl_saved or 1.26), 1.0), 2.0)),
+            help="Placement-load ULS factor: the placement combinations are "
+                 "gamma_DL*DL + gamma_LL*LL + gamma_PL*PL (e.g. RSTAB "
+                 "1.2/1.2/1.2).")
+        c = st.columns(3)
         _gm_saved = float(g("stiffness_gamma_m", 1.0) or 1.0)
         mat_factor_on = c[2].checkbox(
             "Material factor γM on stiffness",
@@ -1082,7 +1097,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         load_frame=int(load_frame),
         beam_laterally_restrained=bool(beam_restrained),
         pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),
-        gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, phi_s=1.0 / phi_s,
+        gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, gamma_PL=float(gPL),
+        phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,
         imperfection_standard="EN1993",     # single basis (RSTAB), no app option
         stiffness_gamma_m=stiffness_gamma_m_val,

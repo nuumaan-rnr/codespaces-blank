@@ -547,7 +547,10 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
 
     # ---- combinations (RSTAB 2.5: per-direction proof + SLS sets) ---------
     gG, gQ = cfg.gamma_G_uls, cfg.gamma_Q
-    psi = cfg.pay_placement_factor
+    # placement factor entered separately (DL / LL / PL each have their own
+    # ULS factor); falls back to the legacy psi-reduced pay_placement_factor
+    g_pl = (cfg.gamma_PL if getattr(cfg, "gamma_PL", None) is not None
+            else cfg.pay_placement_factor)
     anc = cfg.anchor_placement_factor
     combos: List[Combination] = []
     for d, dirs in (("X", ["+x", "-x"]), ("Y", ["+y", "-y"])):
@@ -555,11 +558,11 @@ def _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
         # CO1/CO4 — pay load
         combos.append(Combination(f"ULS-pay-{d}", "ULS",
                                   {"dead": gG, "pallets": gQ}, imp_directions=dirs))
-        # CO2/CO5 — placement (psi-reduced pay + placement)
+        # CO2/CO5 — placement: gamma_G*DL + gamma_Q*LL + gamma_PL*placement
         if placement:
             combos.append(Combination(
                 f"ULS-placement-{d}", "ULS",
-                {"dead": gG, "pallets": psi, plc: psi}, imp_directions=dirs))
+                {"dead": gG, "pallets": gQ, plc: g_pl}, imp_directions=dirs))
         # CO3/CO6 — accidental (gamma = 1.0 on all actions)
         if accidental:
             ic = "impact_x" if d == "X" else "impact_y"

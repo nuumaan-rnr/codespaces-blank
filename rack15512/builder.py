@@ -393,6 +393,10 @@ class RackConfig:
     gamma_G_uls: float = 1.35
     pay_placement_factor: float = 1.26
     anchor_placement_factor: float = 0.4
+    # ULS placement-load factor, entered SEPARATELY from gamma_G (DL) and
+    # gamma_Q (LL): the placement combinations use gamma_G*DL + gamma_Q*LL +
+    # gamma_PL*PL.  None -> falls back to pay_placement_factor (legacy).
+    gamma_PL: Optional[float] = None
     mesh_beam: int = 4
     mesh_upright: int = 1                   # per segment between elevations
     # ---- seismic (IS 1893:2016); see model.SeismicSettings ----------------
@@ -1288,16 +1292,18 @@ def build_rack(cfg: RackConfig) -> RackModel:
                     {"dead": 1.0, "pallets": 1.0}, imperfection=False),
     ]
     if placement:
-        # EN 15512 / RSTAB CO2 & CO5: when the horizontal placement force acts
-        # together with the pallet (live) load, BOTH are taken at the psi-reduced
-        # factor pay_placement_factor (1.26 = 1.4 x 0.9), not the full gamma_Q.
-        psi_pl = cfg.pay_placement_factor
+        # each action carries its OWN separately entered ULS factor:
+        # gamma_G * DL + gamma_Q * LL + gamma_PL * placement (RSTAB CO2/CO5
+        # scheme, e.g. 1.2/1.2/1.2); gamma_PL falls back to the legacy
+        # psi-reduced pay_placement_factor when not entered.
+        g_pl = (cfg.gamma_PL if cfg.gamma_PL is not None
+                else cfg.pay_placement_factor)
         m.combinations.insert(1, Combination(
-            "ULS2", "ULS", {"dead": cfg.gamma_G, "pallets": psi_pl,
-                            "placement": psi_pl}))
+            "ULS2", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
+                            "placement": g_pl}))
         m.combinations.insert(2, Combination(
-            "ULS3", "ULS", {"dead": cfg.gamma_G, "pallets": psi_pl,
-                            "placement_y": psi_pl}))
+            "ULS3", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
+                            "placement_y": g_pl}))
         m.combinations.append(Combination(
             "SLS2", "SLS", {"dead": 1.0, "pallets": 1.0, "placement": 1.0},
             imperfection=False))

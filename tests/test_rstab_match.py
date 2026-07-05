@@ -292,3 +292,24 @@ def test_buckling_interaction_uses_concurrent_station_forces():
     rows = upright_set_buckling_rows(m, checks)
     assert rows and all(set(r["candidates"]) == {"max N", "max My", "max Mz"}
                         for r in rows)
+
+
+def test_separate_uls_factors_dl_ll_placement():
+    """Each ULS action carries its OWN factor: gamma_G*DL + gamma_Q*LL +
+    gamma_PL*placement; gamma_PL falls back to pay_placement_factor (legacy)."""
+    m = build_rack(RackConfig(module="single", n_bays=2,
+                              levels=[LevelSpec(gap=2000.0)], frame_height=2200.0,
+                              gamma_G=1.2, gamma_Q=1.3, gamma_PL=1.1))
+    f1 = next(c.factors for c in m.combinations if c.name == "ULS1")
+    f2 = next(c.factors for c in m.combinations if c.name == "ULS2")
+    f3 = next(c.factors for c in m.combinations if c.name == "ULS3")
+    assert f1 == {"dead": 1.2, "pallets": 1.3}
+    assert f2 == {"dead": 1.2, "pallets": 1.3, "placement": 1.1}
+    assert f3 == {"dead": 1.2, "pallets": 1.3, "placement_y": 1.1}
+    # legacy: no gamma_PL entered -> placement uses pay_placement_factor,
+    # LL keeps its own gamma_Q
+    m2 = build_rack(RackConfig(module="single", n_bays=2,
+                               levels=[LevelSpec(gap=2000.0)],
+                               frame_height=2200.0))
+    f2l = next(c.factors for c in m2.combinations if c.name == "ULS2")
+    assert f2l == {"dead": 1.3, "pallets": 1.4, "placement": 1.26}
