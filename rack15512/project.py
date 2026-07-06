@@ -70,6 +70,10 @@ def rackconfig_from_dict(d: Dict[str, Any], *, master=None,
     # normalised so every run uses the same single method.
     data["imperfection_standard"] = "EN1993"
     data["imperfection_alpha_hm"] = False
+    # stiffness is never reduced by a material factor (gamma_M on stiffness
+    # fixed at 1.0; material effects are covered by the entered data) -
+    # normalise legacy configs that stored a reduction
+    data["stiffness_gamma_m"] = 1.0
     cfg = RackConfig(**data)
     if levels:
         cfg.levels = [LevelSpec(**ls) for ls in levels]
