@@ -472,20 +472,62 @@ def test_rstab8_export_tables(tmp_path):
                                                              values_only=True))
     assert (30.0, 3975.0) in {(r[3], r[4]) for r in d}
     assert any(r[2] == "PZ'-" for r in d)                  # tearing (uplift)
-    # imperfection LCs reference the continuous upright sets, 1/300 & 1/200
-    imps = list(wb["3.4 Imperfections"].iter_rows(min_row=2, values_only=True))
+    # native-inclination alternative sheet: 1/300 & 1/200 both signs
+    imps = list(wb["3.4 Imperfections"].iter_rows(min_row=3, values_only=True))
     incl = {r[4] for r in imps}
     assert {300.0, -300.0, 200.0, -200.0} <= incl
     n_sets = wb["1.11 Sets of Members"].max_row - 1
     assert n_sets == 6                                     # 3 frames x 2 uprights
+    # EHF imperfection load cases exist and carry the phi * W nodal forces
+    lcs = list(wb["2.1 Load Cases"].iter_rows(min_row=2, values_only=True))
+    ehf_lcs = [r for r in lcs if "Imp EHF" in str(r[1])]
+    assert ehf_lcs and all(r[2] == "Imperfection" for r in ehf_lcs)
+    nl = list(wb["3.1 Nodal Loads"].iter_rows(min_row=2, values_only=True))
+    assert any("Imp EHF +x" in str(r[5]) for r in nl)
     # combinations: every (combo x imp direction) becomes its own CO block
+    # and references the EHF cases with the SOURCE gravity factor
     co_rows = list(wb["2.5 Load Combinations"].iter_rows(min_row=2,
                                                          values_only=True))
     names = [r[2] for r in co_rows if r[0]]
     assert "ULS1 (imp +x)" in names and "ULS1 (imp -y)" in names
     assert any(n.startswith("SLS1") for n in names)        # SLS carries imp too
+    ehf_refs = [r for r in co_rows if "Imp EHF" in str(r[6])]
+    assert ehf_refs and any(abs(r[4] - 1.4) < 1e-9 for r in ehf_refs)
     # ULS runs 2nd order, SLS linear
     meth = {r[2]: r[7] for r in co_rows if r[0]}
     assert meth["ULS1 (imp +x)"].startswith("Second order")
     assert meth[[n for n in names if n.startswith("SLS1")][0]].startswith(
         "Geometrically linear")
+
+
+def test_staad_deck_complete_and_runnable(tmp_path):
+    # The STAAD deck must be self-sufficient: every load case + EHF
+    # imperfection cases as JOINT LOADs, every combination as a REPEAT LOAD
+    # primary case (required for P-Delta), one P-Delta analysis command, and
+    # rotational springs converted to STAAD's per-DEGREE constants.
+    import math as _m
+    import re as _re
+    from rack15512.export_solvers import to_staad
+
+    m = build_rack(RackConfig(
+        module="single", n_bays=2, bay_width=2300.0, frame_height=5000.0,
+        levels=[LevelSpec(gap=1500.0), LevelSpec(gap=1500.0)],
+        connector_stiffness=2.039e7))
+    path = str(tmp_path / "deck.std")
+    to_staad(m, path)
+    txt = open(path).read()
+
+    assert "PDELTA 30 ANALYSIS SMALLDELTA" in txt
+    assert "MEMBER TRUSS" in txt                         # braces axial-only
+    # per-degree hinge spring: 2.039e7 N*mm/rad * pi/180 = 355872.6 N*mm/deg
+    assert _re.search(r"KMZ 355872\.\d", txt)
+    # EHF cases exist for both signs and both axes (app +y -> STAAD FZ)
+    assert "TITLE IMP EHF +X OF PALLETS" in txt
+    assert "TITLE IMP EHF -Y OF PALLETS" in txt
+    ncomb = len(_re.findall(r"^REPEAT LOAD$", txt, _re.M))
+    n_named = len(_re.findall(r"^LOAD \d+ LOADTYPE None TITLE", txt, _re.M))
+    assert ncomb == n_named and ncomb >= 4
+    # combination factors reference the EHF cases with the gravity factor:
+    # ULS1 block repeats (dead 1.3, pallets 1.4, EHF_dead 1.3, EHF_pallets 1.4)
+    block = txt.split("TITLE ULS ULS1 (imp +x)")[1].split("LOAD ")[0]
+    assert block.count("1.4") >= 2 and block.count("1.3") >= 2

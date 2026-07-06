@@ -1,31 +1,54 @@
-"""Export a RackModel to neutral solver input files so a project can be re-run
-in RSTAB/RFEM or STAAD.Pro instead of (or to cross-check) the OpenSeesPy engine.
+"""Export a RackModel to solver input files so a project can be re-run in
+RSTAB or STAAD.Pro instead of (or to cross-check) the OpenSeesPy engine.
 
 ADDITIVE only - reads a RackModel, writes input decks; no engine changes.
 
-  * to_staad(model, path)      -> STAAD.Pro .std text input
-  * to_rstab_xlsx(model, path) -> RSTAB/RFEM table .xlsx (Nodes/Members/Sections/
-                                  Materials/Supports/Hinges/Loads), the same
-                                  tabular layout RSTAB imports from Excel.
+  * to_staad(model, path)       -> COMPLETE STAAD.Pro .std input: geometry,
+                                   per-member prismatic properties with the
+                                   correct bending-plane mapping, materials,
+                                   spring supports and beam-end connector
+                                   moment springs (per-DEGREE constants, the
+                                   STAAD convention), truss braces, every
+                                   load case, the sway imperfections as
+                                   equivalent-horizontal-force (EHF) load
+                                   cases and every generated combination as
+                                   a REPEAT LOAD primary case followed by a
+                                   P-Delta analysis - open and Run.
+  * to_rstab8_xlsx(model, path) -> RSTAB 8 table workbook (File > Import >
+                                   Microsoft Excel); sheets mirror the RSTAB
+                                   data tables.  Imperfections are included
+                                   BOTH as importable EHF nodal-load cases
+                                   (used by the combinations - runs with no
+                                   manual dialogs) and as a native-
+                                   inclination sheet (3.4) for engineers who
+                                   prefer RSTAB imperfection objects.
+  * to_rstab_xlsx(model, path)  -> legacy loose table workbook (kept for
+                                   compatibility).
 
-Axis convention: this app uses Z up (gravity = -Z).  STAAD.Pro SPACE uses Y up,
-so coordinates are mapped (X, Y, Z)_staad = (X, Z, Y)_app and gravity is -Y.
-RSTAB keeps the app's axes (Z up); loads are written with gravity in -Z.
+Axis conventions: the app uses Z up (gravity -Z), X down-aisle, Y cross-
+aisle.  STAAD SPACE uses Y up -> coordinates are mapped
+(X, Y, Z)_staad = (X_app, Z_app, Y_app) and gravity acts in -Y.  RSTAB's
+global Z points DOWN -> Z_rstab = -Z_app.
 
-Both decks carry the geometry, sections (as prismatic A/I/J), materials, the
-nodal supports (with rotational spring constants), the beam-end connector hinges
-(rotational springs), and the characteristic pallet + dead load case.  Load
-combinations, imperfections and the 2nd-order setting are emitted as comments /
-a note so the engineer applies the same EN 15512 combinations in the target
-solver (they differ per code and are documented in the report).
+Imperfections: the app engine applies the sway imperfection as an initial
+out-of-plumb of the geometry.  Neither solver can import that per load
+case, so the exports carry the standard equivalent: per gravity load case
+and sway direction an EHF load case with horizontal nodal forces
+phi * W_node at every vertically loaded node (phi = 1/300 down-aisle,
+1/200 cross-aisle by default).  Each combination references the EHF cases
+of its gravity actions WITH THE SAME partial factor, so the imperfection
+scales exactly like the engine's (gamma * gravity) tilt.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Dict, List
+import re
+from typing import Dict, List, Tuple
 
 from .model import RackModel
+
+_DEG = math.pi / 180.0        # STAAD rotational springs are per DEGREE
 
 
 def _members_of(model: RackModel):
@@ -38,31 +61,168 @@ def _node_map(model: RackModel) -> Dict[int, int]:
 
 
 def _udl_load_case(model: RackModel):
-    """Collect the characteristic gravity member UDLs [N/mm] (down = -Z) from the
-    'pallets' + 'dead' load cases if present, keyed by member id."""
+    """Legacy helper: characteristic gravity member UDLs [N/mm] (down = -Z)
+    from the 'pallets' + 'dead' load cases, keyed by member id."""
     q: Dict[int, float] = {}
     for lc in model.load_cases.values():
         if lc.name not in ("pallets", "dead"):
-            continue       # skip pattern/placement/accidental variants
+            continue
         for ml in getattr(lc, "member_loads", []):
             q[ml.member] = q.get(ml.member, 0.0) + getattr(ml, "qz", 0.0)
     return q
 
 
+def _id_ranges(ids) -> str:
+    """RSTAB member/node list syntax: '1-5,8,10-12'."""
+    ids = sorted(set(int(i) for i in ids))
+    if not ids:
+        return ""
+    out, a, b = [], ids[0], ids[0]
+    for i in ids[1:]:
+        if i == b + 1:
+            b = i
+            continue
+        out.append(f"{a}-{b}" if b > a else f"{a}")
+        a = b = i
+    out.append(f"{a}-{b}" if b > a else f"{a}")
+    return ",".join(out)
+
+
+def _staad_ranges(ids) -> List[str]:
+    """STAAD list syntax parts: '1 TO 5', '8', '10 TO 12'."""
+    ids = sorted(set(int(i) for i in ids))
+    out: List[str] = []
+    a = b = None
+    for i in ids:
+        if a is None:
+            a = b = i
+            continue
+        if i == b + 1:
+            b = i
+            continue
+        out.append(f"{a} TO {b}" if b > a else f"{a}")
+        a = b = i
+    if a is not None:
+        out.append(f"{a} TO {b}" if b > a else f"{a}")
+    return out
+
+
+def _chunk(parts: List[str], per_line: int = 9) -> List[str]:
+    return [" ".join(parts[i:i + per_line])
+            for i in range(0, len(parts), per_line)]
+
+
+def _member_length(model: RackModel, m) -> float:
+    ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
+    return math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z))
+
+
+def _is_vertical(model: RackModel, m) -> bool:
+    ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
+    return abs(ni.x - nj.x) < 1e-6 and abs(ni.y - nj.y) < 1e-6
+
+
+# ------------------------------------------------- imperfection EHF cases
+def _imp_directions(model: RackModel) -> List[str]:
+    """Sway directions actually used by the model's combinations."""
+    imp = model.imperfection
+    dirs: List[str] = []
+    for c in model.combinations:
+        if not c.imperfection:
+            continue
+        for d in (c.imp_directions or (imp.directions if imp else [])):
+            if d not in dirs:
+                dirs.append(d)
+    return dirs
+
+
+def _gravity_node_weights(model: RackModel) -> Dict[str, Dict[int, float]]:
+    """Vertical load per node [N, positive down] for every load case that
+    carries gravity (member UDLs tributary half to each end node + nodal
+    FZ loads)."""
+    out: Dict[str, Dict[int, float]] = {}
+    for nm, lc in model.load_cases.items():
+        w: Dict[int, float] = {}
+        for ml in lc.member_loads:
+            if ml.qz < -1e-12:
+                mem = model.members[ml.member]
+                W = -ml.qz * _member_length(model, mem)
+                w[mem.node_i] = w.get(mem.node_i, 0.0) + W / 2.0
+                w[mem.node_j] = w.get(mem.node_j, 0.0) + W / 2.0
+        for nl in lc.nodal_loads:
+            if nl.fz < -1e-12:
+                w[nl.node] = w.get(nl.node, 0.0) - nl.fz
+        if w:
+            out[nm] = w
+    return out
+
+
+def _ehf_cases(model: RackModel):
+    """EHF imperfection load cases: {(direction, source_case): {node: F}}
+    with F = phi(direction) * W_node [N], signed along the direction.
+    Returns (directions, gravity_weights, ehf)."""
+    imp = model.imperfection
+    dirs = _imp_directions(model)
+    grav = _gravity_node_weights(model)
+    ehf: Dict[Tuple[str, str], Dict[int, float]] = {}
+    for d in dirs:
+        phi = imp.value_for(d) if imp else 1.0 / 300.0
+        sgn = 1.0 if d[0] == "+" else -1.0
+        for src, w in grav.items():
+            ehf[(d, src)] = {n: sgn * phi * W for n, W in w.items()}
+    return dirs, grav, ehf
+
+
+def _combo_rows(model: RackModel, grav) -> List[dict]:
+    """One expanded combination per (combination x imperfection direction):
+    [{'name', 'kind', 'ds', 'method', 'factors': [(lc_key, factor), ...]}]
+    where lc_key is a load-case name or an ('EHF', dir, src) tuple."""
+    imp = model.imperfection
+    out: List[dict] = []
+    for c in model.combinations:
+        dirs = [None]
+        if c.imperfection and imp:
+            dirs = c.imp_directions or imp.directions
+        for d in dirs:
+            ds = ("ACC" if any(k.startswith("accidental") for k in c.factors)
+                  else c.kind)
+            rows: List[tuple] = list(c.factors.items())
+            if d:
+                rows += [(("EHF", d, src), f) for src, f in c.factors.items()
+                         if src in grav]
+            out.append({
+                "name": c.name + (f" (imp {d})" if d else ""),
+                "kind": c.kind, "ds": ds,
+                "method": ("Second order analysis (P-Delta)"
+                           if c.kind == "ULS"
+                           else "Geometrically linear analysis"),
+                "factors": rows,
+            })
+    return out
+
+
 # ----------------------------------------------------------------- STAAD .std
 def to_staad(model: RackModel, path: str) -> str:
-    """Write a STAAD.Pro .std input deck (mm, N).  Returns the path."""
-    L: List[str] = []
-    L.append("STAAD SPACE")
-    L.append("START JOB INFORMATION")
-    L.append(f"ENGINEER DATE {model.name}")
-    L.append("END JOB INFORMATION")
-    L.append("* Exported from Racks & Rollers (EN 15512 app). App axes: Z up.")
-    L.append("* STAAD SPACE uses Y up -> coords mapped (x,y,z)=(X,Z,Y); gravity=-Y.")
-    L.append("UNIT MMS NEWTON")
+    """Write a COMPLETE, runnable STAAD.Pro .std input deck (mm, N):
+    geometry, prismatic properties (bending planes mapped per member
+    orientation), materials, truss braces, connector moment springs and
+    support springs (converted to STAAD's per-degree constants), every
+    load case incl. the EHF imperfection cases, and every combination as
+    a REPEAT LOAD primary case solved by a P-Delta analysis."""
     nmap = _node_map(model)
+    dirs, grav, ehf = _ehf_cases(model)
+    L: List[str] = []
+    L.append("STAAD SPACE " + (model.name or "RACK")[:60])
+    L.append("START JOB INFORMATION")
+    L.append("ENGINEER DATE " + (model.name or ""))
+    L.append("END JOB INFORMATION")
+    L.append("* Exported from Racks & Rollers (EN 15512 app).")
+    L.append("* App axes Z-up mapped to STAAD Y-up: (x,y,z)_staad =")
+    L.append("* (X, Z, Y)_app; gravity = -Y.  X = down-aisle, Z = cross-aisle.")
+    L.append("* Sway imperfections are the EHF load cases (phi * W per node);")
+    L.append("* every combination repeats them with its gravity factors.")
+    L.append("UNIT MMS NEWTON")
 
-    # joints (Y up): staad_y = app_z, staad_z = app_y
     L.append("JOINT COORDINATES")
     for n in sorted(model.nodes.values(), key=lambda n: n.id):
         L.append(f"{nmap[n.id]} {n.x:.4f} {n.z:.4f} {n.y:.4f};")
@@ -71,14 +231,9 @@ def to_staad(model: RackModel, path: str) -> str:
     for m in _members_of(model):
         L.append(f"{m.id} {nmap[m.node_i]} {nmap[m.node_j]};")
 
-    # materials (one Steel per distinct E/G)
     L.append("DEFINE MATERIAL START")
-    done = set()
     for mat in model.materials.values():
         nm = mat.name.replace(" ", "_")
-        if nm in done:
-            continue
-        done.add(nm)
         L.append(f"ISOTROPIC {nm}")
         L.append(f"E {mat.E}")
         L.append(f"POISSON {getattr(mat, 'nu', 0.3)}")
@@ -86,77 +241,143 @@ def to_staad(model: RackModel, path: str) -> str:
         L.append(f"G {mat.G}")
     L.append("END DEFINE MATERIAL")
 
-    # prismatic section per member (AX/IX/IY/IZ in mm)
+    # prismatic properties; bending-plane mapping:
+    #   vertical member (upright): STAAD local z // global Z_staad
+    #     (= cross-aisle) -> MZ/IZ = down-aisle flexure = app Iz;  IY = app Iy
+    #   horizontal member: STAAD local y is up -> gravity bending is MZ/IZ
+    #     -> IZ = app strong axis Iy;  IY = app Iz
     L.append("MEMBER PROPERTY AMERICAN")
     for m in _members_of(model):
         s = model.section_of(m)
-        a = s.A * m.area_factor
-        L.append(f"{m.id} PRIS AX {a:.3f} IX {s.J:.1f} IY {s.Iy:.1f} IZ {s.Iz:.1f}")
+        a = s.A * (m.area_factor or 1.0)
+        if _is_vertical(model, m):
+            iy, iz = s.Iy, s.Iz
+        else:
+            iy, iz = s.Iz, s.Iy
+        L.append(f"{m.id} PRIS AX {a:.3f} IX {s.J:.1f} IY {iy:.1f} "
+                 f"IZ {iz:.1f}")
 
-    # material assignment per member
     L.append("CONSTANTS")
+    by_mat: Dict[str, List[int]] = {}
     for m in _members_of(model):
-        nm = model.material_of(m).name.replace(" ", "_")
-        L.append(f"MATERIAL {nm} MEMB {m.id}")
+        by_mat.setdefault(model.material_of(m).name.replace(" ", "_"),
+                          []).append(m.id)
+    for nm, mids in by_mat.items():
+        for part in _chunk(_staad_ranges(mids)):
+            L.append(f"MATERIAL {nm} MEMB {part}")
 
-    # supports (translations fixed; rotational springs from support.ry etc.)
-    L.append("SUPPORTS")
-    for sup in model.supports:
-        parts = [f"{sup.node}"]
-        # STAAD FIXED BUT releases free DOFs; spring via KFX.. KMX..; map app
-        # (ux,uy,uz,rx,ry,rz) -> staad (FX,FZ?,FY,..). Keep translations fixed.
-        # Use a generic: translations fixed, rotational springs where given.
-        kmx = sup.ry if isinstance(sup.ry, (int, float)) else 0.0   # app ry = down-aisle
-        # STAAD: FIXED BUT MX MY MZ <springs>; we fix translations, spring rotations
-        spr = []
-        # app ry (about global Y / down-aisle bending) -> STAAD MY (about staad Y=app Z)?
-        # Map app rotational DOFs to STAAD: app rx->MX, app ry->MZ(staad), app rz->MY
-        def kk(v):
-            return v if isinstance(v, (int, float)) and v > 0 else None
-        rx, ry, rz = kk(sup.rx), kk(sup.ry), kk(sup.rz)
-        rel = []
-        if rx is None: rel.append("MX")
-        else: spr.append(f"KMX {rx:.0f}")
-        # app ry (down-aisle, about app Y) -> STAAD MZ (about staad Z = app Y)
-        if ry is None: rel.append("MZ")
-        else: spr.append(f"KMZ {ry:.0f}")
-        if rz is None: rel.append("MY")
-        else: spr.append(f"KMY {rz:.0f}")
-        line = f"{nmap[sup.node]} FIXED BUT " + " ".join(rel + spr)
-        L.append(line.strip())
+    trusses = [m.id for m in _members_of(model) if m.mtype == "truss"]
+    if trusses:
+        L.append("MEMBER TRUSS")
+        L.extend(_chunk(_staad_ranges(trusses)))
 
-    # beam-end connector hinges: partial moment release with rotational spring
-    # (app hinge.rz about member local z = beam strong axis -> STAAD MZ)
-    rel_lines = []
+    # beam-end connector springs: STAAD member-release moment springs are
+    # entered per DEGREE -> k_deg = k_rad * pi/180 (about the beam's strong
+    # axis = STAAD MZ)
+    rel: List[str] = []
     for m in _members_of(model):
         for end, h in (("START", m.hinge_i), ("END", m.hinge_j)):
             if h is None:
                 continue
             kz = getattr(h, "rz", None)
-            if kz and kz > 0:
-                rel_lines.append(f"{m.id} {end} KMZ {kz:.0f}")
+            if isinstance(kz, (int, float)) and kz > 0:
+                rel.append(f"{m.id} {end} KMZ {kz * _DEG:.1f}")
             elif kz == 0:
-                rel_lines.append(f"{m.id} {end} MZ")
-    if rel_lines:
+                rel.append(f"{m.id} {end} MZ")
+    if rel:
         L.append("MEMBER RELEASE")
-        L.extend(rel_lines)
+        L.extend(rel)
 
-    # characteristic gravity load case (pallets+dead) as member UDL in -Y (staad)
-    q = _udl_load_case(model)
-    L.append("LOAD 1 LOADTYPE LIVE  TITLE PALLET + DEAD (characteristic)")
-    L.append("MEMBER LOAD")
-    for mid, qz in q.items():
-        if abs(qz) > 1e-9:
-            # app qz [N/mm] downward (-Z) -> STAAD GY (global Y up) negative
-            L.append(f"{mid} UNI GY {qz:.5f}")
-    L.append("LOAD 2 LOADTYPE DEAD  TITLE SELFWEIGHT")
-    L.append("SELFWEIGHT Y -1.0")
-    L.append("* EN 15512 ULS combos (apply in STAAD): 1.3 DL + 1.4 LL (+ placement),")
-    L.append("* plus a sway imperfection and a 2nd-order (P-Delta) analysis:")
-    L.append("LOAD COMB 101 1.3DL + 1.4LL")
-    L.append("1 1.4 2 1.3")
-    L.append("PERFORM ANALYSIS PRINT STATICS CHECK")
-    L.append("* For 2nd order use:  PERFORM ANALYSIS  with  DEFINE PDELTA / PDELTA")
+    # supports: translations fixed; app rotational DOFs map to STAAD as
+    #   app rx (about X_app) -> MX;  app ry (about Y_app = Z_staad) -> MZ;
+    #   app rz (about Z_app = Y_staad) -> MY.  Springs per DEGREE.
+    L.append("SUPPORTS")
+    sup_groups: Dict[tuple, List[int]] = {}
+    for sup in model.supports:
+        key = (sup.rx if not isinstance(sup.rx, float) else round(sup.rx, 3),
+               sup.ry if not isinstance(sup.ry, float) else round(sup.ry, 3),
+               sup.rz if not isinstance(sup.rz, float) else round(sup.rz, 3))
+        sup_groups.setdefault(key, []).append(nmap[sup.node])
+    for (rx, ry, rz), nodes in sup_groups.items():
+        rel_dofs, springs = [], []
+        for app_dof, staad_m, staad_k in ((rx, "MX", "KMX"),
+                                          (ry, "MZ", "KMZ"),
+                                          (rz, "MY", "KMY")):
+            if isinstance(app_dof, (int, float)) and app_dof > 0:
+                springs.append(f"{staad_k} {app_dof * _DEG:.1f}")
+            elif app_dof is not True:
+                rel_dofs.append(staad_m)
+        cond = "FIXED BUT " + " ".join(rel_dofs + springs)
+        for part in _chunk(_staad_ranges(nodes)):
+            L.append(f"{part} {cond.strip()}")
+    if getattr(model, "base_axial_table", None):
+        L.append("* NOTE: the app runs the base rotational spring as an")
+        L.append("* AXIAL-DEPENDENT diagram (see the report / RSTAB export")
+        L.append("* sheet 1.8.7); the constant above is the linear value.")
+
+    # ---- primary load cases ------------------------------------------------
+    lc_no = {nm: i + 1 for i, nm in enumerate(model.load_cases)}
+    LOADTYPE = {"dead": "Dead", "pallets": "Live", "pallets_pattern": "Live",
+                "placement": "Live", "placement_lo": "Live",
+                "placement_y": "Live", "accidental_x": "Accidental",
+                "accidental_y": "Accidental"}
+    for nm, lc in model.load_cases.items():
+        L.append(f"LOAD {lc_no[nm]} LOADTYPE {LOADTYPE.get(nm, 'Live')} "
+                 f"TITLE {nm.upper()}")
+        byq: Dict[float, List[int]] = {}
+        for ml in lc.member_loads:
+            if abs(ml.qz) > 1e-12:
+                byq.setdefault(round(ml.qz, 6), []).append(ml.member)
+        if byq:
+            L.append("MEMBER LOAD")
+            for q, mids in sorted(byq.items()):
+                for part in _chunk(_staad_ranges(mids)):
+                    L.append(f"{part} UNI GY {q:.6f}")
+        if lc.nodal_loads:
+            L.append("JOINT LOAD")
+            for nl in lc.nodal_loads:
+                comps = []
+                if abs(nl.fx) > 1e-9:
+                    comps.append(f"FX {nl.fx:.3f}")
+                if abs(nl.fy) > 1e-9:
+                    comps.append(f"FZ {nl.fy:.3f}")     # app Y -> STAAD Z
+                if abs(nl.fz) > 1e-9:
+                    comps.append(f"FY {nl.fz:.3f}")     # app Z -> STAAD Y
+                if comps:
+                    L.append(f"{nmap[nl.node]} " + " ".join(comps))
+
+    ehf_no: Dict[Tuple[str, str], int] = {}
+    for (d, src), forces in ehf.items():
+        no = len(lc_no) + len(ehf_no) + 1
+        ehf_no[(d, src)] = no
+        comp = "FX" if "x" in d else "FZ"               # app Y -> STAAD Z
+        L.append(f"LOAD {no} LOADTYPE Live TITLE IMP EHF {d.upper()} OF "
+                 f"{src.upper()}")
+        L.append("JOINT LOAD")
+        byf: Dict[float, List[int]] = {}
+        for n, F in forces.items():
+            byf.setdefault(round(F, 3), []).append(nmap[n])
+        for F, nodes in sorted(byf.items()):
+            for part in _chunk(_staad_ranges(nodes)):
+                L.append(f"{part} {comp} {F:.3f}")
+
+    # ---- combinations as REPEAT LOAD primary cases + P-Delta --------------
+    L.append("* Combinations: REPEAT LOAD primary cases (required for the")
+    L.append("* P-Delta analysis to include the secondary effects).  SLS")
+    L.append("* cases run in the same P-Delta batch (slightly conservative")
+    L.append("* vs the app's geometrically linear SLS).")
+    co = 100
+    for row in _combo_rows(model, grav):
+        co += 1
+        L.append(f"LOAD {co} LOADTYPE None TITLE {row['ds']} {row['name']}")
+        L.append("REPEAT LOAD")
+        parts = []
+        for key, f in row["factors"]:
+            no = ehf_no[(key[1], key[2])] if isinstance(key, tuple) \
+                else lc_no[key]
+            parts.append(f"{no} {f:g}")
+        L.extend(_chunk(parts, per_line=8))
+    L.append("PDELTA 30 ANALYSIS SMALLDELTA")
     L.append("FINISH")
 
     with open(path, "w", encoding="utf-8") as f:
@@ -164,10 +385,10 @@ def to_staad(model: RackModel, path: str) -> str:
     return path
 
 
-# --------------------------------------------------------------- RSTAB .xlsx
+# ------------------------------------------------- legacy RSTAB loose .xlsx
 def to_rstab_xlsx(model: RackModel, path: str) -> str:
-    """Write an RSTAB/RFEM table workbook (Nodes/Materials/Cross-Sections/
-    Members/Nodal Supports/Member Hinges/Load Case) for Excel import."""
+    """Legacy loose RSTAB/RFEM table workbook (kept for compatibility);
+    use to_rstab8_xlsx for the RSTAB 8 import layout."""
     import openpyxl
     wb = openpyxl.Workbook()
 
@@ -197,8 +418,8 @@ def to_rstab_xlsx(model: RackModel, path: str) -> str:
     ws = wb.create_sheet("1.7 Members")
     ws.append(["No.", "Start Node", "End Node", "Cross-Section No.",
                "Start Hinge", "End Hinge", "Member Set"])
-    # collect distinct hinges
     hinges: List = []
+
     def hinge_id(h):
         if h is None:
             return ""
@@ -222,6 +443,7 @@ def to_rstab_xlsx(model: RackModel, path: str) -> str:
     ws = wb.create_sheet("1.8 Nodal Supports")
     ws.append(["On Nodes", "uX", "uY", "uZ", "phi-X [Nmm/rad]",
                "phi-Y [Nmm/rad]", "phi-Z [Nmm/rad]"])
+
     def cell(v):
         if v is True:
             return "fixed"
@@ -242,11 +464,9 @@ def to_rstab_xlsx(model: RackModel, path: str) -> str:
     ws = wb.create_sheet("README")
     for row in [
         ["Exported from Racks & Rollers (EN 15512 app) for RSTAB/RFEM import."],
-        ["Axes: Z up, gravity -Z (RSTAB default global Z can be set down)."],
-        ["Cross-sections are prismatic A/Iy/Iz/J; assign the real SHAPE-THIN /"],
-        ["RRO sections in RSTAB if available for exact warping/shear."],
-        ["Apply EN 15512 ULS combos (1.3DL+1.4LL+..), sway imperfection and a"],
-        ["2nd-order (P-Delta) analysis in RSTAB to reproduce the app's checks."],
+        ["Legacy loose layout - use the RSTAB8 export for the import-ready"],
+        ["RSTAB 8 data-table workbook with loads, combinations and EHF"],
+        ["imperfection load cases."],
     ]:
         ws.append(row)
 
@@ -255,7 +475,7 @@ def to_rstab_xlsx(model: RackModel, path: str) -> str:
 
 
 def export_project(model_json: str, out_dir: str, name: str = "model") -> dict:
-    """Load a saved project model.json and write both solver decks."""
+    """Load a saved project model.json and write the solver decks."""
     import os
     from . import io_json
     os.makedirs(out_dir, exist_ok=True)
@@ -270,13 +490,12 @@ def export_project(model_json: str, out_dir: str, name: str = "model") -> dict:
 # ------------------------------------------------------- RSTAB 8 table .xlsx
 # Sheet names, column layouts, units and conventions mirror the RSTAB 8 data
 # tables (validated against an RSTAB 8.29 model printout):
-#   1.1 Nodes [mm, global Z DOWN]          1.8 Nodal Supports
-#   1.2 Materials [kN/cm2]                 1.8.7 Support stiffness diagram
-#   1.3 Cross-Sections [cm2, cm4]          1.11 Sets of Members
-#   1.3.2 Stiffness reduction (braces)     2.1 Load Cases (+ imperfection LCs)
-#   1.4 Member Hinges [kNcm/rad]           2.5 Load Combinations
-#   1.7 Members                            3.1/3.2 Loads [kN, kN/m]
-#                                          3.4 Imperfections (on member sets)
+#   1.1 Nodes [mm, global Z DOWN]          1.8.7 Support stiffness diagram
+#   1.2 Materials [kN/cm2]                 1.11 Sets of Members
+#   1.3 Cross-Sections [cm2, cm4]          2.1 Load Cases (+ EHF imp. LCs)
+#   1.3.2 Stiffness reduction (braces)     2.5 Load Combinations
+#   1.4 Member Hinges [kNcm/rad]           3.1/3.2 Loads [kN, kN/m]
+#   1.7 Members / 1.8 Nodal Supports       3.4 Imperfections (alternative)
 _RSTAB_SECTION_MAP = {
     # app section name -> RSTAB library / SHAPE-THIN description
     "1C36X21X1.2": "SHAPE-THIN B5H36X21T012",
@@ -286,7 +505,6 @@ _RSTAB_SECTION_MAP = {
 def _rstab_section_name(name: str) -> str:
     """RSTAB description for an app section: known mappings, RRO-PAR for
     cold-formed RHS names (RHS<h>X<b>X<t>), SHAPE-THIN <name> otherwise."""
-    import re
     if name in _RSTAB_SECTION_MAP:
         return _RSTAB_SECTION_MAP[name]
     m = re.match(r"RHS\s*(\d+)\s*X\s*(\d+)\s*X\s*([\d.]+)$", name.upper())
@@ -309,32 +527,21 @@ def _rstab_material_name(mat) -> str:
     return f"User steel E={E:.0f} N/mm2, fy={fy:.0f} N/mm2"
 
 
-def _id_ranges(ids) -> str:
-    """RSTAB member/node list syntax: '1-5,8,10-12'."""
-    ids = sorted(set(int(i) for i in ids))
-    if not ids:
-        return ""
-    out, a, b = [], ids[0], ids[0]
-    for i in ids[1:]:
-        if i == b + 1:
-            b = i
-            continue
-        out.append(f"{a}-{b}" if b > a else f"{a}")
-        a = b = i
-    out.append(f"{a}-{b}" if b > a else f"{a}")
-    return ",".join(out)
-
-
 def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     """Write an RSTAB 8 table workbook of the whole model - geometry,
     materials, cross-sections (RSTAB library names), member hinges, supports
-    (incl. the axial-dependent base stiffness diagram), sets of members,
-    load cases with the sway-imperfection cases, every load and the app's
-    generated load combinations - so the model can be recreated in RSTAB via
-    File > Import > Microsoft Excel and run directly.  Returns the path."""
+    (linear spring + the axial-dependent base stiffness diagram sheet), sets
+    of members, load cases INCLUDING the sway-imperfection EHF nodal-load
+    cases, every load and the generated combinations referencing the EHF
+    cases - so the model can be recreated in RSTAB via File > Import >
+    Microsoft Excel and run directly with no manual dialogs.  Sheet 3.4
+    documents the equivalent native RSTAB inclinations as an alternative.
+    Returns the path."""
     import openpyxl
     wb = openpyxl.Workbook()
     nmap = _node_map(model)
+    dirs, grav, ehf = _ehf_cases(model)
+    imp = model.imperfection
 
     # ---- 1.1 Nodes (RSTAB global Z points DOWN; the app Z points UP) -----
     ws = wb.active
@@ -419,15 +626,12 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                "Rotation Angle [deg]", "Cross-Section Start",
                "Cross-Section End", "Hinge Start", "Hinge End",
                "Length L [mm]"])
-    import math as _math
     for m in _members_of(model):
-        ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
-        L = _math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z))
         sno = sidx.get(model.section_of(m).name, 1)
         hi, hj = mem_hinge[m.id]
         ws.append([m.id, "Truss" if m.mtype == "truss" else "Beam",
                    nmap[m.node_i], nmap[m.node_j], 0.00,
-                   sno, sno, hi, hj, round(L, 1)])
+                   sno, sno, hi, hj, round(_member_length(model, m), 1)])
 
     # ---- 1.8 Nodal supports (+ 1.8.7 stiffness diagram) --------------------
     tbl = getattr(model, "base_axial_table", None)
@@ -437,9 +641,7 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                "phi-X' [kNcm/rad]", "phi-Y' [kNcm/rad]", "phi-Z' [kNcm/rad]",
                "comment"])
 
-    def dof(v, diagram=False):
-        if diagram:
-            return "Stiffness Diagram"
+    def dof(v):
         if v is True:
             return "fixed"
         if isinstance(v, (int, float)) and v > 0:
@@ -454,11 +656,13 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         groups.setdefault(key, []).append(nmap[sup.node])
     for i, (key, nodes) in enumerate(groups.items()):
         ux, uy, uz, rx, ry, rz = key
+        note = ("base plate - phi-Y' is the LINEAR spring; optionally "
+                "upgrade to the axial-dependent diagram of sheet 1.8.7 "
+                "(support nonlinearity 'Stiffness diagram' vs PZ')"
+                if tbl else "base plate")
         ws.append([i + 1, _id_ranges(nodes), 0.00,
                    dof(ux), dof(uy), dof(uz),
-                   dof(rx), dof(ry, diagram=bool(tbl)), dof(rz),
-                   "base plate; phi-Y' nonlinear vs axial force (sheet "
-                   "1.8.7)" if tbl else "base plate"])
+                   dof(rx), dof(ry), dof(rz), note])
     if tbl:
         ws = wb.create_sheet("1.8.7 Support Stiffness Diagram")
         ws.append(["Support No.", "Degree of Freedom", "Dependent on Force",
@@ -481,18 +685,12 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     ws.append(["Set No.", "Description", "Type", "Member No.", "Length [mm]"])
     for i, (lab, mids) in enumerate(sorted(sets.items())):
         set_no[lab] = i + 1
-        length = sum(
-            _math.dist((model.nodes[model.members[mid].node_i].x,
-                        model.nodes[model.members[mid].node_i].y,
-                        model.nodes[model.members[mid].node_i].z),
-                       (model.nodes[model.members[mid].node_j].x,
-                        model.nodes[model.members[mid].node_j].y,
-                        model.nodes[model.members[mid].node_j].z))
-            for mid in mids)
+        length = sum(_member_length(model, model.members[mid])
+                     for mid in mids)
         ws.append([i + 1, lab, "Contin. member", _id_ranges(mids),
                    round(length, 1)])
 
-    # ---- 2.1 Load cases (+ imperfection LCs) ------------------------------
+    # ---- 2.1 Load cases (+ EHF imperfection LCs) ---------------------------
     CAT = {"permanent": "Permanent", "variable": "Imposed",
            "placement": "Imposed", "other": "Imposed"}
     lc_no = {nm: i + 1 for i, nm in enumerate(model.load_cases)}
@@ -503,15 +701,13 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                "placement_lo": "PL X at highest level <= 3 m",
                "placement_y": "PL Y at frame top",
                "accidental_x": "AL X", "accidental_y": "AL Y"}
-    imp = model.imperfection
-    imp_dirs: list = []
-    for c in model.combinations:
-        for d in (c.imp_directions or (imp.directions if imp else [])):
-            if c.imperfection and d not in imp_dirs:
-                imp_dirs.append(d)
-    imp_lc = {}
-    for d in imp_dirs:
-        imp_lc[d] = len(lc_no) + len(imp_lc) + 1
+    ehf_no: Dict[Tuple[str, str], int] = {}
+    ehf_desc: Dict[Tuple[str, str], str] = {}
+    for (d, src) in ehf:
+        ehf_no[(d, src)] = len(lc_no) + len(ehf_no) + 1
+        phi = imp.value_for(d) if imp else 1 / 300
+        ehf_desc[(d, src)] = (f"Imp EHF {d} of {src} "
+                              f"(phi=1/{1 / phi:.0f})")
     ws = wb.create_sheet("2.1 Load Cases")
     ws.append(["Load Case", "Description", "Action Category",
                "Self-Weight Active", "SW Factor X", "SW Factor Y",
@@ -523,14 +719,31 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                    "No (self-weight is in the LC1 member loads)"
                    if nm == "dead" else "No", 0, 0, 0,
                    "Geometrically linear analysis"])
-    for d, no in imp_lc.items():
-        phi = (imp.phi_s if "x" in d else imp.phi_s_cross) if imp else 1 / 300
-        ws.append([f"LC{no}",
-                   f"Imperfection towards {d[0]} {d[1].upper()} "
-                   f"(L/{1 / phi:.0f})", "Imperfection", "No", 0, 0, 0,
+    for key, no in ehf_no.items():
+        ws.append([f"LC{no}", ehf_desc[key], "Imperfection", "No", 0, 0, 0,
                    "Geometrically linear analysis"])
 
-    # ---- 3.1 / 3.2 loads ---------------------------------------------------
+    # ---- 2.5 load combinations (reference the EHF LCs) --------------------
+    ws = wb.create_sheet("2.5 Load Combinations")
+    ws.append(["Load Combin.", "DS", "Description", "No.", "Factor",
+               "Load Case", "Load Case Description", "Method of analysis"])
+    co = 0
+    for row in _combo_rows(model, grav):
+        co += 1
+        r = 0
+        for key, f in row["factors"]:
+            r += 1
+            if isinstance(key, tuple):
+                no, desc = ehf_no[(key[1], key[2])], ehf_desc[(key[1], key[2])]
+            else:
+                no, desc = lc_no[key], LC_DESC.get(key, key)
+            ws.append([f"CO{co}" if r == 1 else "",
+                       row["ds"] if r == 1 else "",
+                       row["name"] if r == 1 else "", r, f,
+                       f"LC{no}", desc,
+                       row["method"] if r == 1 else ""])
+
+    # ---- 3.1 / 3.2 loads (incl. the EHF nodal forces) ----------------------
     ws = wb.create_sheet("3.1 Nodal Loads")
     ws.append(["Load Case", "Nodes No.", "FX [kN]", "FY [kN]", "FZ [kN]",
                "comment"])
@@ -539,6 +752,16 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
             ws.append([f"LC{lc_no[nm]}", nmap[nl.node],
                        round(nl.fx / 1e3, 4), round(nl.fy / 1e3, 4),
                        round(-nl.fz / 1e3, 4), LC_DESC.get(nm, nm)])
+    for (d, src), forces in ehf.items():
+        byf: Dict[float, List[int]] = {}
+        for n, F in forces.items():
+            byf.setdefault(round(F / 1e3, 6), []).append(nmap[n])
+        col = 2 if "x" in d else 3                       # FX or FY column
+        for F, nodes in sorted(byf.items()):
+            row = [f"LC{ehf_no[(d, src)]}", _id_ranges(nodes), 0.0, 0.0, 0.0,
+                   ehf_desc[(d, src)]]
+            row[col] = F
+            ws.append(row)
     ws = wb.create_sheet("3.2 Member Loads")
     ws.append(["Load Case", "Members No.", "Load Type", "Load Distribution",
                "Load Direction", "p [kN/m]", "comment"])
@@ -552,48 +775,23 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                        "Uniform", "ZL (global Z, down +)", q,
                        LC_DESC.get(nm, nm)])
 
-    # ---- 3.4 imperfections (on the upright member sets) -------------------
-    if imp_lc:
+    # ---- 3.4 imperfections: the native-RSTAB alternative -------------------
+    if dirs:
         ws = wb.create_sheet("3.4 Imperfections")
-        ws.append(["Load Case", "Reference to", "On Members No. (sets)",
-                   "Direction", "Inclination 1/phi [-]", "Precamber",
-                   "comment"])
+        ws.append(["ALTERNATIVE to the EHF load cases: native RSTAB",
+                   "imperfections (inclinations on the upright member",
+                   "sets).  If you use these, REMOVE the 'Imp EHF' load",
+                   "cases from the combinations first - never both."])
+        ws.append(["Direction", "Reference to", "On Members No. (sets)",
+                   "Dir.", "Inclination 1/phi [-]", "Precamber", "comment"])
         all_sets = _id_ranges(set_no.values())
-        for d, no in imp_lc.items():
-            phi = (imp.phi_s if "x" in d else imp.phi_s_cross) if imp else 1 / 300
+        for d in dirs:
+            phi = imp.value_for(d) if imp else 1 / 300
             sign = 1.0 if d[0] == "+" else -1.0
-            ws.append([f"LC{no}", "Set of members", all_sets,
+            ws.append([d, "Set of members", all_sets,
                        "z" if "x" in d else "y",
                        round(sign / phi, 2), 0.0,
                        f"sway imperfection {d} (uniform, all upright lines)"])
-
-    # ---- 2.5 load combinations --------------------------------------------
-    ws = wb.create_sheet("2.5 Load Combinations")
-    ws.append(["Load Combin.", "DS", "Description", "No.", "Factor",
-               "Load Case", "Load Case Description", "Method of analysis"])
-    co = 0
-    for c in model.combinations:
-        dirs = c.imp_directions if (c.imperfection and imp) else [None]
-        if c.imperfection and not c.imp_directions and imp:
-            dirs = imp.directions
-        for d in dirs:
-            co += 1
-            ds = ("ACC" if any(k.startswith("accidental") for k in c.factors)
-                  else c.kind)
-            desc = c.name + (f" (imp {d})" if d else "")
-            method = ("Second order analysis (P-Delta)" if c.kind == "ULS"
-                      else "Geometrically linear analysis")
-            row = 0
-            for lcn, f in c.factors.items():
-                row += 1
-                ws.append([f"CO{co}" if row == 1 else "", ds if row == 1 else "",
-                           desc if row == 1 else "", row, f,
-                           f"LC{lc_no[lcn]}", LC_DESC.get(lcn, lcn),
-                           method if row == 1 else ""])
-            if d:
-                row += 1
-                ws.append(["", "", "", row, 1.00, f"LC{imp_lc[d]}",
-                           f"Imperfection {d}", ""])
 
     # ---- import notes ------------------------------------------------------
     ws = wb.create_sheet("IMPORT NOTES")
@@ -604,6 +802,13 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         "Axes: RSTAB global Z points DOWN - node Z and load FZ are already",
         "converted (app is Z-up); X = down-aisle, Y = cross-aisle.",
         "",
+        "THE FILE IS SELF-SUFFICIENT TO RUN: the sway imperfections are",
+        "included as 'Imp EHF' nodal-load cases (phi x vertical node load)",
+        "and every combination already references them with its gravity",
+        "factors - no imperfection dialogs needed.  Sheet 3.4 documents",
+        "the equivalent native inclinations if you prefer RSTAB",
+        "imperfection objects (then remove the EHF cases from the COs).",
+        "",
         "1) Cross-sections: RRO-PAR names come from the RSTAB parametric",
         "   library; SHAPE-THIN sections must exist in the section database",
         "   under the given name (or assign your equivalents).  Reference",
@@ -611,19 +816,16 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         "2) Member hinges: linear rotational springs phi-z [kNcm/rad] -",
         "   the beam-end connector values.",
         "3) Nodal supports: translations fixed; phi-Y' (down-aisle rocking)",
-        "   uses the axial-dependent stiffness diagram on sheet 1.8.7 -",
-        "   enter it as a support nonlinearity 'Stiffness diagram depending",
-        "   on PZ'; the Excel import cannot carry nonlinearities.",
+        "   carries the LINEAR base spring so the import runs directly;",
+        "   optionally upgrade it to the axial-dependent stiffness diagram",
+        "   of sheet 1.8.7 (support nonlinearity vs PZ' with tearing).",
         "4) Load cases: self-weight factors are 0 because LC1 (dead)",
         "   already carries every member self-weight as member loads -",
         "   do NOT additionally activate RSTAB self-weight.",
-        "5) Imperfection LCs: apply as RSTAB imperfections (inclination",
-        "   1/300 down-aisle, 1/200 cross-aisle) on the continuous upright",
-        "   member sets of sheet 1.11, direction per LC description.",
-        "6) Combinations: ULS/ACC run 'Second order analysis (P-Delta)',",
+        "5) Combinations: ULS/ACC run 'Second order analysis (P-Delta)',",
         "   SLS geometrically linear - set in Calculation Parameters;",
         "   stiffness NOT reduced by gamma_M (Partial Factor 1.00).",
-        "7) Brace area factor (X/D bracing tension model) is on sheet",
+        "6) Brace area factor (X/D bracing tension model) is on sheet",
         "   1.3.2 as an RSTAB cross-section stiffness reduction Factor A.",
     ]:
         ws.append([line])
