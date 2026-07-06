@@ -676,7 +676,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 pd.DataFrame(_zrows, columns=["Up to height [mm]",
                                               "Diagonals per panel"]),
                 num_rows="dynamic", hide_index=True, width="stretch",
-                key="ca_zones_editor")
+                # per-config key: a static key would keep a previous config's
+                # (possibly empty) editor state when switching configurations,
+                # making the saved zones appear to vanish
+                key=f"ca_zones_editor_{st.session_state.get('edit_cfg') or 'new'}")
             _zones = []
             for _, _row in _zedit.iterrows():
                 try:
@@ -2008,33 +2011,26 @@ def render_view_config():
                                f"{seis.get('seismic_weight_kN')} kN · captured "
                                f"mass {seis.get('captured_mass_x_pct')}%")
         rc = st.columns(3)
-        _ids = (proj.id, sysm.id, conf.id)
         if rc[0].button("▶ Run / re-run analysis", type="primary",
                         width="stretch"):
             ui.log(f"Run invoked: {proj.name} · {sysm.name} · {conf.name}")
-            st.session_state["_run_for"] = _ids
-            st.session_state["_crun_run"] = None       # fresh run holder
-        if st.session_state.get("_run_for") == _ids:
-            status, payload = ui.run_cancellable_poll(
-                lambda progress, should_cancel: run_configuration(
-                    PSTORE, proj.id, sysm.id, conf.id, progress=progress,
-                    should_cancel=should_cancel),
-                label="OpenSees second-order analysis", key="run")
-            # 'running' never returns here (a rerun is triggered first)
-            st.session_state["_run_for"] = None
-            if status == "done":
-                summary, _ = payload
+            # synchronous run with the staged status box + bottom command log
+            # (per-combination convergence lines stream via the progress
+            # callback).  OpenSees must run on the main thread - a threaded
+            # runner starves under Streamlit's rerun loop and hangs.
+            try:
+                summary, _ = ui.run_with_status(
+                    lambda progress: run_configuration(
+                        PSTORE, proj.id, sysm.id, conf.id, progress=progress),
+                    label="OpenSees second-order analysis")
                 ui.toast_verdict(summary["verdict"])
-                _run_summary_dialog(summary, target=_ids)
-            elif status == "cancelled":
-                st.warning("⛔ Analysis cancelled.")
-            elif status == "error":
-                exc = payload
-                if isinstance(exc, UnstableModelError):
-                    st.error(f"🛑 Model not stable — run stopped. {exc}")
-                else:
-                    st.error(f"Analysis failed: {exc}")
-                    st.exception(exc)
+                _run_summary_dialog(summary,
+                                    target=(proj.id, sysm.id, conf.id))
+            except UnstableModelError as exc:
+                st.error(f"🛑 Model not stable — run stopped. {exc}")
+            except Exception as exc:
+                st.error(f"Analysis failed: {exc}")
+                st.exception(exc)
         if rc[1].button("🌐 Seismic design (IS 1893)",
                         width="stretch"):
             goto("seismic_study", project_id=proj.id, system_id=sysm.id,

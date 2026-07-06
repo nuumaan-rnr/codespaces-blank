@@ -424,6 +424,11 @@ def run_cancellable_poll(run_fn, label="Running analysis", key="run"):
     user can cancel it with a Stop button.  Drives itself by short reruns while
     the worker is alive (it calls st.rerun() and does NOT return in that case).
 
+    WARNING: NOT suitable for OpenSees runs - the solver must stay on the main
+    thread, and the rerun polling loop re-executes the whole page every cycle,
+    starving the worker (the app appears stuck at the first stage).  Use
+    run_with_status for analyses; keep this only for light, thread-safe tasks.
+
     Returns one of:
       ("running", None)   - never actually returned (a rerun is triggered first)
       ("done", result)    - worker finished; result is run_fn's return value
