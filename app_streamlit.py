@@ -718,6 +718,13 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             float(g("fy_bracing", None) or 0.0), 5.0,
             help="Overrides the master fy for every BRACING section. "
                  "0 = keep the master value.")
+        core_checks = st.checkbox(
+            "Verdict from core checks only — deflection, stress & buckling",
+            bool(g("core_checks_only", True)),
+            help="PASS/FAIL is decided by the DEFLECTION, STRESS and BUCKLING "
+                 "checks (plus frame sway and convergence). The connector, "
+                 "shear, brace-bolt, splice, anchorage and base-plate checks "
+                 "are still computed and shown, but as informative only.")
         if is_di:
             # drive-in: steel grade, semi-rigid base, and the brace bolt
             # connection (no footplate / anchor check).
@@ -883,8 +890,13 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
 
     with st.expander("⬇  Loads, imperfection & factors"):
         c = st.columns(3)
-        dead = c[0].number_input("Beam dead load [N/mm]", 0.0, 1.0,
-                                 float(g("dead_load_beam", 0.05)))
+        dead = c[0].number_input(
+            "Additional beam dead load [N/mm]", 0.0, 1.0,
+            float(g("dead_load_beam", 0.0)),
+            help="Extra dead load on every beam per level (decking, panels, "
+                 "services...). The beam SELF-WEIGHT is taken automatically "
+                 "from the selected beam section (A·ρ·g) - do NOT enter it "
+                 "here. 0 = self-weight only.")
         place = c[1].number_input("Placement load [kN]", 0.0, 5.0,
                                   float(g("placement_load", 500.0) / 1e3))
         phi_s = c[2].number_input(
@@ -1110,6 +1122,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, gamma_PL=float(gPL),
         fy_upright=float(fy_up_in) or None, fy_beam=float(fy_bm_in) or None,
         fy_bracing=float(fy_br_in) or None,
+        core_checks_only=bool(core_checks),
         phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,
         imperfection_standard="EN1993",     # single basis (RSTAB), no app option

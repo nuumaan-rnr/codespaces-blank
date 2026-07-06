@@ -619,6 +619,7 @@ def _checks(m, cfg, nL) -> None:
     m.checks.bolts_per_connection = cfg.bolts_per_connection
     m.checks.brace_planes = cfg.brace_planes
     m.checks.beam_laterally_restrained = cfg.beam_laterally_restrained
+    m.checks.core_checks_only = cfg.core_checks_only
     if getattr(cfg, "built_up_end_columns", False):
         m.built_up = BuiltUpColumn(
             target_set="end columns",

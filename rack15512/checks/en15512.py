@@ -153,6 +153,15 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
         else:
             out += _deflection_checks(model, case)
             out += _sway_checks(model, case)
+    # core-checks-only verdict: only DEFLECTION / STRESS / BUCKLING (+ frame
+    # SWAY and non-convergence) decide PASS/FAIL; connector, shear, bolts,
+    # splice, anchorage, base plate etc. are still computed and reported but
+    # marked informative (excluded from the verdict).
+    if getattr(model.checks, "core_checks_only", False):
+        core = {"STRESS", "BUCKLING", "DEFLECTION", "SWAY", "STABILITY"}
+        for c in out:
+            if c.check not in core:
+                c.informative = True
     return out
 
 

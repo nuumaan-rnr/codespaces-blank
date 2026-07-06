@@ -524,6 +524,11 @@ class CheckSettings:
     sway_limit_ratio: float = 200.0       # max sway <= H / ratio (SLS)
     beam_defl_limit_ratio: float = 200.0  # beam deflection <= L / ratio (SLS)
     alpha_cr_warn: float = 10.0
+    # verdict from the CORE checks only (DEFLECTION, STRESS, BUCKLING, plus
+    # frame SWAY and non-convergence): every other check (connector, shear,
+    # brace bolts, splice, anchorage, base plate, LTB, ...) is still computed
+    # and reported, but marked informative and excluded from PASS/FAIL.
+    core_checks_only: bool = False
     # torsional buckling length factor beta_T (EN 15512 9.7.5.2 / fig 24):
     # 1.0 with full torsional restraint at bracing, 0.7 with the typical
     # bolted brace connection; applied to the member torsional length

@@ -345,3 +345,46 @@ def test_per_role_material_fy_overrides():
                                fy_bracing=235.0))
     assert fy_of(m1, "1C26X21X1.2") == 235.0
     assert fy_of(m1, "RHS60X40X1.6") == 355.0     # global still on the rest
+
+
+def test_core_checks_only_verdict_scope():
+    """core_checks_only: PASS/FAIL from DEFLECTION/STRESS/BUCKLING (+SWAY,
+    convergence); connector and other secondary checks become informative but
+    are still reported.  Default off keeps every check in the verdict."""
+    from rack15512.analysis import run_all
+    from rack15512.checks.en15512 import run_checks
+    base = dict(module="single", n_bays=2, levels=[LevelSpec(gap=2000.0)],
+                frame_height=2200.0)
+    m = build_rack(RackConfig(**base, core_checks_only=True))
+    checks = run_checks(m, run_all(m))
+    for c in checks:
+        if c.check in ("STRESS", "BUCKLING", "DEFLECTION", "SWAY"):
+            continue                                # core: verdict-carrying
+        assert c.informative, c.check               # everything else info-only
+    assert any(c.check == "CONNECTOR" for c in checks)   # still reported
+    m0 = build_rack(RackConfig(**base))             # default: all checks count
+    checks0 = run_checks(m0, run_all(m0))
+    assert any(c.check == "CONNECTOR" and not c.informative for c in checks0)
+
+
+def test_beam_dead_load_from_section_plus_extra_only():
+    """The beam self-weight comes from the SELECTED SECTION (A*rho*g); the
+    dead_load_beam entry is an ADDITIONAL load only (default 0)."""
+    from rack15512.builder import _RHO_STEEL, _G_ACC
+    m = build_rack(RackConfig(module="single", n_bays=2,
+                              levels=[LevelSpec(gap=2000.0)],
+                              frame_height=2200.0))
+    bm = next(mm for mm in m.members.values() if mm.member_set == "pallet beams")
+    A = m.sections[bm.section].A
+    qs = sorted(abs(ml.qz) for ml in m.load_cases["dead"].member_loads
+                if ml.member == bm.id)
+    assert abs(qs[-1] - A * _RHO_STEEL * _G_ACC) < 1e-6   # self-wt from section
+    assert qs[0] < 1e-9                                   # no hardcoded extra
+    m2 = build_rack(RackConfig(module="single", n_bays=2,
+                               levels=[LevelSpec(gap=2000.0)],
+                               frame_height=2200.0, dead_load_beam=0.08))
+    bm2 = next(mm for mm in m2.members.values()
+               if mm.member_set == "pallet beams")
+    qs2 = sorted(abs(ml.qz) for ml in m2.load_cases["dead"].member_loads
+                 if ml.member == bm2.id)
+    assert any(abs(q - 0.08) < 1e-9 for q in qs2)         # extra entry applied

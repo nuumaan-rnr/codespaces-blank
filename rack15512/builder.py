@@ -311,7 +311,10 @@ class RackConfig:
     anchor_shear_rk: Optional[float] = None    # V_Rk,c [N] (None = default)
     # loads
     pallet_load_per_level: float = 20000.0  # N per bay per level PER MODULE
-    dead_load_beam: float = 0.05            # N/mm per beam
+    # ADDITIONAL dead load per beam [N/mm] (decking, panels, services...).
+    # The beam SELF-WEIGHT comes automatically from the selected section
+    # (A * rho * g via include_self_weight) - this entry only adds extras.
+    dead_load_beam: float = 0.0
     # include steel member self-weight (A*rho*g) as a global -Z UDL in the dead
     # load case (RSTAB does this automatically; OpenSees needs it sent).
     include_self_weight: bool = True
@@ -409,6 +412,10 @@ class RackConfig:
     fy_upright: Optional[float] = None
     fy_beam: Optional[float] = None
     fy_bracing: Optional[float] = None
+    # verdict from the CORE checks only (deflection, stress, buckling + frame
+    # sway/stability); connector and the other secondary checks are computed
+    # and reported but informative (see CheckSettings.core_checks_only)
+    core_checks_only: bool = False
     mesh_beam: int = 4
     mesh_upright: int = 1                   # per segment between elevations
     # ---- seismic (IS 1893:2016); see model.SeismicSettings ----------------
@@ -1170,6 +1177,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
     m.checks.bolts_per_connection = cfg.bolts_per_connection
     m.checks.brace_planes = cfg.brace_planes
     m.checks.beam_laterally_restrained = cfg.beam_laterally_restrained
+    m.checks.core_checks_only = cfg.core_checks_only
     pb, pd_, pt = cfg.plate_b, cfg.plate_d, cfg.plate_t
     if pb is None and pd_ is None and pt is None:
         std = standard_footplate(up.depth_h)
