@@ -388,3 +388,28 @@ def test_beam_dead_load_from_section_plus_extra_only():
     qs2 = sorted(abs(ml.qz) for ml in m2.load_cases["dead"].member_loads
                  if ml.member == bm2.id)
     assert any(abs(q - 0.08) < 1e-9 for q in qs2)         # extra entry applied
+
+
+def test_per_section_fy_override():
+    """fy_sections {name: fy}: an entered value overrides the master fy (and
+    any per-role override) for THAT section only; unlisted sections keep the
+    master / role value."""
+    from rack15512.master_xlsx import load_master
+    mw = load_master("examples/Master_Template_FINAL_mount_offset.xlsx")
+    base = dict(master=mw, module="single", n_bays=2, bay_width=2300.0,
+                levels=[LevelSpec(gap=1500.0, beam_section="RHS60X40X1.6",
+                                  pallet_load=5000.0)],
+                frame_height=2000.0, upright_section="UP0010")
+
+    def fy_of(m, n):
+        return m.materials[m.sections[n].material].fy
+
+    m = build_rack(RackConfig(**base, fy_beam=350.0,
+                              fy_sections={"RHS60X40X1.6": 330.0,
+                                           "UP0010": 280.0}))
+    assert fy_of(m, "UP0010") == 280.0            # section beats master 355
+    assert fy_of(m, "RHS60X40X1.6") == 330.0      # section beats role 350
+    assert fy_of(m, "1C26X21X1.2") == 270.0       # unlisted keeps master
+    m0 = build_rack(RackConfig(**base))           # nothing entered -> master
+    assert fy_of(m0, "UP0010") == 355.0
+    assert fy_of(m0, "RHS60X40X1.6") == 270.0

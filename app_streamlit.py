@@ -718,6 +718,31 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             float(g("fy_bracing", None) or 0.0), 5.0,
             help="Overrides the master fy for every BRACING section. "
                  "0 = keep the master value.")
+        # per-SECTION yield strength: an entered value overrides the master fy
+        # (and the role inputs above) for that one section; 0 = master default
+        _sel_secs: list = []
+        for _nm in ([up_sec] +
+                    [getattr(_ls, "beam_section", None) for _ls in levels] +
+                    [br_sec, stiffener_section]):
+            if _nm and _nm not in _sel_secs:
+                _sel_secs.append(_nm)
+        _saved_fys = g("fy_sections", {}) or {}
+        st.caption("Per-section YS override [MPa] — 0 = master default "
+                   "(shown per section); an entered value overrides the "
+                   "master and the per-type inputs above for that section.")
+        fy_sections: dict = {}
+        _fy_cols = st.columns(min(max(len(_sel_secs), 1), 4))
+        for _i, _nm in enumerate(_sel_secs):
+            _mfy = (master.fy.get(_nm) if master is not None else None)
+            _v = _fy_cols[_i % len(_fy_cols)].number_input(
+                f"YS {_nm}", 0.0, 700.0,
+                float(_saved_fys.get(_nm, 0.0) or 0.0), 5.0,
+                key=f"fy_sec_{_nm}",
+                help=f"Master default: {_mfy:g} MPa. 0 = use it." if _mfy
+                     else "Master default not set (uses the global fy). "
+                          "0 = default.")
+            if _v:
+                fy_sections[_nm] = float(_v)
         core_checks = st.checkbox(
             "Verdict from core checks only — deflection, stress & buckling",
             bool(g("core_checks_only", True)),
@@ -1122,6 +1147,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         gamma_G=gG, gamma_G_uls=gG, gamma_Q=gQ, gamma_PL=float(gPL),
         fy_upright=float(fy_up_in) or None, fy_beam=float(fy_bm_in) or None,
         fy_bracing=float(fy_br_in) or None,
+        fy_sections=fy_sections or None,
         core_checks_only=bool(core_checks),
         phi_s=1.0 / phi_s,
         phi_s_cross=1.0 / phi_s_cross,

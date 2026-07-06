@@ -416,6 +416,10 @@ class RackConfig:
     # sway/stability); connector and the other secondary checks are computed
     # and reported but informative (see CheckSettings.core_checks_only)
     core_checks_only: bool = False
+    # per-SECTION yield strength overrides {section name: fy [MPa]}: an entered
+    # value overrides the master fy (and any per-role override) for THAT
+    # section only; sections not listed keep the master / role value.
+    fy_sections: Optional[Dict[str, float]] = None
     mesh_beam: int = 4
     mesh_upright: int = 1                   # per segment between elevations
     # ---- seismic (IS 1893:2016); see model.SeismicSettings ----------------
@@ -541,18 +545,14 @@ def _pick(lib: SectionLibrary, name: str, role: str) -> str:
 
 
 def _apply_role_fy(m: RackModel, cfg: "RackConfig") -> None:
-    """Per-role steel grade overrides (fy_upright / fy_beam / fy_bracing):
-    every section whose master role matches gets its own material clone at the
-    entered fy, so roles sharing a steel grade in the master stay unaffected.
-    Applied last - wins over the master fy and the fy_override global."""
-    ov = {"upright": cfg.fy_upright, "beam": cfg.fy_beam,
-          "bracing": cfg.fy_bracing}
-    for sec in m.sections.values():
-        fy = ov.get((sec.role or "").lower())
-        if not fy:
-            continue
+    """Steel grade overrides, applied last so an entered value always wins:
+    1. per-ROLE (fy_upright / fy_beam / fy_bracing): every section of that
+       master role gets a material clone at the entered fy;
+    2. per-SECTION (fy_sections {name: fy}): the strongest override - that
+       one section gets its own clone, beating the role and master values.
+    Cloning keeps roles/sections that share a steel grade unaffected."""
+    def _clone(sec, fy, name):
         src = m.materials.get(sec.material)
-        name = f"steel_{(sec.role or 'x').lower()}_fy{float(fy):g}"
         if name not in m.materials:
             m.materials[name] = Steel(
                 name, fy=float(fy),
@@ -560,6 +560,17 @@ def _apply_role_fy(m: RackModel, cfg: "RackConfig") -> None:
                 G=src.G if src else 81000.0,
                 nu=src.nu if src else 0.3)
         sec.material = name
+
+    ov = {"upright": cfg.fy_upright, "beam": cfg.fy_beam,
+          "bracing": cfg.fy_bracing}
+    for sec in m.sections.values():
+        fy = ov.get((sec.role or "").lower())
+        if fy:
+            _clone(sec, fy, f"steel_{(sec.role or 'x').lower()}_fy{float(fy):g}")
+    for sname, fy in (getattr(cfg, "fy_sections", None) or {}).items():
+        sec = m.sections.get(sname)
+        if sec and fy:
+            _clone(sec, fy, f"steel_{sname}_fy{float(fy):g}")
 
 
 def build_rack(cfg: RackConfig) -> RackModel:
