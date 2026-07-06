@@ -922,8 +922,17 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                  "services...). The beam SELF-WEIGHT is taken automatically "
                  "from the selected beam section (A·ρ·g) - do NOT enter it "
                  "here. 0 = self-weight only.")
-        place = c[1].number_input("Placement load [kN]", 0.0, 5.0,
-                                  float(g("placement_load", 500.0) / 1e3))
+        place = c[1].number_input(
+            "Placement load [kN] (manual)", 0.0, 5.0,
+            float(g("placement_load", 500.0) / 1e3),
+            help="Used only when the EN 15512 automatic placement below is "
+                 "OFF (single position at the top beam level).")
+        placement_auto = c[1].checkbox(
+            "Placement per EN 15512 6.3.4 (auto)",
+            bool(g("placement_auto", True)),
+            help="Magnitude by the height function (0.5 kN <= 3 m, linear to "
+                 "0.25 kN at 6 m) and one combination per candidate position: "
+                 "the top beam level plus the highest level <= 3 m.")
         phi_s = c[2].number_input(
             "Out-of-plumb down-aisle (1/x)", 100.0, 1000.0, 300.0,
             help="Down-aisle (X) sway imperfection 1/x. Drive-in default 1/300.")
@@ -951,7 +960,14 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             "Include pattern (checkerboard) pallet load",
             bool(g("include_pattern", True)),
             help="Alternate bays AND levels loaded — the unfavourable partial "
-                 "loading that maximises differential column moments and sway.")
+                 "loading that maximises differential column moments and sway. "
+                 "Mandatory down-aisle per EN 15512 10.2.2.2.")
+        patt_ca = c[2].checkbox(
+            "Pattern in cross-aisle too",
+            bool(g("pattern_cross_aisle", False)),
+            help="EN 15512 10.2.2.3 Note 1 exempts the cross-aisle direction; "
+                 "enable when imperfection + pattern is near-critical for the "
+                 "upright checks.")
         c = st.columns(3)
         lf_max = int(n_lanes) if is_di else int(n_bays)
         _lf_default = lf_max // 2 if lf_max >= 2 else 0   # governing interior line
@@ -989,9 +1005,15 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         gPL = c[2].number_input(
             "gamma Placement (ULS)", 1.0, 2.0,
             float(min(max(float(_gpl_saved or 1.26), 1.0), 2.0)),
-            help="Placement-load ULS factor: the placement combinations are "
-                 "gamma_DL*DL + gamma_LL*LL + gamma_PL*PL (e.g. RSTAB "
-                 "1.2/1.2/1.2).")
+            help="Placement-load ULS factor before the multi-variable "
+                 "reduction: the placement combinations are gamma_DL*DL + "
+                 "psi*gamma_LL*LL + psi*gamma_PL*PL.")
+        psi_mv = c[2].number_input(
+            "psi multi-variable (EN 15512 Eq 7)", 0.5, 1.0,
+            float(g("multi_var_factor", 0.9)), 0.05,
+            help="Reduction on SIMULTANEOUS variable actions (Q + placement): "
+                 "0.9 x 1.4 = 1.26 per EN 15512 7.2 Eq (7). Set 1.0 to apply "
+                 "the entered gammas unreduced (e.g. flat RSTAB 1.2/1.2).")
         # stiffness is NEVER reduced by a material factor: the analysis runs on
         # the full elastic E/G (gamma_M on stiffness = 1.0, no app option) -
         # material effects are already covered by the entered data
@@ -1141,6 +1163,8 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         accidental_load_x=ax * 1e3, accidental_load_y=ay * 1e3,
         accidental_height=ah, include_placement=inc_place,
         include_accidental=inc_acc, include_pattern=inc_patt,
+        pattern_cross_aisle=bool(patt_ca), placement_auto=bool(placement_auto),
+        multi_var_factor=float(psi_mv),
         load_frame=int(load_frame),
         beam_laterally_restrained=bool(beam_restrained),
         pallet_sliding=bool(pallet_sliding), pallet_mu=float(pallet_mu),

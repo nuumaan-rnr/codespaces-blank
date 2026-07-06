@@ -299,24 +299,38 @@ def test_buckling_interaction_uses_concurrent_station_forces():
 
 
 def test_separate_uls_factors_dl_ll_placement():
-    """Each ULS action carries its OWN factor: gamma_G*DL + gamma_Q*LL +
-    gamma_PL*placement; gamma_PL falls back to pay_placement_factor (legacy)."""
+    """Each ULS action carries its OWN factor, with the EN 15512 Eq (7)
+    multi-variable reduction psi on the SIMULTANEOUS variables: placement
+    combos = gamma_G*DL + psi*gamma_Q*LL + psi*gamma_PL*PL.  psi=1.0 applies
+    the entered gammas unreduced (flat RSTAB style)."""
     m = build_rack(RackConfig(module="single", n_bays=2,
                               levels=[LevelSpec(gap=2000.0)], frame_height=2200.0,
-                              gamma_G=1.2, gamma_Q=1.3, gamma_PL=1.1))
+                              gamma_G=1.2, gamma_Q=1.3, gamma_PL=1.1,
+                              multi_var_factor=1.0))
     f1 = next(c.factors for c in m.combinations if c.name == "ULS1")
     f2 = next(c.factors for c in m.combinations if c.name == "ULS2")
     f3 = next(c.factors for c in m.combinations if c.name == "ULS3")
     assert f1 == {"dead": 1.2, "pallets": 1.3}
     assert f2 == {"dead": 1.2, "pallets": 1.3, "placement": 1.1}
     assert f3 == {"dead": 1.2, "pallets": 1.3, "placement_y": 1.1}
-    # legacy: no gamma_PL entered -> placement uses pay_placement_factor,
-    # LL keeps its own gamma_Q
+    # spec defaults: psi=0.9 and gamma_PL falls back to gamma_Q ->
+    # 1.3 DL + 1.26 LL + 1.26 PL (EN 15512 Eq (7): 0.9 x 1.4 = 1.26)
     m2 = build_rack(RackConfig(module="single", n_bays=2,
                                levels=[LevelSpec(gap=2000.0)],
                                frame_height=2200.0))
     f2l = next(c.factors for c in m2.combinations if c.name == "ULS2")
-    assert f2l == {"dead": 1.3, "pallets": 1.4, "placement": 1.26}
+    assert abs(f2l["pallets"] - 1.26) < 1e-9
+    assert abs(f2l["placement"] - 1.26) < 1e-9
+    assert f2l["dead"] == 1.3
+    # direction-locked: placement-X combos analysed with the X imperfection
+    c2 = next(c for c in m2.combinations if c.name == "ULS2")
+    c3 = next(c for c in m2.combinations if c.name == "ULS3")
+    assert c2.imp_directions == ["+x", "-x"]
+    assert c3.imp_directions == ["+y", "-y"]
+    # SLS carries the sway imperfection, placement excluded (7.3 / R6, R7)
+    sls = [c for c in m2.combinations if c.kind == "SLS"]
+    assert len(sls) == 1 and sls[0].imp_directions
+    assert all("placement" not in k for k in sls[0].factors)
 
 
 def test_per_role_material_fy_overrides():

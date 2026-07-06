@@ -404,6 +404,19 @@ class RackConfig:
     # gamma_Q (LL): the placement combinations use gamma_G*DL + gamma_Q*LL +
     # gamma_PL*PL.  None -> falls back to pay_placement_factor (legacy).
     gamma_PL: Optional[float] = None
+    # EN 15512 7.2 Eq (7): when two or more unfavourable VARIABLE actions act
+    # simultaneously (Q + placement) both are reduced by this factor
+    # (0.9 x 1.4 = 1.26).  Set 1.0 to apply the entered gammas unreduced.
+    multi_var_factor: float = 0.9
+    # placement load magnitude/positions per EN 15512 6.3.4.2/6.3.4.3:
+    # 0.5 kN up to 3 m, linear to 0.25 kN at 6 m, 0.25 kN above; one
+    # combination per candidate position (top beam level + the highest beam
+    # level <= 3 m).  False = single position (top level) at placement_load.
+    placement_auto: bool = True
+    # include the PATTERN arrangement in the cross-aisle combinations too
+    # (EN 15512 10.2.2.3 Note 1 exempts it; enable when imperfection+pattern
+    # is near-critical for the upright checks)
+    pattern_cross_aisle: bool = False
     # per-role steel grade overrides [MPa]: when entered they override the
     # master / default fy for EVERY section of that role (upright / beam /
     # bracing); None keeps the master per-section fy.  Each overridden role
@@ -1312,16 +1325,41 @@ def build_rack(cfg: RackConfig) -> RackModel:
     else:
         li = max(0, min(int(cfg.load_frame), cfg.n_bays))
 
-    top_j = j_of(beam_levels[-1])
-    placement = cfg.include_placement and cfg.placement_load > 0
+    top_z = beam_levels[-1]
+    placement = cfg.include_placement and (cfg.placement_load > 0
+                                           or cfg.placement_auto)
+    pl_x_cases: List[Tuple[str, float]] = []      # (load-case name, level z)
     if placement:
-        place = LoadCase("placement", "variable")
-        place.nodal_loads.append(NodalLoad(nid(li, 0, top_j),
-                                           fx=cfg.placement_load))
-        m.load_cases["placement"] = place
+        def _pl_mag(z: float) -> float:
+            """Placement force [N] by the EN 15512 6.3.4.2 height function:
+            0.5 kN up to 3 m, linear to 0.25 kN at 6 m, 0.25 kN above."""
+            if not cfg.placement_auto:
+                return cfg.placement_load
+            if z <= 3000.0:
+                return 500.0
+            if z >= 6000.0:
+                return 250.0
+            return 500.0 - (z - 3000.0) / 3000.0 * 250.0
+
+        # down-aisle candidate positions (6.3.4.3, beam levels only): the top
+        # beam level, PLUS the highest beam level <= 3 m (where the full
+        # 0.5 kN applies) when that is a different level -> one combination
+        # per position
+        pos = [top_z]
+        lo3 = [z for z in beam_levels if z <= 3000.0 + _TOL]
+        if cfg.placement_auto and lo3 and abs(lo3[-1] - top_z) > _TOL:
+            pos.append(lo3[-1])
+        for k, z in enumerate(pos):
+            cname = "placement" if k == 0 else "placement_lo"
+            lc = LoadCase(cname, "variable")
+            lc.nodal_loads.append(NodalLoad(nid(li, 0, j_of(z)),
+                                            fx=_pl_mag(z)))
+            m.load_cases[cname] = lc
+            pl_x_cases.append((cname, z))
+        # cross-aisle placement at the top of the frame (6.3.4.4)
         place_y = LoadCase("placement_y", "variable")
-        place_y.nodal_loads.append(NodalLoad(nid(li, 0, top_j),
-                                             fy=cfg.placement_load))
+        place_y.nodal_loads.append(NodalLoad(nid(li, 0, j_of(top_z)),
+                                             fy=_pl_mag(top_z)))
         m.load_cases["placement_y"] = place_y
 
     # accidental impact loads on the chosen frame's upright (EN 15512)
@@ -1339,46 +1377,73 @@ def build_rack(cfg: RackConfig) -> RackModel:
                                            fy=cfg.accidental_load_y))
         m.load_cases["accidental_y"] = acc_y
 
-    # ---- combinations (EN 15512 defaults - verify for your edition) --------
-    m.combinations = [
+    # ---- combinations (EN 15512:2009 7.2/7.3 generation rules) ------------
+    # Direction-locked: the sway imperfection acts in the analysed direction
+    # only (7.1/8.5) and placement/accidental loads never combine across
+    # directions (R1-R3).  Two simultaneous variables (Q + placement) are both
+    # reduced by multi_var_factor (Eq (7), 0.9 -> e.g. 1.26 = 0.9 x 1.4).
+    # Placement expands over its candidate positions (one combination per
+    # position); PATTERN is a substitute arrangement of Q, also combined with
+    # placement (ULS-X-04); SLS carries the imperfection but no placement.
+    psi = cfg.multi_var_factor
+    # placement gamma BEFORE the Eq (7) reduction; default = gamma_Q (EN 15512
+    # Table 2: placement loads carry the unit-load factor), so with psi = 0.9
+    # the spec products appear directly (0.9 x 1.4 = 1.26)
+    g_pl = cfg.gamma_PL if cfg.gamma_PL is not None else cfg.gamma_Q
+    uls: List[Combination] = [
+        # ULS-X-01 / ULS-Y-01: full Q + imperfection per analysed direction
         Combination("ULS1", "ULS",
                     {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q}),
-        Combination("SLS1", "SLS",
-                    {"dead": 1.0, "pallets": 1.0}, imperfection=False),
     ]
     if placement:
-        # each action carries its OWN separately entered ULS factor:
-        # gamma_G * DL + gamma_Q * LL + gamma_PL * placement (RSTAB CO2/CO5
-        # scheme, e.g. 1.2/1.2/1.2); gamma_PL falls back to the legacy
-        # psi-reduced pay_placement_factor when not entered.
-        g_pl = (cfg.gamma_PL if cfg.gamma_PL is not None
-                else cfg.pay_placement_factor)
-        m.combinations.insert(1, Combination(
-            "ULS2", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                            "placement": g_pl}))
-        m.combinations.insert(2, Combination(
-            "ULS3", "ULS", {"dead": cfg.gamma_G, "pallets": cfg.gamma_Q,
-                            "placement_y": g_pl}))
-        m.combinations.append(Combination(
-            "SLS2", "SLS", {"dead": 1.0, "pallets": 1.0, "placement": 1.0},
-            imperfection=False))
+        for k, (cname, z) in enumerate(pl_x_cases):
+            label = "ULS2" if k == 0 else f"ULS2@{z:.0f}"
+            uls.append(Combination(                 # ULS-X-02[p]
+                label, "ULS",
+                {"dead": cfg.gamma_G, "pallets": psi * cfg.gamma_Q,
+                 cname: psi * g_pl},
+                imp_directions=["+x", "-x"]))
+        uls.append(Combination(                     # ULS-Y-02
+            "ULS3", "ULS",
+            {"dead": cfg.gamma_G, "pallets": psi * cfg.gamma_Q,
+             "placement_y": psi * g_pl},
+            imp_directions=["+y", "-y"]))
     if acc:
-        # accidental design situation: gamma = 1.0 on all actions
-        idx = len([c for c in m.combinations if c.kind == "ULS"])
-        m.combinations.insert(idx, Combination(
+        # accidental design situation: gamma = 1.0 on all actions, placement
+        # excluded (Eq (8), R4), imperfection in the accidental direction
+        uls.append(Combination(
             "ULS-accX", "ULS",
             {"dead": 1.0, "pallets": 1.0, "accidental_x": 1.0},
             imp_directions=["+x"]))
-        m.combinations.insert(idx + 1, Combination(
+        uls.append(Combination(
             "ULS-accY", "ULS",
             {"dead": 1.0, "pallets": 1.0, "accidental_y": 1.0},
             imp_directions=["+y"]))
     if pattern:
-        # checkerboard pallet arrangement (unfavourable partial loading)
-        idx = len([c for c in m.combinations if c.kind == "ULS"])
-        m.combinations.insert(idx, Combination(
+        # PATTERN arrangement (10.2.2.2): mandatory down-aisle, cross-aisle
+        # only when the project opts in (10.2.2.3 Note 1)
+        pat_dirs = (["+x", "-x", "+y", "-y"] if cfg.pattern_cross_aisle
+                    else ["+x", "-x"])
+        uls.append(Combination(
             "ULS-pattern", "ULS",
-            {"dead": cfg.gamma_G, "pallets_pattern": cfg.gamma_Q}))
+            {"dead": cfg.gamma_G, "pallets_pattern": cfg.gamma_Q},
+            imp_directions=pat_dirs))
+        if placement:
+            for k, (cname, z) in enumerate(pl_x_cases):   # ULS-X-04[p]
+                label = ("ULS-pattern-PL" if k == 0
+                         else f"ULS-pattern-PL@{z:.0f}")
+                uls.append(Combination(
+                    label, "ULS",
+                    {"dead": cfg.gamma_G,
+                     "pallets_pattern": psi * cfg.gamma_Q,
+                     cname: psi * g_pl},
+                    imp_directions=["+x", "-x"]))
+    m.combinations = uls + [
+        # SLS-X / SLS-Y: unfactored WITH the sway imperfection (7.1/8.5);
+        # placement and accidental loads excluded (7.3, R6)
+        Combination("SLS1", "SLS", {"dead": 1.0, "pallets": 1.0},
+                    imp_directions=["+x", "-x", "+y", "-y"]),
+    ]
 
     # ---- imperfection --------------------------------------------------------
     # phi_l: per EN 15512 the connector looseness may be omitted from phi
