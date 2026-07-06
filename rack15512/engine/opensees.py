@@ -25,6 +25,7 @@ Modelling choices:
 from __future__ import annotations
 
 import math
+import time as _time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -76,13 +77,12 @@ class OpenSeesEngine:
 
         def _once() -> CaseResult:
             n_steps = max(1, model.analysis.n_steps) if order == 2 else 1
-            converged = False
-            for attempt_steps in (n_steps, 5 * n_steps):
-                self._build(model, order, geom_sway)
-                self._apply_loads(model, loads)
-                converged = self._solve(model, attempt_steps)
-                if converged:
-                    break
+            # single pass: _solve already escalates internally (Newton ->
+            # KrylovNewton x1/x4 -> time-boxed NewtonLineSearch), so an outer
+            # retry would just repeat the whole cascade on a hopeless case
+            self._build(model, order, geom_sway)
+            self._apply_loads(model, loads)
+            converged = self._solve(model, n_steps)
             r = CaseResult(name=name, combo=combo, kind=kind, order=order,
                            imp_direction=imp_direction, converged=converged)
             if converged:
@@ -100,7 +100,7 @@ class OpenSeesEngine:
         saved = [s.ry for s in model.supports]
         try:
             res = _once()
-            for _ in range(6):
+            for _ in range(3):
                 if not res.converged:
                     break
                 if not self._update_base_from_table(model, res, table):
@@ -594,16 +594,36 @@ class OpenSeesEngine:
                     ("KrylovNewton", max(n_steps, 10)),
                     ("KrylovNewton", 4 * max(n_steps, 10)),
                     ("NewtonLineSearch", 10 * max(n_steps, 10)))
+        frac = 0.0                          # furthest load fraction reached
         for algo, steps in attempts:
-            ops.test("NormDispIncr", tol, max(st.max_iter, 100))
             if algo == "NewtonLineSearch":
+                # last resort is VERY expensive (fine steps x bisection line
+                # search); only worth it when a previous attempt nearly
+                # carried full load - a case stuck below ~60% of the load is
+                # genuinely unstable and would just burn minutes here
+                if frac < 0.6:
+                    return False
+                ops.test("NormDispIncr", tol, max(st.max_iter, 60))
                 ops.algorithm(algo, "-type", "Bisection")
             else:
+                ops.test("NormDispIncr", tol, max(st.max_iter, 100))
                 ops.algorithm(algo)
             ops.integrator("LoadControl", 1.0 / steps)
             ops.analysis("Static")
-            if ops.analyze(steps) == 0:
+            # the line-search stage is time-boxed: a genuinely unstable case
+            # otherwise grinds for many minutes just to prove non-convergence
+            deadline = (_time.time() + 120.0
+                        if algo == "NewtonLineSearch" else None)
+            done = 0
+            for _ in range(steps):          # step-wise, to know how far we got
+                if ops.analyze(1) != 0:
+                    break
+                done += 1
+                if deadline and _time.time() > deadline:
+                    break
+            if done == steps:
                 return True
+            frac = max(frac, done / steps)
             ops.reset()                     # restart from the unloaded state
         return False
 

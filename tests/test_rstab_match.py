@@ -217,23 +217,27 @@ def test_plastic_connector_law():
 
 def test_rstab_behavior_defaults():
     """RSTAB-matching behaviors (validated on the Zepto model, <=2%):
-    SLS combinations linear, stepped axial-dependent base from the master,
-    EN1993 flat imperfection 1/300 DA / 1/200 CA, connector interpolation."""
+    SLS combinations linear, EN1993 flat imperfection 1/300 DA / 1/200 CA,
+    connector interpolation; the stepped axial-dependent auto base is OPT-IN
+    (it can destabilise tall frames and multiplies the solve count)."""
     from rack15512.master_xlsx import load_master
     mw = load_master("examples/Master_Template_FINAL_mount_offset.xlsx")
-    m = build_rack(RackConfig(master=mw, module="single", n_bays=2,
-                              bay_width=2300.0, frame_height=2000.0,
-                              levels=[LevelSpec(gap=1500.0,
-                                                beam_section="RHS60X40X1.6",
-                                                pallet_load=5000.0)],
-                              upright_section="UP0010",
-                              steel_E=200000.0, steel_G=76900.0))
+    kw = dict(master=mw, module="single", n_bays=2,
+              bay_width=2300.0, frame_height=2000.0,
+              levels=[LevelSpec(gap=1500.0, beam_section="RHS60X40X1.6",
+                                pallet_load=5000.0)],
+              upright_section="UP0010", steel_E=200000.0, steel_G=76900.0)
+    m = build_rack(RackConfig(**kw))
     # SLS combos run geometrically linear (RSTAB), ULS at the model order
     assert all(c.order == 1 for c in m.combinations if c.kind == "SLS")
     assert all(c.order in (None, 2) for c in m.combinations if c.kind == "ULS")
-    # base 'auto' -> stepped axial-dependent table from the master, tearing at 0
-    assert m.base_axial_table is not None
-    assert m.base_axial_table[0][0] == 0.0 and m.base_axial_table[1][0] == 30.0
+    # default: auto base = single interpolated value (fast, proven); the
+    # stepped axial-dependent table only when opted in
+    assert m.base_axial_table is None
+    m_ax = build_rack(RackConfig(**kw, base_axial_dependent=True))
+    assert m_ax.base_axial_table is not None
+    assert m_ax.base_axial_table[0][0] == 0.0
+    assert m_ax.base_axial_table[1][0] == 30.0
     # EN1993 flat imperfection defaults
     assert m.imperfection.standard == "EN1993"
     assert abs(1 / m.imperfection.value_for("+x") - 300) < 1

@@ -357,11 +357,15 @@ class RackConfig:
     # SLS combinations run geometrically LINEAR (RSTAB practice: ULS second
     # order, SLS 1st order); False runs everything at analysis.order.
     sls_first_order: bool = True
-    # base_stiffness='auto': apply the master's tested BASE_STIFFNESS table as a
-    # stepped AXIAL-DEPENDENT rotational spring per column (RSTAB stiffness
-    # diagram, with tearing toward zero axial), instead of one value
-    # interpolated at the estimated axial.  False keeps the single value.
-    base_axial_dependent: bool = True
+    # base_stiffness='auto': OPT-IN stepped AXIAL-DEPENDENT base - apply the
+    # master's tested BASE_STIFFNESS table as a per-column stiffness diagram
+    # (RSTAB style, tearing toward zero axial) instead of one value
+    # interpolated at the estimated axial.  Default OFF: the diagram softens
+    # the windward bases toward zero below the table's first anchor, which can
+    # push tall down-aisle frames to the stability limit and multiplies the
+    # solve count (fixed-point re-solves) - only enable when matching a tested
+    # axial-dependent base.  An explicit base_axial_table always applies.
+    base_axial_dependent: bool = False
     # steel elastic constants override applied to every material (e.g. IS 2062:
     # E=200000, G=76900); None keeps the default 210000/81000.
     steel_E: Optional[float] = None
