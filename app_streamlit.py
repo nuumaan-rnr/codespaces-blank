@@ -2166,6 +2166,32 @@ def render_view_config():
             with st.expander("Preview check report (text)"):
                 st.markdown(open(rp, encoding="utf-8").read())
 
+        st.markdown("#### Solver export — re-run this model in RSTAB / STAAD")
+        st.caption("RSTAB 8 table workbook (File → Import → Microsoft Excel): "
+                   "nodes, materials and cross-sections with RSTAB library "
+                   "names, member hinges [kNcm/rad], supports with the "
+                   "axial-dependent base stiffness diagram, sets of members, "
+                   "load cases + sway-imperfection cases, all loads and the "
+                   "generated load combinations with their analysis type.")
+        ec = st.columns(2)
+        if ec[0].button("⚙ Generate RSTAB 8 / STAAD export",
+                        width="stretch", key="gen_solver_exp"):
+            from rack15512.export_solvers import to_rstab8_xlsx, to_staad
+            to_rstab8_xlsx(model, os.path.join(cdir, "RSTAB8_export.xlsx"))
+            to_staad(model, os.path.join(cdir, "STAAD_export.std"))
+            st.rerun()
+        for fname, mime in (("RSTAB8_export.xlsx",
+                             "application/vnd.openxmlformats-officedocument"
+                             ".spreadsheetml.sheet"),
+                            ("STAAD_export.std", "text/plain")):
+            fp = os.path.join(cdir, fname)
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    ec[1].download_button(
+                        f"Download {fname}", f.read(),
+                        f"{conf.id}_{fname}", mime=mime,
+                        width="stretch", key=f"dl_{fname}")
+
     if active == _VC_TABS[3]:
         ui.section("⚙️", "Configuration — edit the inputs and re-run")
         st.caption("Change any input below, then *Update & re-run*. Use this "

@@ -427,3 +427,65 @@ def test_per_section_fy_override():
     m0 = build_rack(RackConfig(**base))           # nothing entered -> master
     assert fy_of(m0, "UP0010") == 355.0
     assert fy_of(m0, "RHS60X40X1.6") == 270.0
+
+
+def test_rstab8_export_tables(tmp_path):
+    # The RSTAB 8 export mirrors the RSTAB data tables (validated against an
+    # RSTAB 8.29 printout): kNcm/rad hinge springs (1 kNcm = 1e4 N*mm),
+    # Z-down node coordinates, RSTAB library section names, the axial-
+    # dependent base diagram sheet, imperfection LCs on the upright member
+    # sets and one CO row-group per (combination x imperfection direction).
+    import openpyxl
+    from rack15512.export_solvers import (to_rstab8_xlsx,
+                                          _rstab_section_name, _id_ranges)
+
+    assert _rstab_section_name("RHS100X50X1.6") == "RRO-PAR 100/50/1.6/3.2/1.6/K"
+    assert _rstab_section_name("1C36X21X1.2") == "SHAPE-THIN B5H36X21T012"
+    assert _rstab_section_name("UP0010") == "SHAPE-THIN UP0010"
+    assert _id_ranges([3, 1, 2, 7, 9, 10]) == "1-3,7,9-10"
+
+    m = build_rack(RackConfig(
+        module="single", n_bays=2, bay_width=2300.0, frame_height=5000.0,
+        levels=[LevelSpec(gap=1500.0), LevelSpec(gap=1500.0)],
+        base_axial_table=[[0, 1.0e3], [30, 3.975e7], [90, 2.5523e8]],
+        connector_stiffness=2.039e7))
+    path = str(tmp_path / "rstab8.xlsx")
+    to_rstab8_xlsx(m, path)
+    wb = openpyxl.load_workbook(path)
+    for sheet in ("1.1 Nodes", "1.2 Materials", "1.3 Cross-Sections",
+                  "1.4 Member Hinges", "1.7 Members", "1.8 Nodal Supports",
+                  "1.8.7 Support Stiffness Diagram", "1.11 Sets of Members",
+                  "2.1 Load Cases", "3.1 Nodal Loads", "3.2 Member Loads",
+                  "3.4 Imperfections", "2.5 Load Combinations",
+                  "IMPORT NOTES"):
+        assert sheet in wb.sheetnames, sheet
+
+    # nodes: RSTAB global Z is DOWN -> top node exported at Z = -5000
+    zs = [r[5] for r in wb["1.1 Nodes"].iter_rows(min_row=2, values_only=True)]
+    assert min(zs) == -5000.0 and max(zs) == 0.0
+    # hinge spring in kNcm/rad: 2.039e7 N*mm/rad -> 2039
+    hz = [r[7] for r in wb["1.4 Member Hinges"].iter_rows(min_row=2,
+                                                          values_only=True)]
+    assert 2039 in hz
+    # base diagram rows in kN / kNcm/rad incl. the tearing branch
+    d = list(wb["1.8.7 Support Stiffness Diagram"].iter_rows(min_row=2,
+                                                             values_only=True))
+    assert (30.0, 3975.0) in {(r[3], r[4]) for r in d}
+    assert any(r[2] == "PZ'-" for r in d)                  # tearing (uplift)
+    # imperfection LCs reference the continuous upright sets, 1/300 & 1/200
+    imps = list(wb["3.4 Imperfections"].iter_rows(min_row=2, values_only=True))
+    incl = {r[4] for r in imps}
+    assert {300.0, -300.0, 200.0, -200.0} <= incl
+    n_sets = wb["1.11 Sets of Members"].max_row - 1
+    assert n_sets == 6                                     # 3 frames x 2 uprights
+    # combinations: every (combo x imp direction) becomes its own CO block
+    co_rows = list(wb["2.5 Load Combinations"].iter_rows(min_row=2,
+                                                         values_only=True))
+    names = [r[2] for r in co_rows if r[0]]
+    assert "ULS1 (imp +x)" in names and "ULS1 (imp -y)" in names
+    assert any(n.startswith("SLS1") for n in names)        # SLS carries imp too
+    # ULS runs 2nd order, SLS linear
+    meth = {r[2]: r[7] for r in co_rows if r[0]}
+    assert meth["ULS1 (imp +x)"].startswith("Second order")
+    assert meth[[n for n in names if n.startswith("SLS1")][0]].startswith(
+        "Geometrically linear")
