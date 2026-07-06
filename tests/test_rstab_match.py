@@ -472,27 +472,30 @@ def test_rstab8_export_tables(tmp_path):
                                                              values_only=True))
     assert (30.0, 3975.0) in {(r[3], r[4]) for r in d}
     assert any(r[2] == "PZ'-" for r in d)                  # tearing (uplift)
-    # native-inclination alternative sheet: 1/300 & 1/200 both signs
-    imps = list(wb["3.4 Imperfections"].iter_rows(min_row=3, values_only=True))
-    incl = {r[4] for r in imps}
-    assert {300.0, -300.0, 200.0, -200.0} <= incl
     n_sets = wb["1.11 Sets of Members"].max_row - 1
     assert n_sets == 6                                     # 3 frames x 2 uprights
-    # EHF imperfection load cases exist and carry the phi * W nodal forces
+    # exactly TWO native imperfection load cases (Imp X 1/300, Imp Y 1/200)
     lcs = list(wb["2.1 Load Cases"].iter_rows(min_row=2, values_only=True))
-    ehf_lcs = [r for r in lcs if "Imp EHF" in str(r[1])]
-    assert ehf_lcs and all(r[2] == "Imperfection" for r in ehf_lcs)
+    imp_lcs = [r for r in lcs if r[2] == "Imperfection"]
+    assert len(imp_lcs) == 2
+    assert any("L/300" in str(r[1]) for r in imp_lcs)
+    assert any("L/200" in str(r[1]) for r in imp_lcs)
+    # 3.4 holds their inclinations on the upright sets; no imperfection
+    # forces appear in the load tables
+    imps = list(wb["3.4 Imperfections"].iter_rows(min_row=2, values_only=True))
+    assert {r[4] for r in imps} == {300.0, 200.0}
+    assert all(r[1] == "Set of members" for r in imps)
     nl = list(wb["3.1 Nodal Loads"].iter_rows(min_row=2, values_only=True))
-    assert any("Imp EHF +x" in str(r[5]) for r in nl)
+    assert not any("mp" in str(r[5]) and "EHF" in str(r[5]) for r in nl)
     # combinations: every (combo x imp direction) becomes its own CO block
-    # and references the EHF cases with the SOURCE gravity factor
+    # referencing the imperfection LC with factor +1 / -1 (RSTAB style)
     co_rows = list(wb["2.5 Load Combinations"].iter_rows(min_row=2,
                                                          values_only=True))
     names = [r[2] for r in co_rows if r[0]]
     assert "ULS1 (imp +x)" in names and "ULS1 (imp -y)" in names
     assert any(n.startswith("SLS1") for n in names)        # SLS carries imp too
-    ehf_refs = [r for r in co_rows if "Imp EHF" in str(r[6])]
-    assert ehf_refs and any(abs(r[4] - 1.4) < 1e-9 for r in ehf_refs)
+    imp_refs = [r for r in co_rows if "Imperfection towards" in str(r[6])]
+    assert {r[4] for r in imp_refs} == {1.0, -1.0}
     # ULS runs 2nd order, SLS linear
     meth = {r[2]: r[7] for r in co_rows if r[0]}
     assert meth["ULS1 (imp +x)"].startswith("Second order")
@@ -501,11 +504,11 @@ def test_rstab8_export_tables(tmp_path):
 
 
 def test_staad_deck_complete_and_runnable(tmp_path):
-    # The STAAD deck must be self-sufficient: every load case + EHF
-    # imperfection cases as JOINT LOADs, every combination as a REPEAT LOAD
-    # primary case (required for P-Delta), one P-Delta analysis command, and
-    # rotational springs converted to STAAD's per-DEGREE constants.
-    import math as _m
+    # The STAAD deck must be self-sufficient: every load case, every
+    # combination as a REPEAT LOAD primary case (required for P-Delta) with
+    # its sway imperfection as a NOTIONAL LOAD block (factor = gamma * phi
+    # per gravity case), one P-Delta analysis command, and rotational
+    # springs converted to STAAD's per-DEGREE constants.
     import re as _re
     from rack15512.export_solvers import to_staad
 
@@ -521,13 +524,19 @@ def test_staad_deck_complete_and_runnable(tmp_path):
     assert "MEMBER TRUSS" in txt                         # braces axial-only
     # per-degree hinge spring: 2.039e7 N*mm/rad * pi/180 = 355872.6 N*mm/deg
     assert _re.search(r"KMZ 355872\.\d", txt)
-    # EHF cases exist for both signs and both axes (app +y -> STAAD FZ)
-    assert "TITLE IMP EHF +X OF PALLETS" in txt
-    assert "TITLE IMP EHF -Y OF PALLETS" in txt
+    # no standalone imperfection load cases - the imperfection lives inside
+    # each combination as NOTIONAL LOAD (gamma * phi, signed per direction)
+    assert "IMP EHF" not in txt
     ncomb = len(_re.findall(r"^REPEAT LOAD$", txt, _re.M))
     n_named = len(_re.findall(r"^LOAD \d+ LOADTYPE None TITLE", txt, _re.M))
     assert ncomb == n_named and ncomb >= 4
-    # combination factors reference the EHF cases with the gravity factor:
-    # ULS1 block repeats (dead 1.3, pallets 1.4, EHF_dead 1.3, EHF_pallets 1.4)
-    block = txt.split("TITLE ULS ULS1 (imp +x)")[1].split("LOAD ")[0]
-    assert block.count("1.4") >= 2 and block.count("1.3") >= 2
+    n_notional = len(_re.findall(r"^NOTIONAL LOAD$", txt, _re.M))
+    assert n_notional == ncomb                           # every combo has one
+    # ULS1 (imp +x): pallets 1.4 -> notional 1.4/300 = 0.004667 in X;
+    # the -x twin flips the sign; cross-aisle uses Z at 1/200
+    blk = txt.split("TITLE ULS ULS1 (imp +x)")[1].split("LOAD ")[0]
+    assert _re.search(r"X 0\.00466", blk)
+    blk = txt.split("TITLE ULS ULS1 (imp -x)")[1].split("LOAD ")[0]
+    assert _re.search(r"X -0\.00466", blk)
+    blk = txt.split("TITLE ULS ULS1 (imp +y)")[1].split("LOAD ")[0]
+    assert _re.search(r"Z 0\.00700", blk)               # 1.4 * 1/200
