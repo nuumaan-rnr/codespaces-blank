@@ -162,8 +162,9 @@ def _combo_rows(model: RackModel) -> List[dict]:
         for d in dirs:
             ds = ("ACC" if any(k.startswith("accidental") for k in c.factors)
                   else c.kind)
+            cname = c.name.replace("@", "-")     # RSTAB drops '@' in names
             out.append({
-                "name": c.name + (f" (imp {d})" if d else ""),
+                "name": cname + (f" (imp {d})" if d else ""),
                 "kind": c.kind, "ds": ds, "imp": d,
                 "method": ("Second order analysis (P-Delta)"
                            if c.kind == "ULS"
@@ -599,11 +600,13 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     secs = {s.name: s for s in model.sections.values()}
     sidx = {nm: i + 1 for i, nm in enumerate(secs)}
     for nm, s in secs.items():
+        swapped = s.Iz > s.Iy            # RSTAB Iy = major axis
         iy, iz = max(s.Iy, s.Iz), min(s.Iy, s.Iz)
+        avy, avz = (s.Avz, s.Avy) if swapped else (s.Avy, s.Avz)
         ws.append([sidx[nm], _rstab_section_name(nm),
                    midx.get(s.material, 1), s.J / 1.0e4, iy / 1.0e4,
                    iz / 1.0e4, s.A / 1.0e2,
-                   (s.Avy or 0) / 1.0e2 or "", (s.Avz or 0) / 1.0e2 or "",
+                   (avy or 0) / 1.0e2 or "", (avz or 0) / 1.0e2 or "",
                    0, 0, s.width_b or "", s.depth_h or "",
                    f"app section '{nm}' - verify SHAPE-THIN orientation"])
 
@@ -647,14 +650,25 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                "L [mm]", "W [kg]", None, "Comment"])
     ws.merge_cells("C1:D1"); ws.merge_cells("E1:F1")
     ws.merge_cells("G1:H1"); ws.merge_cells("I1:J1")
+    # upright orientation: the two posts of a frame face each other -
+    # RSTAB practice rotates the posts on the LOWER-y line of each frame
+    # pair by 180 deg (validated against a corrected RSTAB rack model)
+    up_ys = sorted({model.nodes[m.node_i].y for m in _members_of(model)
+                    if _is_vertical(model, m)
+                    and getattr(m, "set_label", None)})
+    rot180_y = set(up_ys[0::2])
     for m in _members_of(model):
         s = model.section_of(m)
         Lm = _member_length(model, m)
         sno = sidx.get(s.name, 1)
         hi, hj = mem_hinge[m.id]
+        beta = 0
+        if _is_vertical(model, m) and getattr(m, "set_label", None) and \
+                model.nodes[m.node_i].y in rot180_y:
+            beta = 180
         ws.append([m.id,
                    "Truss (only N)" if m.mtype == "truss" else "Beam",
-                   nmap[m.node_i], nmap[m.node_j], "Angle", 0,
+                   nmap[m.node_i], nmap[m.node_j], "Angle", beta,
                    sno, sno, hi, hj, 0, 0, "",
                    round(Lm, 1), round(s.A * Lm * RHO, 1),
                    axis_code(m), ""])
@@ -730,14 +744,14 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                    round(length, 1), round(weight, 1), ""])
 
     # ---- 2.1 Load cases + the two native imperfection LCs ------------------
-    CAT = {"permanent": "Permanent", "variable": "Imposed",
+    CAT = {"permanent": "Dead", "variable": "Live",
            "placement": "Imposed", "other": "Imposed"}
     lc_no = {nm: i + 1 for i, nm in enumerate(model.load_cases)}
     LC_DESC = {"dead": "Dead Load (DL)",
                "pallets": "Level Load (LL)",
                "pallets_pattern": "Pattern Load (LL alternate levels)",
                "placement": "PL X at top level",
-               "placement_lo": "PL X at highest level <= 3 m",
+               "placement_lo": "PL X at highest level up to 3 m",
                "placement_y": "PL Y at frame top",
                "accidental_x": "AL X", "accidental_y": "AL Y"}
     phi_x = imp.value_for("+x") if imp else 1 / 300
@@ -759,7 +773,8 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     gravity = set(_gravity_cases(model))
     for nm, lc in model.load_cases.items():
         cat = "Accidental" if nm.startswith("accidental") else \
-            CAT.get(lc.case_type, "Imposed")
+            ("Imposed" if nm.startswith("placement")
+             else CAT.get(lc.case_type, "Live"))
         ws.append([f"LC{lc_no[nm]}", LC_DESC.get(nm, nm), "+", cat, "-",
                    0, 0, 1 if nm in gravity else 0,
                    "self-weight included as member loads - do NOT "
@@ -798,8 +813,34 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         r = [f"CO{co_i + 1}", DS.get(row["ds"], 1), row["name"], "+"]
         for f, lcn in pairs:
             r += [f, lcn]
-        r += ["", ""] * (npair - len(pairs))
+        r += [None, None] * (npair - len(pairs))
         r.append(row["method"])
+        ws.append(r)
+
+    # ---- 2.6 result combinations: one envelope per design situation -------
+    rc_groups: Dict[str, List[str]] = {}
+    for co_i, (row, pairs) in enumerate(pairs_data):
+        rc_groups.setdefault(row["ds"], []).append(f"CO{co_i + 1}")
+    ws = wb.create_sheet("2.6 Result Combinations")
+    ngr = max(len(v) for v in rc_groups.values())
+    h1 = ["Result", "Result Combination", None, None]
+    h2 = ["Combin.", "DS", "Description", "To Solve"]
+    for i in range(ngr):
+        h1 += [f"Loading.{i + 1}", None, None, None]
+        h2 += ["Factor", "No.", "Crit.", "Gr."]
+    ws.append(h1 + [None])
+    ws.append(h2 + ["Comment"])
+    ws.merge_cells("B1:C1")
+    for i in range(ngr):
+        c = 5 + 4 * i
+        ws.merge_cells(f"{get_column_letter(c)}1:{get_column_letter(c + 3)}1")
+    RC_LBL = {"ULS": "ULS", "ACC": "Accidental", "SLS": "SLS"}
+    for j, (ds, cos) in enumerate(rc_groups.items()):
+        r = [f"RC{j + 1}", 0, RC_LBL.get(ds, ds), "+"]
+        for co in cos:
+            r += [1, co, "v", "-"]
+        r += [None] * 4 * (ngr - len(cos))
+        r.append("envelope of all " + RC_LBL.get(ds, ds) + " combinations")
         ws.append(r)
 
     # ---- per-load-case load sheets ----------------------------------------
@@ -841,7 +882,6 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                            LC_DESC.get(nm, nm)])
 
     # ---- per-imperfection-LC 3.4 sheets ------------------------------------
-    all_sets = _id_ranges(set_no.values())
     STD = "EN 1993-1-1: 2005-07  (European Union)"
     for ax, no in imp_lc.items():
         ws = wb.create_sheet(f"LC{no} - 3.4 Imperfections")
@@ -853,11 +893,17 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                    "Adjustment Factor a [-]", "Load Combination",
                    "L/e0 [-]", "Criterion", "from e0 [-]", "Comment"])
         phi = phi_x if ax == "x" else phi_y
-        ws.append([1, "Sets of Members", all_sets,
+        odd = _id_ranges([n for n in set_no.values() if n % 2 == 1])
+        even = _id_ranges([n for n in set_no.values() if n % 2 == 0])
+        first, second = (even, odd) if ax == "x" else (odd, even)
+        ws.append([1, "Sets of Members", first,
                    "z" if ax == "x" else "y", STD, "Relative",
                    round(1 / phi, 2), "", "", "", 0, "", "",
-                   f"uniform +{ax.upper()} inclination; COs use factor -1 "
-                   f"for -{ax.upper()}"])
+                   f"alternating +{ax.upper()} inclination (RSTAB rack "
+                   "practice); COs use factor -1 for the minus direction"])
+        ws.append([2, "Sets of Members", second,
+                   "z" if ax == "x" else "y", STD, "Relative",
+                   round(-1 / phi, 2), "", "", "", 0, "", "", ""])
 
     # ---- import notes (untick this sheet in the import dialog) ------------
     ws = wb.create_sheet("IMPORT NOTES")

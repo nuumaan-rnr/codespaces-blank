@@ -487,9 +487,20 @@ def test_rstab8_export_tables(tmp_path):
     assert len(imp_lcs) == 2
     imp_sheets = [s for s in wb.sheetnames if "3.4 Imperfections" in s]
     assert len(imp_sheets) == 2
+    # alternating +/- inclination rows per upright set (RSTAB rack practice)
     incl = {r[6] for s in imp_sheets
             for r in wb[s].iter_rows(min_row=3, values_only=True)}
-    assert incl == {300.0, 200.0}
+    assert incl == {300.0, -300.0, 200.0, -200.0}
+    # front upright line of each frame rotated 180 deg; result-combination
+    # envelopes per design situation
+    rots = {(r[6], r[5]) for r in wb["1.7 Members"].iter_rows(min_row=3,
+                                                              values_only=True)
+            if r[0]}
+    assert (1, 180) in rots and (1, 0) in rots           # both post lines
+    rcs = [r for r in wb["2.6 Result Combinations"].iter_rows(
+        min_row=3, values_only=True) if r[0]]
+    assert {r[2] for r in rcs} == {"ULS", "Accidental", "SLS"}
+    assert all(r[6] == "v" for r in rcs)                 # variable criterion
     # combinations: WIDE rows (Factor/No. pairs), numeric DS, one row per
     # (combination x imp direction); the -x twin references the imp LC
     # with factor -1
