@@ -136,7 +136,7 @@ def test_default_base_stiffness_calculated_from_r899():
     up = m.sections[ups[0].section]
     E = m.materials[up.material].E
     expect = derived_base_stiffness(up, E, 2400.0)   # first beam level of _cfg
-    assert all(abs(s.ry - expect) < 1.0 and s.rx is False and s.rz is False
+    assert all(abs(s.ry - expect) < 1.0 and s.rx is False and s.rz is True
                for s in m.supports)
     assert 1.6e7 <= expect <= 2.4e8                  # in the measured band
     cases = run_all(m)

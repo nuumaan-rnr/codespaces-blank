@@ -1261,17 +1261,19 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # The EN 15512 floor-connection test gives the DOWN-AISLE rotational
     # stiffness (bending in the X-Z plane -> M_y -> ry).  Cross-aisle (rx) is
     # provided by the braced frame, so the base is pinned about X.  Apply the
-    # base spring in the down-aisle direction (ry) only.
+    # base spring in the down-aisle direction (ry) only.  The anchored base
+    # plate holds the upright TORSIONALLY (rz fixed) - the RSTAB reference
+    # models define the base support with jZ' fixed.
     for i in range(n_lines):
         for s in sides:
             k = k_base if k_base > 0 else False
             m.supports.append(Support(nid(i, s, 0), ux=True, uy=True, uz=True,
-                                      rx=False, ry=k, rz=False))
-    # spine tower bases: a pinned floor connection (translations held, free to
-    # rotate) for the spine between back-to-back modules / behind a single one
+                                      rx=False, ry=k, rz=True))
+    # spine tower bases: floor connection - translations held, rotations free
+    # except the base-plate torsion (rz), like the upright bases
     for node in spine_base_nodes:
         m.supports.append(Support(node, ux=True, uy=True, uz=True,
-                                  rx=False, ry=False, rz=False))
+                                  rx=False, ry=False, rz=True))
 
     # ---- load cases ---------------------------------------------------------
     dead = LoadCase("dead", "permanent")

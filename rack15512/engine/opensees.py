@@ -471,20 +471,28 @@ class OpenSeesEngine:
 
     def _fix_spinning_nodes(self, model: RackModel) -> None:
         """Restrain the rotations of nodes with no rotational stiffness
-        (connected only by truss members and without rotational support)."""
-        has_rot: Dict[int, bool] = {nid: False for nid in model.nodes}
+        (connected only by truss members and without rotational support).
+        Per-DOF: a support that holds only ONE rotation (e.g. the base-plate
+        torsion rz) must not stop the other two from being restrained."""
+        has_beam: Dict[int, bool] = {nid: False for nid in model.nodes}
         for m in model.members.values():
             if m.mtype == "beam":
-                has_rot[m.node_i] = True
-                has_rot[m.node_j] = True
+                has_beam[m.node_i] = True
+                has_beam[m.node_j] = True
+        sup_rot: Dict[int, List[bool]] = {}
         for sup in model.supports:
-            for r in sup.restraints()[3:]:
-                if r is True or (not isinstance(r, bool)
-                                 and isinstance(r, (int, float)) and r > 0):
-                    has_rot[sup.node] = True
-        for nid, ok in has_rot.items():
-            if not ok:
-                ops.fix(self._node_tag[nid], 0, 0, 0, 1, 1, 1)
+            held = [r is True or (not isinstance(r, bool)
+                                  and isinstance(r, (int, float)) and r > 0)
+                    for r in sup.restraints()[3:]]
+            prev = sup_rot.get(sup.node, [False, False, False])
+            sup_rot[sup.node] = [a or b for a, b in zip(prev, held)]
+        for nid, ok in has_beam.items():
+            if ok:
+                continue
+            held = sup_rot.get(nid, [False, False, False])
+            flags = [0 if h else 1 for h in held]
+            if any(flags):
+                ops.fix(self._node_tag[nid], 0, 0, 0, *flags)
 
     def _apply_loads(self, model: RackModel, loads: AssembledLoads) -> None:
         ops.timeSeries("Linear", 1)

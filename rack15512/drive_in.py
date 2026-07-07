@@ -449,9 +449,10 @@ def build_drive_in(cfg) -> RackModel:
     for k in range(nL + 1):
         for di in range(nDpos):
             kk = k_base if k_base and k_base > 0 else False
+            # base plate holds the upright torsionally (RSTAB jZ' fixed)
             m.supports.append(Support(node_of[(k, di, rz(0.0))], ux=True,
                                       uy=True, uz=True, rx=False, ry=kk,
-                                      rz=False))
+                                      rz=True))
 
     _loads(m, cfg, rail_levels, rail_length, node_of, rz, nDpos, nL,
            rail_members, acc_h)
