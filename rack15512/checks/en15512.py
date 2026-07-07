@@ -1252,6 +1252,51 @@ def all_ok(checks: List[CheckResult]) -> bool:
     return all(c.ok for c in checks)
 
 
+def set_member_envelopes(model, cases) -> List[dict]:
+    """ULS envelope of internal forces per SET OF MEMBERS - the continuous
+    upright lines and the per-level storey segments (RSTAB table 4.2 'Set
+    of Members - Internal Forces' style).  For every set: the most
+    compressive N with its CONCURRENT My/Mz (the buckling-check input),
+    the |My| and |Mz| envelopes, and the governing case of each.  Rows:
+    {set, N_kN, My_conc_kNm, Mz_conc_kNm, case_N, My_kNm, case_My,
+    Mz_kNm, case_Mz}."""
+    env: dict = {}
+
+    def upd(lbl, s, case_name):
+        e = env.setdefault(lbl, {"N": 0.0, "Myc": 0.0, "Mzc": 0.0,
+                                 "cN": "", "My": 0.0, "cMy": "",
+                                 "Mz": 0.0, "cMz": ""})
+        if s.N < e["N"]:
+            e.update(N=s.N, Myc=s.My, Mzc=s.Mz, cN=case_name)
+        if abs(s.My) > e["My"]:
+            e.update(My=abs(s.My), cMy=case_name)
+        if abs(s.Mz) > e["Mz"]:
+            e.update(Mz=abs(s.Mz), cMz=case_name)
+
+    for case in cases:
+        if case.kind != "ULS" or not case.converged:
+            continue
+        for mid, mr in case.members.items():
+            m = model.members.get(mid)
+            lbl = getattr(m, "set_label", None) if m else None
+            if not lbl:
+                continue
+            line = lbl.split(" \u00b7 ")[0]
+            for s in mr.stations:
+                upd(line, s, case.name)
+                upd(lbl, s, case.name)
+
+    def row(lbl, e):
+        return {"set": lbl, "N_kN": round(-e["N"] / 1e3, 2),
+                "My_conc_kNm": round(e["Myc"] / 1e6, 3),
+                "Mz_conc_kNm": round(e["Mzc"] / 1e6, 3), "case_N": e["cN"],
+                "My_kNm": round(e["My"] / 1e6, 3), "case_My": e["cMy"],
+                "Mz_kNm": round(e["Mz"] / 1e6, 3), "case_Mz": e["cMz"]}
+    lines = sorted(l for l in env if " \u00b7 " not in l)
+    segs = sorted(l for l in env if " \u00b7 " in l)
+    return [row(l, env[l]) for l in lines + segs]
+
+
 def upright_set_buckling_rows(model, checks: List[CheckResult]) -> List[dict]:
     """Aggregate the per-element BUCKLING checks into one row per upright
     member-set (the continuous storey segment between beam levels, RSTAB-style).

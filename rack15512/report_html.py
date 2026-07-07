@@ -391,6 +391,33 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
               f"(see CSV / full report)</td></tr>")
         a("</tbody></table>")
 
+    # ---- ULS envelope per set of members (RSTAB table 4.2 style) ----------
+    from .checks.en15512 import set_member_envelopes
+    envrows = set_member_envelopes(model, cases)
+    if envrows:
+        a(f"<h3>6.{n} ULS ENVELOPE PER SET OF MEMBERS &mdash; N / My / Mz"
+          "</h3>")
+        n += 1
+        a("<p class='basis'>Envelope of the internal forces over every "
+          "converged ULS case, per set of members: the continuous upright "
+          "lines and the per-level storey segments (LEVEL sets of the RSTAB "
+          "export). N is the most compressive axial force with its "
+          "CONCURRENT My and Mz &mdash; the input of the set buckling "
+          "check; the |My| and |Mz| columns are the independent envelopes "
+          "with their governing cases.</p>")
+        a("<table><thead><tr><th>Set</th><th>N (kN)</th>"
+          "<th>My conc. (kNm)</th><th>Mz conc. (kNm)</th><th>Case N</th>"
+          "<th>|My| env (kNm)</th><th>Case My</th>"
+          "<th>|Mz| env (kNm)</th><th>Case Mz</th></tr></thead><tbody>")
+        for r in envrows:
+            a(f"<tr><td>{_esc(r['set'])}</td><td>{r['N_kN']:.2f}</td>"
+              f"<td>{r['My_conc_kNm']:.3f}</td>"
+              f"<td>{r['Mz_conc_kNm']:.3f}</td><td>{_esc(r['case_N'])}</td>"
+              f"<td>{r['My_kNm']:.3f}</td><td>{_esc(r['case_My'])}</td>"
+              f"<td>{r['Mz_kNm']:.3f}</td><td>{_esc(r['case_Mz'])}</td>"
+              "</tr>")
+        a("</tbody></table>")
+
     # ---- upright buckling grouped by continuous member-set (RSTAB-style) ---
     from .checks.en15512 import upright_set_buckling_rows
     uset = upright_set_buckling_rows(model, checks)

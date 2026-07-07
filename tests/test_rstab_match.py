@@ -638,3 +638,33 @@ def test_rstab8_unit_profile_detection_and_conversion(tmp_path):
     assert wb[ml].cell(2, 8).value == "p [N/mm]"
     # detection round-trips on the custom profile too
     assert rstab_units_from_export(p1) == {**_RSTAB_DEFAULT_UNITS, **prof}
+
+
+def test_set_member_envelopes_uls():
+    # ULS envelope per set of members (RSTAB table 4.2 style): rows for the
+    # continuous upright lines AND the per-level storey segments, N most
+    # compressive with its CONCURRENT My/Mz, envelopes with governing cases.
+    from rack15512.analysis import run_all
+    from rack15512.checks.en15512 import set_member_envelopes
+
+    m = build_rack(RackConfig(
+        module="single", n_bays=2, bay_width=2300.0, frame_height=5000.0,
+        levels=[LevelSpec(gap=1500.0), LevelSpec(gap=1500.0)],
+        include_accidental=False, include_pattern=False,
+        include_placement=False, mesh_beam=1))
+    cases = run_all(m)
+    rows = set_member_envelopes(m, cases)
+    labels = [r["set"] for r in rows]
+    lines = [l for l in labels if " · " not in l]
+    segs = [l for l in labels if " · " in l]
+    assert len(lines) == 6                      # 3 frames x 2 uprights
+    assert len(segs) == 6 * 3                   # base->L1, L1->L2, L2->top
+    r0 = next(r for r in rows if " · " not in r["set"])
+    assert r0["N_kN"] > 0 and r0["case_N"].startswith("ULS")
+    # the line envelope bounds each of its segment envelopes
+    for seg in segs:
+        line = seg.split(" · ")[0]
+        rl = next(r for r in rows if r["set"] == line)
+        rs = next(r for r in rows if r["set"] == seg)
+        assert rl["N_kN"] >= rs["N_kN"] - 1e-6
+        assert rl["Mz_kNm"] >= rs["Mz_kNm"] - 1e-6
