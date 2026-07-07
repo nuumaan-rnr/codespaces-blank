@@ -217,21 +217,26 @@ def to_staad(model: RackModel, path: str) -> str:
         L.append(f"G {mat.G}")
     L.append("END DEFINE MATERIAL")
 
-    # prismatic properties; bending-plane mapping:
-    #   vertical member (upright): STAAD local z // global Z_staad
-    #     (= cross-aisle) -> MZ/IZ = down-aisle flexure = app Iz;  IY = app Iy
-    #   horizontal member: STAAD local y is up -> gravity bending is MZ/IZ
-    #     -> IZ = app strong axis Iy;  IY = app Iz
+    # prismatic properties.  The app's local axes already match STAAD's
+    # (beams: local y up, gravity bending about local z -> app Iz is the
+    # strong axis; uprights: local y = down-aisle X), so Iy/Iz map 1:1.
+    # YD/ZD give the physical depth/width so STAAD renders the members
+    # (3D view / stress display); explicit AX/IX/IY/IZ still govern the
+    # analysis.
     L.append("MEMBER PROPERTY AMERICAN")
     for m in _members_of(model):
         s = model.section_of(m)
         a = s.A * (m.area_factor or 1.0)
-        if _is_vertical(model, m):
-            iy, iz = s.Iy, s.Iz
-        else:
-            iy, iz = s.Iz, s.Iy
-        L.append(f"{m.id} PRIS AX {a:.3f} IX {s.J:.1f} IY {iy:.1f} "
-                 f"IZ {iz:.1f}")
+        b = s.width_b or math.sqrt(max(s.A, 1.0))
+        h = s.depth_h or math.sqrt(max(s.A, 1.0))
+        # YD = dimension along local y: beams have local y UP -> depth h;
+        # uprights have local y down-aisle -> flange width b
+        yd, zd = (b, h) if _is_vertical(model, m) else (h, b)
+        line = (f"{m.id} PRIS YD {yd:.1f} ZD {zd:.1f} AX {a:.3f} "
+                f"IX {s.J:.1f} IY {s.Iy:.1f} IZ {s.Iz:.1f}")
+        if s.Avy and s.Avz:
+            line += f" AY {s.Avy:.1f} AZ {s.Avz:.1f}"
+        L.append(line)
 
     L.append("CONSTANTS")
     by_mat: Dict[str, List[int]] = {}

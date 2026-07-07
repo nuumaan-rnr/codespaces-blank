@@ -550,6 +550,16 @@ def test_staad_deck_complete_and_runnable(tmp_path):
 
     assert "PDELTA 30 ANALYSIS SMALLDELTA" in txt
     assert "MEMBER TRUSS" in txt                         # braces axial-only
+    # members carry the full physical + analysis properties: YD/ZD so
+    # STAAD renders the sections, Iy/Iz in APP order (the app's local
+    # axes match STAAD's - a horizontal beam's strong axis is IZ)
+    pris = [l for l in txt.splitlines() if " PRIS " in l]
+    assert pris and all("YD " in l and "ZD " in l for l in pris)
+    # shear areas AY/AZ appear when the section provides them (optional)
+    import re as _re2
+    for l in pris:
+        mm = _re2.search(r"IY (\d+\.?\d*) IZ (\d+\.?\d*)", l)
+        assert mm
     # per-degree hinge spring: 2.039e7 N*mm/rad * pi/180 = 355872.6 N*mm/deg
     assert _re.search(r"KMZ 355872\.\d", txt)
     # no standalone imperfection load cases - the imperfection lives inside
