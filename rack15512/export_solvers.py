@@ -826,27 +826,38 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     rc_groups: Dict[str, List[str]] = {}
     for co_i, (row, pairs) in enumerate(pairs_data):
         rc_groups.setdefault(row["ds"], []).append(f"CO{co_i + 1}")
+    # RSTAB's 2.6 table is 29 columns wide (6 Loading groups + Comment) -
+    # envelopes with more combinations are split over several RC rows
     ws = wb.create_sheet("2.6 Result Combinations")
-    ngr = max(len(v) for v in rc_groups.values())
+    NGR = 6
     h1 = ["Result", "Result Combination", None, None]
     h2 = ["Combin.", "DS", "Description", "To Solve"]
-    for i in range(ngr):
+    for i in range(NGR):
         h1 += [f"Loading.{i + 1}", None, None, None]
         h2 += ["Factor", "No.", "Crit.", "Gr."]
     ws.append(h1 + [None])
     ws.append(h2 + ["Comment"])
     ws.merge_cells("B1:C1")
-    for i in range(ngr):
+    for i in range(NGR):
         c = 5 + 4 * i
         ws.merge_cells(f"{get_column_letter(c)}1:{get_column_letter(c + 3)}1")
     RC_LBL = {"ULS": "ULS", "ACC": "Accidental", "SLS": "SLS"}
-    for j, (ds, cos) in enumerate(rc_groups.items()):
-        r = [f"RC{j + 1}", 0, RC_LBL.get(ds, ds), "+"]
-        for co in cos:
-            r += [1, co, "v", "-"]
-        r += [None] * 4 * (ngr - len(cos))
-        r.append("envelope of all " + RC_LBL.get(ds, ds) + " combinations")
-        ws.append(r)
+    rc_i = 0
+    for ds, cos in rc_groups.items():
+        parts = [cos[k:k + NGR] for k in range(0, len(cos), NGR)]
+        for p_i, part in enumerate(parts):
+            rc_i += 1
+            lbl = RC_LBL.get(ds, ds)
+            if len(parts) > 1:
+                lbl += f" {p_i + 1}/{len(parts)}"
+            r = [f"RC{rc_i}", 0, lbl, "+"]
+            for co in part:
+                r += [1, co, "v", "-"]
+            r += [None] * 4 * (NGR - len(part))
+            r.append("envelope of " + RC_LBL.get(ds, ds) + " combinations"
+                     + (" (split - merge in the RC dialog if desired)"
+                        if len(parts) > 1 else ""))
+            ws.append(r)
 
     # ---- per-load-case load sheets ----------------------------------------
     for nm, lc in model.load_cases.items():

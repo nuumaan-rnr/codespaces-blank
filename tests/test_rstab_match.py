@@ -497,9 +497,11 @@ def test_rstab8_export_tables(tmp_path):
                                                               values_only=True)
             if r[0]}
     assert (1, 180) in rots and (1, 0) in rots           # both post lines
-    rcs = [r for r in wb["2.6 Result Combinations"].iter_rows(
-        min_row=3, values_only=True) if r[0]]
-    assert {r[2] for r in rcs} == {"ULS", "Accidental", "SLS"}
+    ws26 = wb["2.6 Result Combinations"]
+    assert ws26.max_column == 29                         # RSTAB's fixed width
+    rcs = [r for r in ws26.iter_rows(min_row=3, values_only=True) if r[0]]
+    kinds = {str(r[2]).split(" ")[0] for r in rcs}
+    assert kinds == {"ULS", "Accidental", "SLS"}
     assert all(r[6] == "v" for r in rcs)                 # variable criterion
     # combinations: WIDE rows (Factor/No. pairs), numeric DS, one row per
     # (combination x imp direction); the -x twin references the imp LC
