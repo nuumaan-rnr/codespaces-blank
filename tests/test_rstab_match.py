@@ -474,6 +474,7 @@ def test_rstab8_export_tables(tmp_path):
                                                   values_only=True))[0]
     assert sup[7] == "+" and sup[8] == "+" and sup[9] == "+"
     assert isinstance(sup[11], (int, float))               # jY' spring
+    assert sup[12] == "+"                # jZ' base-plate torsion FIXED
     # base diagram rows in kN / kNcm/rad incl. the tearing branch
     d = list(wb["INFO Base Stiffness"].iter_rows(min_row=3,
                                               values_only=True))
@@ -487,10 +488,14 @@ def test_rstab8_export_tables(tmp_path):
     assert len(imp_lcs) == 2
     imp_sheets = [s for s in wb.sheetnames if "3.4 Imperfections" in s]
     assert len(imp_sheets) == 2
-    # alternating +/- inclination rows per upright set (RSTAB rack practice)
-    incl = {r[6] for s in imp_sheets
-            for r in wb[s].iter_rows(min_row=3, values_only=True)}
-    assert incl == {300.0, -300.0, 200.0, -200.0}
+    # ONE uniform inclination row over all upright sets per direction,
+    # with RSTAB's exact standard string (else the import drops the rows)
+    imp_rows = [r for s in imp_sheets
+                for r in wb[s].iter_rows(min_row=3, values_only=True) if r[0]]
+    assert len(imp_rows) == 2
+    assert {r[6] for r in imp_rows} == {300.0, 200.0}
+    assert all(r[4] == "EN 1993-1-1: 2005-07  (Eurocode 3)"
+               for r in imp_rows)
     # front upright line of each frame rotated 180 deg; result-combination
     # envelopes per design situation
     rots = {(r[6], r[5]) for r in wb["1.7 Members"].iter_rows(min_row=3,

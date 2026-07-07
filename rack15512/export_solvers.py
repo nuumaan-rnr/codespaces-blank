@@ -706,12 +706,14 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         groups.setdefault(key, []).append(nmap[sup.node])
     for i, (key, nodes) in enumerate(groups.items()):
         ux, uy, uz, rx, ry, rz = key
-        note = ("base plate; jY' linear spring - optionally use the "
-                "axial-dependent diagram (report table)" if tbl
-                else "base plate")
+        note = ("base plate (jZ' torsion fixed); jY' is the LINEAR base "
+                "spring - set 0 when entering the axial-dependent diagram "
+                "of the INFO sheet as a support nonlinearity vs PZ'"
+                if tbl else
+                "base plate (jZ' torsion fixed); jY' linear base spring")
         ws.append([i + 1, _id_ranges(nodes), "XYZ", 0, 0, 0, "-",
                    dof(ux), dof(uy), dof(uz),
-                   dof(rx), dof(ry), dof(rz), note])
+                   dof(rx), dof(ry), "+", note])
     if tbl:
         ws = wb.create_sheet("INFO Base Stiffness")
         ws.append(["Support", "Degree of", "Dependent", "Force", "C",
@@ -898,7 +900,7 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                            LC_DESC.get(nm, nm)])
 
     # ---- per-imperfection-LC 3.4 sheets ------------------------------------
-    STD = "EN 1993-1-1: 2005-07  (European Union)"
+    STD = "EN 1993-1-1: 2005-07  (Eurocode 3)"
     for ax, no in imp_lc.items():
         ws = wb.create_sheet(f"LC{no} - 3.4 Imperfections")
         ws.append([None, None, "On Sets of Members", None, None, None,
@@ -909,17 +911,11 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                    "Adjustment Factor a [-]", "Load Combination",
                    "L/e0 [-]", "Criterion", "from e0 [-]", "Comment"])
         phi = phi_x if ax == "x" else phi_y
-        odd = _id_ranges([n for n in set_no.values() if n % 2 == 1])
-        even = _id_ranges([n for n in set_no.values() if n % 2 == 0])
-        first, second = (even, odd) if ax == "x" else (odd, even)
-        ws.append([1, "Sets of Members", first,
+        ws.append([1, "Sets of Members", _id_ranges(set_no.values()),
                    "z" if ax == "x" else "y", STD, "Relative",
                    round(1 / phi, 2), "", "", "", 0, "", "",
-                   f"alternating +{ax.upper()} inclination (RSTAB rack "
-                   "practice); COs use factor -1 for the minus direction"])
-        ws.append([2, "Sets of Members", second,
-                   "z" if ax == "x" else "y", STD, "Relative",
-                   round(-1 / phi, 2), "", "", "", 0, "", "", ""])
+                   f"uniform +{ax.upper()} inclination on all upright "
+                   "lines; COs use factor -1 for the minus direction"])
 
     # ---- import notes (untick this sheet in the import dialog) ------------
     ws = wb.create_sheet("IMPORT NOTES")
