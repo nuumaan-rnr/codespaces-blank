@@ -456,7 +456,7 @@ def test_rstab8_export_tables(tmp_path):
     wb = openpyxl.load_workbook(path)
     for sheet in ("1.1 Nodes", "1.2 Materials", "1.3 Cross-Sections ",
                   "1.4 Member Hinges", "1.7 Members", "1.8 Nodal Supports",
-                  "1.8.7 Stiffness Diagram", "1.11 Sets of Members",
+                  "INFO Base Stiffness", "1.11 Sets of Members",
                   "2.1 Load Cases", "2.5 Load Combinations"):
         assert sheet in wb.sheetnames, sheet
 
@@ -475,8 +475,8 @@ def test_rstab8_export_tables(tmp_path):
     assert sup[7] == "+" and sup[8] == "+" and sup[9] == "+"
     assert isinstance(sup[11], (int, float))               # jY' spring
     # base diagram rows in kN / kNcm/rad incl. the tearing branch
-    d = list(wb["1.8.7 Stiffness Diagram"].iter_rows(min_row=3,
-                                                     values_only=True))
+    d = list(wb["INFO Base Stiffness"].iter_rows(min_row=3,
+                                              values_only=True))
     assert (30.0, 3975.0) in {(r[3], r[4]) for r in d}
     assert any(r[2] == "PZ'-" for r in d)                  # tearing (uplift)
     n_sets = wb["1.11 Sets of Members"].max_row - 2
@@ -507,6 +507,17 @@ def test_rstab8_export_tables(tmp_path):
     assert any(f == -1 for f, lc in pairs_mx)
     # per-load-case load sheets exist (RSTAB export style)
     assert any(s.endswith("3.2 Member Loads") for s in wb.sheetnames)
+    # merged group-header cells replicate RSTAB's own export (the import
+    # rejects flat headers with 'number of columns is not equal')
+    assert {str(r) for r in wb["1.1 Nodes"].merged_cells.ranges} == {"D1:F1"}
+    assert {str(r) for r in wb["2.1 Load Cases"].merged_cells.ranges} == \
+        {"E1:H1"}
+    co_m = {str(r) for r in wb["2.5 Load Combinations"].merged_cells.ranges}
+    assert "B1:C1" in co_m and "E1:F1" in co_m
+    for s in wb.sheetnames:
+        if s.endswith("3.2 Member Loads"):
+            assert {str(r) for r in wb[s].merged_cells.ranges} == {"H1:M1"}
+    assert "IMPORT NOTES" in wb.sheetnames
 
 
 def test_staad_deck_complete_and_runnable(tmp_path):
