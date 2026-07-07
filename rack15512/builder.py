@@ -1232,7 +1232,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
 
     # ---- semi-rigid floor connections ---------------------------------------
     n_uprights = len(sides) * n_lines
-    auto_base_table = None
+    auto_base_table = base_table_ref = None
     if cfg.base_stiffness == "auto":
         if cfg.master:
             n_modules = len(rack_pairs)
@@ -1243,10 +1243,13 @@ def build_rack(cfg: RackConfig) -> RackModel:
             # stepped axial-dependent base (RSTAB stiffness diagram): the full
             # tested table [[P_kN, C_Nmm/rad], ...] with tearing toward P=0;
             # the engine updates each column base from its own axial.
-            if cfg.base_axial_dependent and up.name in cfg.master.base_tables:
-                auto_base_table = ([[0.0, 1.0e3]] +
-                                   [[row[0] / 1.0e3, row[1]]
-                                    for row in cfg.master.base_tables[up.name]])
+            if up.name in cfg.master.base_tables:
+                table = ([[0.0, 1.0e3]] +
+                         [[row[0] / 1.0e3, row[1]]
+                          for row in cfg.master.base_tables[up.name]])
+                base_table_ref = table
+                if cfg.base_axial_dependent:
+                    auto_base_table = table
         else:
             # no test data: keep the historical selective default
             k_base = 5.0e8
@@ -1462,6 +1465,7 @@ def build_rack(cfg: RackConfig) -> RackModel:
         alpha_hm=cfg.imperfection_alpha_hm, height=H,
         directions=["+x", "-x", "+y", "-y"])
     m.base_axial_table = cfg.base_axial_table or auto_base_table
+    m.base_table_ref = m.base_axial_table or base_table_ref
     m.model_connector_looseness = cfg.model_connector_looseness
     m.analysis.stiffness_gamma_m = cfg.stiffness_gamma_m
     # steel elastic constants override (e.g. IS 2062: E=200000, G=76900)

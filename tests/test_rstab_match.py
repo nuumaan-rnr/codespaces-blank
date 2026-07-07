@@ -473,7 +473,7 @@ def test_rstab8_export_tables(tmp_path):
     sup = list(wb["1.8 Nodal Supports"].iter_rows(min_row=3,
                                                   values_only=True))[0]
     assert sup[7] == "+" and sup[8] == "+" and sup[9] == "+"
-    assert isinstance(sup[11], (int, float))               # jY' spring
+    assert sup[11] == 0                  # jY' zeroed - diagram on INFO sheet
     assert sup[12] == "+"                # jZ' base-plate torsion FIXED
     # base diagram rows in kN / kNcm/rad incl. the tearing branch
     d = list(wb["INFO Base Stiffness"].iter_rows(min_row=3,
@@ -487,13 +487,13 @@ def test_rstab8_export_tables(tmp_path):
     imp_lcs = [r for r in lcs if r[3] == "Imperfection"]
     assert len(imp_lcs) == 2
     imp_sheets = [s for s in wb.sheetnames if "3.4 Imperfections" in s]
-    assert len(imp_sheets) == 2
-    # ONE uniform inclination row over all upright sets per direction,
-    # with RSTAB's exact standard string (else the import drops the rows)
+    # every LC gets a 3.4 sheet (RSTAB export style); only the two
+    # imperfection LCs carry rows - alternating +/- per upright set with
+    # RSTAB's exact standard string (else the import drops the rows)
     imp_rows = [r for s in imp_sheets
                 for r in wb[s].iter_rows(min_row=3, values_only=True) if r[0]]
-    assert len(imp_rows) == 2
-    assert {r[6] for r in imp_rows} == {300.0, 200.0}
+    assert len(imp_rows) == 4
+    assert {r[6] for r in imp_rows} == {300.0, -300.0, 200.0, -200.0}
     assert all(r[4] == "EN 1993-1-1: 2005-07  (Eurocode 3)"
                for r in imp_rows)
     # front upright line of each frame rotated 180 deg; result-combination
@@ -505,9 +505,12 @@ def test_rstab8_export_tables(tmp_path):
     ws26 = wb["2.6 Result Combinations"]
     assert ws26.max_column == 29                         # RSTAB's fixed width
     rcs = [r for r in ws26.iter_rows(min_row=3, values_only=True) if r[0]]
-    kinds = {str(r[2]).split(" ")[0] for r in rcs}
-    assert kinds == {"ULS", "Accidental", "SLS"}
-    assert all(r[6] == "v" for r in rcs)                 # variable criterion
+    assert rcs == []                     # headers only (FINAL reference)
+    # empty structural tables exported like RSTAB's own workbook
+    for sheet in ("1.5 Member Eccentricities", "1.6 Member Divisions",
+                  "1.9 Member Elastic Foundations",
+                  "1.10 Member Nonlinearities"):
+        assert sheet in wb.sheetnames, sheet
     # combinations: WIDE rows (Factor/No. pairs), numeric DS, one row per
     # (combination x imp direction); the -x twin references the imp LC
     # with factor -1

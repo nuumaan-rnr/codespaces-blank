@@ -645,8 +645,9 @@ def to_rstab8_xlsx(model: RackModel, path: str,
     mats = {m.name: m for m in model.materials.values()}
     midx = {nm: i + 1 for i, nm in enumerate(mats)}
     for nm, m in mats.items():
+        nu = getattr(m, "nu", 0.3)
         ws.append([midx[nm], _rstab_material_name(m), m.E * F["modulus"],
-                   m.G * F["modulus"],
+                   m.E / (2.0 * (1.0 + nu)) * F["modulus"],
                    getattr(m, "nu", 0.3), 78.5, 1.2e-05, 1.0,
                    "Isotropic Linear Elastic",
                    f"app material '{nm}', fy={m.fy:.0f} N/mm2"])
@@ -709,6 +710,40 @@ def to_rstab8_xlsx(model: RackModel, path: str,
         ws.append([i + 1, "Local x,y,z", "-", "-", "-", "-", jy, "-",
                    "beam-end connector"])
 
+    # ---- empty structural tables (RSTAB exports them even when unused) ---
+    ws = wb.create_sheet("1.5 Member Eccentricities")
+    ws.append(["Eccen.", "Reference",
+               f"Member Start - Eccentricity [{U['length']}]", None, None,
+               f"Member End - Eccentricity [{U['length']}]", None, None,
+               "Cross-Section Alignment", None,
+               "Transverse offset from cross-section of another object",
+               None, None, None, "Axial offset from adjoining objects at",
+               None, None])
+    ws.append(["No.", "System", "ei,X", "ei,Y", "ei,Z", "ej,X", "ej,Y",
+               "ej,Z", "y-Axis", "z-Axis", "Object Type", "Object No.",
+               "y-Axis", "z-Axis", "Member Start", "Member End", "Comment"])
+    ws.merge_cells("C1:E1"); ws.merge_cells("F1:H1"); ws.merge_cells("I1:J1")
+    ws.merge_cells("K1:N1"); ws.merge_cells("O1:P1")
+    ws = wb.create_sheet("1.6 Member Divisions")
+    ws.append(["Division", "Number of",
+               "Relative distance of point from the member start",
+               None, None, None, None, None, None, None, None, None])
+    ws.append(["No.", "Points", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+               "x8", "x9", "Comment"])
+    ws.merge_cells("C1:K1")
+    ws = wb.create_sheet("1.9 Member Elastic Foundations")
+    ws.append(["Found.", None, "C1,x", "C1,y", "C1,z", "C2,x", "C2,y",
+               "C2,z", "C@j", "Foundation", None])
+    ws.append(["No.", "On Members No.", "[kN/cm2]", "[kN/cm2]", "[kN/cm2]",
+               f"[{U['force']}]", f"[{U['force']}]", f"[{U['force']}]",
+               "[kNcm/rad/cm]", "Ineffectiveness", "Comment"])
+    ws = wb.create_sheet("1.10 Member Nonlinearities")
+    ws.append(["Nonlin.", None, "Type of", "Nonlinear Parameters", None,
+               None, None, None, None, None])
+    ws.append(["No.", "On Members No.", "Nonlinearity", "N", "Vy", "Vz",
+               "MT", "My", "Mz", "Comment"])
+    ws.merge_cells("D1:I1")
+
     # ---- 1.7 Members -------------------------------------------------------
     ws = wb.create_sheet("1.7 Members")
     ws.append(["Member", None, "Node No.", None, "Member Rotation", None,
@@ -744,7 +779,8 @@ def to_rstab8_xlsx(model: RackModel, path: str,
                    axis_code(m), ""])
 
     # ---- 1.8 Nodal supports ('+' fixed, '-' free, number = spring) --------
-    tbl = getattr(model, "base_axial_table", None)
+    tbl = (getattr(model, "base_axial_table", None)
+           or getattr(model, "base_table_ref", None))
     ws = wb.create_sheet("1.8 Nodal Supports")
     ws.append(["Support", None, "Support Rotation [\u00b0]", None, None,
                None, "Column",
@@ -772,14 +808,14 @@ def to_rstab8_xlsx(model: RackModel, path: str,
         groups.setdefault(key, []).append(nmap[sup.node])
     for i, (key, nodes) in enumerate(groups.items()):
         ux, uy, uz, rx, ry, rz = key
-        note = ("base plate (jZ' torsion fixed); jY' is the LINEAR base "
-                "spring - set 0 when entering the axial-dependent diagram "
-                "of the INFO sheet as a support nonlinearity vs PZ'"
-                if tbl else
+        note = ("base plate (jZ' torsion fixed); jY' = 0 - enter the "
+                "axial-dependent diagram of the INFO sheet as a support "
+                "nonlinearity vs PZ' (linear equivalent: "
+                f"{dof(ry)} {U['spring_rot']})" if tbl else
                 "base plate (jZ' torsion fixed); jY' linear base spring")
         ws.append([i + 1, _id_ranges(nodes), "XYZ", 0, 0, 0, "-",
                    dof(ux), dof(uy), dof(uz),
-                   dof(rx), dof(ry), "+", note])
+                   dof(rx), 0 if tbl else dof(ry), "+", note])
     if tbl:
         ws = wb.create_sheet("INFO Base Stiffness")
         ws.append(["Support", "Degree of", "Dependent", "Force", "C",
@@ -852,7 +888,7 @@ def to_rstab8_xlsx(model: RackModel, path: str,
             ("Imposed" if nm.startswith("placement")
              else CAT.get(lc.case_type, "Live"))
         ws.append([f"LC{lc_no[nm]}", LC_DESC.get(nm, nm), "+", cat, "-",
-                   0, 0, 1 if nm in gravity else 0,
+                   0, 0, 1,
                    "self-weight included as member loads - do NOT "
                    "activate" if nm == "dead" else ""])
     for ax, no in imp_lc.items():
@@ -912,69 +948,55 @@ def to_rstab8_xlsx(model: RackModel, path: str,
     for i in range(NGR):
         c = 5 + 4 * i
         ws.merge_cells(f"{get_column_letter(c)}1:{get_column_letter(c + 3)}1")
-    RC_LBL = {"ULS": "ULS", "ACC": "Accidental", "SLS": "SLS"}
-    rc_i = 0
-    for ds, cos in rc_groups.items():
-        parts = [cos[k:k + NGR] for k in range(0, len(cos), NGR)]
-        for p_i, part in enumerate(parts):
-            rc_i += 1
-            lbl = RC_LBL.get(ds, ds)
-            if len(parts) > 1:
-                lbl += f" {p_i + 1}/{len(parts)}"
-            r = [f"RC{rc_i}", 0, lbl, "+"]
-            for co in part:
-                r += [1, co, "v", "-"]
-            r += [None] * 4 * (NGR - len(part))
-            r.append("envelope of " + RC_LBL.get(ds, ds) + " combinations"
-                     + (" (split - merge in the RC dialog if desired)"
-                        if len(parts) > 1 else ""))
-            ws.append(r)
+    # headers only - the FINAL reference model defines no RCs; the
+    # rc_groups mapping stays available for future use
+    del rc_groups
 
-    # ---- per-load-case load sheets ----------------------------------------
-    for nm, lc in model.load_cases.items():
-        no = lc_no[nm]
-        if lc.nodal_loads:
-            ws = wb.create_sheet(f"LC{no} - 3.1 Nodal Loads")
-            ws.append([None, None, "Definition", "Coordinate",
-                       f"Force [{U['force']}]", None, None, "Moment [kNm]",
-                       None, None, "Direction", "Force", "Moment", None])
-            ws.append(["No.", "On Nodes No.", "Type", "System", "PX", "PY",
-                       "PZ", "MX", "MY", "MZ", "Type",
-                       f"P [{U['force']}]", "M [kNm]", "Comment"])
-            ws.merge_cells("E1:G1"); ws.merge_cells("H1:J1")
-            ff = F["force"]
-            for j, nl in enumerate(lc.nodal_loads):
-                ws.append([j + 1, nmap[nl.node], "By components",
-                           "0  |  Global XYZ",
-                           round(nl.fx * ff, 6), round(nl.fy * ff, 6),
-                           round(-nl.fz * ff, 6), 0, 0, 0, "", "", "",
-                           LC_DESC.get(nm, nm)])
-        byq: dict = {}
-        for ml in lc.member_loads:
-            if abs(ml.qz) > 1e-12:
-                byq.setdefault(round(-ml.qz * F["udl"], 8),
-                               []).append(ml.member)
-        if byq:
-            ws = wb.create_sheet(f"LC{no} - 3.2 Member Loads")
-            ws.append([None, None, None, None, "Load", "Load", "Reference",
-                       "Member Load Parameters", None, None, None, None,
-                       None, "Distance", "Over Total", None])
-            ws.append(["No.", "Reference to", "On Members No.", "Load Type",
-                       "Distribution", "Direction", "Length",
-                       f"p [{U['udl']}]",
-                       None, None, None, None, None, "in %", "Length",
-                       "Comment"])
-            ws.merge_cells("H1:M1")
-            for j, (q, mids) in enumerate(sorted(byq.items())):
-                ws.append([j + 1, "Members", _id_ranges(mids), "Force",
-                           "Uniform", "Z", "True Length", q,
-                           "", "", "", "", "", "-", "-",
-                           LC_DESC.get(nm, nm)])
+    # ---- per-load-case load sheets (RSTAB exports ALL four tables per
+    # load case, empty or not; sheet names truncate at Excel's 31 chars) ---
+    def sheet31(no, nodal, desc):
+        ws = wb.create_sheet(f"LC{no} - 3.1 Nodal Loads"[:31])
+        ws.append([None, None, "Definition", "Coordinate",
+                   f"Force [{U['force']}]", None, None, "Moment [kNcm]",
+                   None, None, "Direction", "Force", "Moment", None])
+        ws.append(["No.", "On Nodes No.", "Type", "System", "PX", "PY",
+                   "PZ", "MX", "MY", "MZ", "Type",
+                   f"P [{U['force']}]", "M [kNcm]", "Comment"])
+        ws.merge_cells("E1:G1"); ws.merge_cells("H1:J1")
+        ff = F["force"]
+        for j, nl in enumerate(nodal):
+            ws.append([j + 1, nmap[nl.node], "By components",
+                       "0  |  Global XYZ",
+                       round(nl.fx * ff, 6), round(nl.fy * ff, 6),
+                       round(-nl.fz * ff, 6), 0, 0, 0, "", "", "", desc])
 
-    # ---- per-imperfection-LC 3.4 sheets ------------------------------------
-    STD = "EN 1993-1-1: 2005-07  (Eurocode 3)"
-    for ax, no in imp_lc.items():
-        ws = wb.create_sheet(f"LC{no} - 3.4 Imperfections")
+    def sheet32(no, byq, desc):
+        ws = wb.create_sheet(f"LC{no} - 3.2 Member Loads"[:31])
+        ws.append([None, None, None, None, "Load", "Load", "Reference",
+                   "Member Load Parameters", None, None, None, None,
+                   None, "Distance", "Over Total", None])
+        ws.append(["No.", "Reference to", "On Members No.", "Load Type",
+                   "Distribution", "Direction", "Length",
+                   f"p [{U['udl']}]",
+                   None, None, None, None, None, "in %", "Length",
+                   "Comment"])
+        ws.merge_cells("H1:M1")
+        for j, (q, mids) in enumerate(sorted(byq.items())):
+            ws.append([j + 1, "Members", _id_ranges(mids), "Force",
+                       "Uniform", "Z", "True Length", q,
+                       "", "", "", "", "", "-", "-", desc])
+
+    def sheet33(no):
+        ws = wb.create_sheet(f"LC{no} - 3.3 Imposed Nodal Deforma"[:31])
+        ws.append([None, None, "Displacement", None, None, "Rotation",
+                   None, None, None])
+        ws.append(["No.", "On Nodes No.", f"uX' [{U['length']}]",
+                   f"uY' [{U['length']}]", f"uZ' [{U['length']}]",
+                   "jX' [rad]", "jY' [rad]", "jZ' [rad]", "Comment"])
+        ws.merge_cells("C1:E1"); ws.merge_cells("F1:H1")
+
+    def sheet34(no, rows34):
+        ws = wb.create_sheet(f"LC{no} - 3.4 Imperfections"[:31])
         ws.append([None, None, "On Sets of Members", None, None, None,
                    "Inclination", "Notional Load", "Force Level", "Gravity",
                    "Precamber", "Activity", "Apply e0", None])
@@ -982,12 +1004,40 @@ def to_rstab8_xlsx(model: RackModel, path: str,
                    "Reference", "1/j0 [-]", "Factor [-]",
                    "Adjustment Factor a [-]", "Load Combination",
                    "L/e0 [-]", "Criterion", "from e0 [-]", "Comment"])
+        for j, (setlist, direction, incl, comment) in enumerate(rows34):
+            ws.append([j + 1, "Sets of Members", setlist, direction, STD,
+                       "Relative", incl, "", "", "", 0, "", "", comment])
+
+    STD = "EN 1993-1-1: 2005-07  (Eurocode 3)"
+    odd = _id_ranges([n for n in set_no.values() if n % 2 == 1])
+    even = _id_ranges([n for n in set_no.values() if n % 2 == 0])
+    for nm, lc in model.load_cases.items():
+        no = lc_no[nm]
+        desc = LC_DESC.get(nm, nm)
+        byq: dict = {}
+        for ml in lc.member_loads:
+            if abs(ml.qz) > 1e-12:
+                byq.setdefault(round(-ml.qz * F["udl"], 8),
+                               []).append(ml.member)
+        sheet31(no, lc.nodal_loads, desc)
+        sheet32(no, byq, desc)
+        sheet33(no)
+        sheet34(no, [])
+    # imperfection LCs: alternating +/- inclination per upright set (the
+    # FINAL reference model: X even sets +, odd -; Y odd sets +, even -)
+    for ax, no in imp_lc.items():
         phi = phi_x if ax == "x" else phi_y
-        ws.append([1, "Sets of Members", _id_ranges(set_no.values()),
-                   "z" if ax == "x" else "y", STD, "Relative",
-                   round(1 / phi, 2), "", "", "", 0, "", "",
-                   f"uniform +{ax.upper()} inclination on all upright "
-                   "lines; COs use factor -1 for the minus direction"])
+        first, second = (even, odd) if ax == "x" else (odd, even)
+        d = "z" if ax == "x" else "y"
+        sheet31(no, [], imp_desc[ax])
+        sheet32(no, {}, imp_desc[ax])
+        sheet33(no)
+        sheet34(no, [
+            (first, d, round(1 / phi, 2),
+             f"alternating +{ax.upper()} inclination; COs use factor -1 "
+             "for the minus direction"),
+            (second, d, round(-1 / phi, 2), ""),
+        ])
 
     # ---- import notes (untick this sheet in the import dialog) ------------
     ws = wb.create_sheet("IMPORT NOTES")
