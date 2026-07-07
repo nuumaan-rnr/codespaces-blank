@@ -2169,15 +2169,36 @@ def render_view_config():
         st.markdown("#### Solver export — re-run this model in RSTAB / STAAD")
         st.caption("RSTAB 8 table workbook (File → Import → Microsoft Excel): "
                    "nodes, materials and cross-sections with RSTAB library "
-                   "names, member hinges [kNcm/rad], supports with the "
-                   "axial-dependent base stiffness diagram, sets of members, "
-                   "load cases + sway-imperfection cases, all loads and the "
-                   "generated load combinations with their analysis type.")
+                   "names, member hinges, supports with the axial-dependent "
+                   "base stiffness diagram, sets of members, load cases + "
+                   "sway-imperfection cases, all loads and the generated "
+                   "load combinations with their analysis type. The STAAD "
+                   ".std deck declares its own units (mm, N).")
+        uref = st.file_uploader(
+            "Match units to your RSTAB (optional): drop ANY Excel export "
+            "made by your RSTAB — the workbook adopts its unit settings "
+            "automatically. Without it, RSTAB factory units are used "
+            "(mm, kN/cm², cm⁴, kNcm/rad, kN, kN/m).",
+            type=["xlsx"], key="rstab_units_ref")
         ec = st.columns(2)
         if ec[0].button("⚙ Generate RSTAB 8 / STAAD export",
                         width="stretch", key="gen_solver_exp"):
-            from rack15512.export_solvers import to_rstab8_xlsx, to_staad
-            to_rstab8_xlsx(model, os.path.join(cdir, "RSTAB8_export.xlsx"))
+            from rack15512.export_solvers import (rstab_units_from_export,
+                                                  to_rstab8_xlsx, to_staad)
+            units = None
+            if uref is not None:
+                ref_path = os.path.join(cdir, "_units_ref.xlsx")
+                with open(ref_path, "wb") as f:
+                    f.write(uref.getbuffer())
+                try:
+                    units = rstab_units_from_export(ref_path)
+                    st.info("Units matched to the uploaded RSTAB export: "
+                            + ", ".join(f"{k} {v}"
+                                        for k, v in sorted(units.items())))
+                except ValueError as exc:
+                    st.error(f"{exc} — exporting in RSTAB factory units.")
+            to_rstab8_xlsx(model, os.path.join(cdir, "RSTAB8_export.xlsx"),
+                           units=units)
             to_staad(model, os.path.join(cdir, "STAAD_export.std"))
             st.rerun()
         for fname, mime in (("RSTAB8_export.xlsx",

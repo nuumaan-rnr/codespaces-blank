@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .model import RackModel
 
@@ -443,41 +443,6 @@ def to_rstab_xlsx(model: RackModel, path: str) -> str:
     ]:
         ws.append(row)
 
-    # ---- import notes (untick this sheet in the import dialog) ------------
-    ws = wb.create_sheet("IMPORT NOTES")
-    for line in [
-        "RSTAB 8 import: File > Import > Microsoft Excel.  UNTICK the",
-        "'INFO Base Stiffness' and 'IMPORT NOTES' sheets - they are not",
-        "RSTAB tables.",
-        "",
-        "UNITS: the import interprets numbers in the units currently set",
-        "in the target model.  Before importing, open Table > Units and",
-        "Decimal Places (or Options > Units and Decimal Places) and set:",
-        "  lengths/coordinates mm; E, G kN/cm2; inertia cm4; areas cm2;",
-        "  springs kNcm/rad and kN/cm; forces kN; line loads kN/m;",
-        "  weights kg.  These are RSTAB's defaults and exactly the units",
-        "  of this workbook (same as an RSTAB 8.29 Excel export).",
-        "",
-        "AXES: the model must use the global Z axis oriented DOWNWARD",
-        "(General Data > Orientation of Global Axis Z: downward).  Node",
-        "heights are negative Z, gravity factor +1 in Z - the same",
-        "convention as the reference RSTAB rack models.",
-        "",
-        "GENERAL DATA: create the target model WITHOUT automatic load",
-        "combinations (classic load cases + combinations, no standard),",
-        "so tables 2.1/2.5 keep this exact column layout.",
-        "",
-        "Base stiffness: supports carry the LINEAR jY' spring; the",
-        "axial-dependent diagram (with tearing) is on the 'INFO Base",
-        "Stiffness' sheet - enter it as a support nonlinearity",
-        "'Stiffness diagram depending on PZ' after the import.",
-        "Self-weight: LC1 already contains every member self-weight as",
-        "member loads - keep RSTAB self-weight INACTIVE.",
-        "Imperfections: LCs reference the two native inclination cases",
-        "with factor +1 / -1; mirror the load case with a negative",
-        "inclination if your RSTAB version rejects factor -1.",
-    ]:
-        ws.append([line])
     wb.save(path)
     return path
 
@@ -535,7 +500,90 @@ def _rstab_material_name(mat) -> str:
     return f"User steel E={E:.0f} N/mm2, fy={fy:.0f} N/mm2"
 
 
-def to_rstab8_xlsx(model: RackModel, path: str) -> str:
+# RSTAB interprets imported numbers in the units the TARGET MODEL is set
+# to (Options > Units and Decimal Places) - there is no unit selector in
+# the import dialog.  The export therefore writes in a UNIT PROFILE:
+# defaults below (RSTAB's factory settings, the units of every reference
+# export), or a profile auto-detected from an Excel export of the user's
+# own RSTAB via rstab_units_from_export().
+_RSTAB_DEFAULT_UNITS = {
+    "length": "mm", "modulus": "kN/cm2", "inertia": "cm4", "area": "cm2",
+    "spring_rot": "kNcm/rad", "spring_tr": "kN/cm", "force": "kN",
+    "udl": "kN/m", "weight": "kg",
+}
+# multiply an APP value (N, mm, kg base units) by the factor to get the
+# target unit
+_UNIT_FACTORS = {
+    "length":     {"mm": 1.0, "cm": 0.1, "m": 1.0e-3},
+    "modulus":    {"kN/cm2": 0.1, "N/mm2": 1.0, "MN/m2": 1.0, "MPa": 1.0,
+                   "kN/mm2": 1.0e-3, "kN/m2": 1.0e3},
+    "inertia":    {"cm4": 1.0e-4, "mm4": 1.0, "m4": 1.0e-12},
+    "area":       {"cm2": 1.0e-2, "mm2": 1.0, "m2": 1.0e-6},
+    "spring_rot": {"kNcm/rad": 1.0e-4, "kNm/rad": 1.0e-6, "Nm/rad": 1.0e-3,
+                   "Nmm/rad": 1.0, "kNmm/rad": 1.0e-3, "MNm/rad": 1.0e-9},
+    "spring_tr":  {"kN/cm": 1.0e-2, "kN/m": 1.0, "N/mm": 1.0,
+                   "kN/mm": 1.0e-3, "N/m": 1.0e3},
+    "force":      {"kN": 1.0e-3, "N": 1.0, "MN": 1.0e-6, "daN": 1.0e-1,
+                   "kgf": 1.0 / 9.80665, "kp": 1.0 / 9.80665},
+    "udl":        {"kN/m": 1.0, "N/mm": 1.0, "N/m": 1.0e3, "kN/cm": 1.0e-2,
+                   "kN/mm": 1.0e-3, "kgf/m": 1.0e3 / 9.80665},
+    "weight":     {"kg": 1.0, "t": 1.0e-3},
+}
+
+
+def rstab_units_from_export(path: str) -> Dict[str, str]:
+    """Detect an RSTAB installation's unit settings from ANY Excel export
+    it produced: parse the bracketed unit strings in the table headers
+    (nodes/materials/sections/hinges/members + the load sheets).  Returns
+    a complete unit profile (defaults fill the gaps); raises ValueError
+    when a detected unit is not supported by the converter."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    names = {s.strip(): s for s in wb.sheetnames}
+
+    def cell(stripped_name, r, c):
+        sh = names.get(stripped_name)
+        if not sh:
+            return ""
+        try:
+            return str(wb[sh].cell(r, c).value or "")
+        except Exception:
+            return ""
+
+    def unit(text):
+        mm = re.search(r"\[(.+?)\]", text)
+        return mm.group(1).strip().replace(" ", "") if mm else None
+
+    found: Dict[str, str] = {}
+
+    def put(kind, text):
+        u = unit(text)
+        if u:
+            found[kind] = u
+
+    put("length", cell("1.1 Nodes", 2, 4))
+    put("modulus", cell("1.2 Materials", 2, 3))
+    put("inertia", cell("1.3 Cross-Sections", 1, 4))
+    put("area", cell("1.3 Cross-Sections", 1, 7))
+    put("spring_tr", cell("1.4 Member Hinges", 1, 3))
+    put("spring_rot", cell("1.4 Member Hinges", 1, 6))
+    put("weight", cell("1.7 Members", 2, 15))
+    for stripped in names:
+        if stripped.endswith("3.2 Member Loads") and "udl" not in found:
+            put("udl", cell(stripped, 2, 8))
+        if stripped.endswith("3.1 Nodal Loads") and "force" not in found:
+            put("force", cell(stripped, 1, 5))
+    wb.close()
+    bad = [f"{k}: '{v}'" for k, v in found.items()
+           if v not in _UNIT_FACTORS.get(k, {})]
+    if bad:
+        raise ValueError("Unsupported unit(s) in the RSTAB export: "
+                         + ", ".join(bad))
+    return {**_RSTAB_DEFAULT_UNITS, **found}
+
+
+def to_rstab8_xlsx(model: RackModel, path: str,
+                   units: Optional[Dict[str, str]] = None) -> str:
     """Write an RSTAB 8 workbook in EXACTLY the structure of RSTAB's own
     File > Export > Microsoft Excel output (sheet names, two header rows,
     column layouts, units and symbol conventions taken 1:1 from an RSTAB
@@ -549,13 +597,20 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
 
     Imperfections are TWO native inclination load cases (Imp X L/300,
     Imp Y L/200 on the upright member sets); combinations reference them
-    with factor +1 / -1.  Returns the path."""
+    with factor +1 / -1.
+
+    `units` is an optional unit profile (see rstab_units_from_export) -
+    every number and header unit string adapts to it, so the workbook
+    matches the target RSTAB's Units-and-Decimal-Places settings without
+    manual changes.  Default: RSTAB's factory units.  Returns the path."""
     import openpyxl
     wb = openpyxl.Workbook()
     nmap = _node_map(model)
     imp = model.imperfection
     dirs = _imp_directions(model)
     RHO = 7.85e-6                            # kg/mm3
+    U = {**_RSTAB_DEFAULT_UNITS, **(units or {})}
+    F = {k: _UNIT_FACTORS[k][v] for k, v in U.items()}
 
     def axis_code(m) -> str:
         ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
@@ -571,23 +626,27 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     ws.title = "1.1 Nodes"
     ws.append(["Node", "Reference", "Coordinate", "Node Coordinates", None,
                None, None])
-    ws.append(["No.", "Node", "System", "X [mm]", "Y [mm]", "Z [mm]",
-               "Comment"])
+    ws.append(["No.", "Node", "System", f"X [{U['length']}]",
+               f"Y [{U['length']}]", f"Z [{U['length']}]", "Comment"])
     ws.merge_cells("D1:F1")
+    fl = F["length"]
     for n in sorted(model.nodes.values(), key=lambda n: n.id):
-        ws.append([nmap[n.id], 0, "Cartesian", n.x, n.y, -n.z, ""])
+        ws.append([nmap[n.id], 0, "Cartesian", n.x * fl, n.y * fl,
+                   -n.z * fl, ""])
 
     # ---- 1.2 Materials [kN/cm2] ------------------------------------------
     ws = wb.create_sheet("1.2 Materials")
     ws.append(["Material", "Material", "Modulus of Elasticity",
                "Shear Modulus", "Poisson's Ratio", "Specific Weight",
                "Coeff. of Th. Exp.", "Partial Factor", "Material", None])
-    ws.append(["No.", "Description", "E [kN/cm2]", "G [kN/cm2]", "n [-]",
+    ws.append(["No.", "Description", f"E [{U['modulus']}]",
+               f"G [{U['modulus']}]", "n [-]",
                "g [kN/m3]", "a [1/\u00b0C]", "gM [-]", "Model", "Comment"])
     mats = {m.name: m for m in model.materials.values()}
     midx = {nm: i + 1 for i, nm in enumerate(mats)}
     for nm, m in mats.items():
-        ws.append([midx[nm], _rstab_material_name(m), m.E / 10.0, m.G / 10.0,
+        ws.append([midx[nm], _rstab_material_name(m), m.E * F["modulus"],
+                   m.G * F["modulus"],
                    getattr(m, "nu", 0.3), 78.5, 1.2e-05, 1.0,
                    "Isotropic Linear Elastic",
                    f"app material '{nm}', fy={m.fy:.0f} N/mm2"])
@@ -595,9 +654,10 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     # ---- 1.3 Cross-Sections (trailing space = RSTAB's own sheet name) ----
     ws = wb.create_sheet("1.3 Cross-Sections ")
     ws.append(["Section", "Cross-Section", "Material",
-               "Moments of inertia [cm4]", None, None,
-               "Cross-Sectional Areas [cm2]", None, None, "Principal Axes",
-               "Rotation", "Overall Dimensions [mm]", None, None])
+               f"Moments of inertia [{U['inertia']}]", None, None,
+               f"Cross-Sectional Areas [{U['area']}]", None, None,
+               "Principal Axes", "Rotation",
+               f"Overall Dimensions [{U['length']}]", None, None])
     ws.append(["No.", "Description [mm]", "No.", "Torsion J", "Bending Iy",
                "Bending Iz", "Axial A", "Shear Ay", "Shear Az", "a [\u00b0]",
                "a' [\u00b0]", "Width b", "Depth h", "Comment"])
@@ -608,11 +668,13 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         swapped = s.Iz > s.Iy            # RSTAB Iy = major axis
         iy, iz = max(s.Iy, s.Iz), min(s.Iy, s.Iz)
         avy, avz = (s.Avz, s.Avy) if swapped else (s.Avy, s.Avz)
+        fi, fa = F["inertia"], F["area"]
         ws.append([sidx[nm], _rstab_section_name(nm),
-                   midx.get(s.material, 1), s.J / 1.0e4, iy / 1.0e4,
-                   iz / 1.0e4, s.A / 1.0e2,
-                   (avy or 0) / 1.0e2 or "", (avz or 0) / 1.0e2 or "",
-                   0, 0, s.width_b or "", s.depth_h or "",
+                   midx.get(s.material, 1), s.J * fi, iy * fi,
+                   iz * fi, s.A * fa,
+                   (avy or 0) * fa or "", (avz or 0) * fa or "",
+                   0, 0, (s.width_b or 0) * fl or "",
+                   (s.depth_h or 0) * fl or "",
                    f"app section '{nm}' - verify SHAPE-THIN orientation"])
 
     # ---- 1.4 Member hinges [kNcm/rad] - spring about local y (RSTAB
@@ -632,16 +694,18 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     mem_hinge = {m.id: (hinge_no(m.hinge_i), hinge_no(m.hinge_j))
                  for m in _members_of(model)}
     ws = wb.create_sheet("1.4 Member Hinges")
-    ws.append(["Hinge", "Reference", "Axial/Shear Release or Spring [kN/cm]",
-               None, None, "Moment Release or Spring [kNcm/rad]", None, None,
+    ws.append(["Hinge", "Reference",
+               f"Axial/Shear Release or Spring [{U['spring_tr']}]",
+               None, None,
+               f"Moment Release or Spring [{U['spring_rot']}]", None, None,
                None])
     ws.append(["No.", "System", "ux", "uy", "uz", "jx", "jy", "jz",
                "Comment"])
     ws.merge_cells("C1:E1"); ws.merge_cells("F1:H1")
     for i, (key, h) in enumerate(hinges):
         k = getattr(h, "rz", None)          # app strong-axis connector spring
-        jy = round(k / 1.0e4, 3) if isinstance(k, (int, float)) and k > 0 \
-            else "-"
+        jy = round(k * F["spring_rot"], 3) \
+            if isinstance(k, (int, float)) and k > 0 else "-"
         ws.append([i + 1, "Local x,y,z", "-", "-", "-", "-", jy, "-",
                    "beam-end connector"])
 
@@ -652,7 +716,7 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                "Division", "Taper", "Length", "Weight", None, None])
     ws.append(["No.", "Member Type", "Start", "End", "Type", "b [\u00b0]",
                "Start", "End", "Start", "End", "No.", "No.", "Shape",
-               "L [mm]", "W [kg]", None, "Comment"])
+               f"L [{U['length']}]", f"W [{U['weight']}]", None, "Comment"])
     ws.merge_cells("C1:D1"); ws.merge_cells("E1:F1")
     ws.merge_cells("G1:H1"); ws.merge_cells("I1:J1")
     # upright orientation: the two posts of a frame face each other -
@@ -675,27 +739,29 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
                    "Truss (only N)" if m.mtype == "truss" else "Beam",
                    nmap[m.node_i], nmap[m.node_j], "Angle", beta,
                    sno, sno, hi, hj, 0, 0, "",
-                   round(Lm, 1), round(s.A * Lm * RHO, 1),
+                   round(Lm * fl, 1),
+                   round(s.A * Lm * RHO * F["weight"], 1),
                    axis_code(m), ""])
 
     # ---- 1.8 Nodal supports ('+' fixed, '-' free, number = spring) --------
     tbl = getattr(model, "base_axial_table", None)
     ws = wb.create_sheet("1.8 Nodal Supports")
     ws.append(["Support", None, "Support Rotation [\u00b0]", None, None,
-               None, "Column", "Support or Spring [kN/cm]", None, None,
-               "Rotational Restraint or Spring [kNcm/rad]", None, None,
-               None])
+               None, "Column",
+               f"Support or Spring [{U['spring_tr']}]", None, None,
+               f"Rotational Restraint or Spring [{U['spring_rot']}]",
+               None, None, None])
     ws.append(["No.", "On Nodes No.", "Sequence", "about X", "about Y",
                "about Z", "in Z", "uX'", "uY'", "uZ'", "jX'", "jY'", "jZ'",
                "Comment"])
     ws.merge_cells("C1:F1"); ws.merge_cells("H1:J1")
     ws.merge_cells("K1:M1")
 
-    def dof(v):
+    def dof(v, f=F["spring_rot"]):
         if v is True:
             return "+"
         if isinstance(v, (int, float)) and v > 0:
-            return round(v / 1.0e4, 3)
+            return round(v * f, 3)
         return "-"
 
     groups: dict = {}
@@ -718,13 +784,15 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         ws = wb.create_sheet("INFO Base Stiffness")
         ws.append(["Support", "Degree of", "Dependent", "Force", "C",
                    "UNTICK this sheet in the import dialog - info only"])
-        ws.append(["No.", "Freedom", "on Force", "[kN]", "[kNcm/rad]",
-                   "Comment"])
+        ws.append(["No.", "Freedom", "on Force", f"[{U['force']}]",
+                   f"[{U['spring_rot']}]", "Comment"])
         for j, (n_kn, k) in enumerate(tbl):
-            ws.append([1, "jY'", "PZ'+", float(n_kn), k / 1.0e4,
+            ws.append([1, "jY'", "PZ'+", n_kn * 1.0e3 * F["force"],
+                       k * F["spring_rot"],
                        "" if j else "axial-dependent base stiffness"])
-        ws.append([1, "jY'", "PZ'+", f"> {tbl[-1][0]:.0f}",
-                   tbl[-1][1] / 1.0e4, "Constant rigidity"])
+        ws.append([1, "jY'", "PZ'+",
+                   f"> {tbl[-1][0] * 1.0e3 * F['force']:.0f}",
+                   tbl[-1][1] * F["spring_rot"], "Constant rigidity"])
         ws.append([1, "jY'", "PZ'-", 0.0, 0.0, "Tearing (uplift)"])
 
     # ---- 1.11 Sets of members (continuous upright lines) ------------------
@@ -737,8 +805,8 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
     ws = wb.create_sheet("1.11 Sets of Members")
     ws.append(["Set of M.", "Set of Members", None, None, "Length",
                "Weight", None])
-    ws.append(["No.", "Description", "Type", "Members No.", "[mm]", "[kg]",
-               "Comment"])
+    ws.append(["No.", "Description", "Type", "Members No.",
+               f"[{U['length']}]", f"[{U['weight']}]", "Comment"])
     for i, (lab, mids) in enumerate(sorted(sets.items())):
         set_no[lab] = i + 1
         length = weight = 0.0
@@ -748,7 +816,8 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
             length += Lm
             weight += model.section_of(mm).A * Lm * RHO
         ws.append([i + 1, lab, "Continuous", _id_ranges(mids),
-                   round(length, 1), round(weight, 1), ""])
+                   round(length * fl, 1),
+                   round(weight * F["weight"], 1), ""])
 
     # ---- 2.1 Load cases + the two native imperfection LCs ------------------
     CAT = {"permanent": "Dead", "variable": "Live",
@@ -867,29 +936,32 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         if lc.nodal_loads:
             ws = wb.create_sheet(f"LC{no} - 3.1 Nodal Loads")
             ws.append([None, None, "Definition", "Coordinate",
-                       "Force [kN]", None, None, "Moment [kNm]", None, None,
-                       "Direction", "Force", "Moment", None])
+                       f"Force [{U['force']}]", None, None, "Moment [kNm]",
+                       None, None, "Direction", "Force", "Moment", None])
             ws.append(["No.", "On Nodes No.", "Type", "System", "PX", "PY",
-                       "PZ", "MX", "MY", "MZ", "Type", "P [kN]", "M [kNm]",
-                       "Comment"])
+                       "PZ", "MX", "MY", "MZ", "Type",
+                       f"P [{U['force']}]", "M [kNm]", "Comment"])
             ws.merge_cells("E1:G1"); ws.merge_cells("H1:J1")
+            ff = F["force"]
             for j, nl in enumerate(lc.nodal_loads):
                 ws.append([j + 1, nmap[nl.node], "By components",
                            "0  |  Global XYZ",
-                           round(nl.fx / 1e3, 4), round(nl.fy / 1e3, 4),
-                           round(-nl.fz / 1e3, 4), 0, 0, 0, "", "", "",
+                           round(nl.fx * ff, 6), round(nl.fy * ff, 6),
+                           round(-nl.fz * ff, 6), 0, 0, 0, "", "", "",
                            LC_DESC.get(nm, nm)])
         byq: dict = {}
         for ml in lc.member_loads:
             if abs(ml.qz) > 1e-12:
-                byq.setdefault(round(-ml.qz, 6), []).append(ml.member)
+                byq.setdefault(round(-ml.qz * F["udl"], 8),
+                               []).append(ml.member)
         if byq:
             ws = wb.create_sheet(f"LC{no} - 3.2 Member Loads")
             ws.append([None, None, None, None, "Load", "Load", "Reference",
                        "Member Load Parameters", None, None, None, None,
                        None, "Distance", "Over Total", None])
             ws.append(["No.", "Reference to", "On Members No.", "Load Type",
-                       "Distribution", "Direction", "Length", "p [kN/m]",
+                       "Distribution", "Direction", "Length",
+                       f"p [{U['udl']}]",
                        None, None, None, None, None, "in %", "Length",
                        "Comment"])
             ws.merge_cells("H1:M1")
@@ -925,12 +997,17 @@ def to_rstab8_xlsx(model: RackModel, path: str) -> str:
         "RSTAB tables.",
         "",
         "UNITS: the import interprets numbers in the units currently set",
-        "in the target model.  Before importing, open Table > Units and",
-        "Decimal Places (or Options > Units and Decimal Places) and set:",
-        "  lengths/coordinates mm; E, G kN/cm2; inertia cm4; areas cm2;",
-        "  springs kNcm/rad and kN/cm; forces kN; line loads kN/m;",
-        "  weights kg.  These are RSTAB's defaults and exactly the units",
-        "  of this workbook (same as an RSTAB 8.29 Excel export).",
+        "in the target model (Options > Units and Decimal Places).  This",
+        "workbook is written in the following unit profile"
+        + (" (auto-matched to your RSTAB export)" if units else
+           " (RSTAB factory defaults)") + ":",
+        f"  lengths/coordinates {U['length']}; E, G {U['modulus']}; "
+        f"inertia {U['inertia']}; areas {U['area']};",
+        f"  springs {U['spring_rot']} and {U['spring_tr']}; forces "
+        f"{U['force']}; line loads {U['udl']}; weights {U['weight']}.",
+        "Check the target model uses the same settings, then save them",
+        "via 'Set as default' in the Units and Decimal Places dialog so",
+        "every new model opens with them automatically.",
         "",
         "AXES: the model must use the global Z axis oriented DOWNWARD",
         "(General Data > Orientation of Global Axis Z: downward).  Node",

@@ -585,3 +585,43 @@ def test_staad_deck_complete_and_runnable(tmp_path):
     assert _re.search(r"X -0\.00466", blk)
     blk = txt.split("TITLE ULS ULS1 (imp +y)")[1].split("LOAD ")[0]
     assert _re.search(r"Z 0\.00700", blk)               # 1.4 * 1/200
+
+
+def test_rstab8_unit_profile_detection_and_conversion(tmp_path):
+    # RSTAB interprets imported numbers in the TARGET model's units, so the
+    # export adapts: rstab_units_from_export() reads the unit strings from
+    # any RSTAB-produced Excel export, and to_rstab8_xlsx(units=...) writes
+    # every value and header in that profile.
+    import openpyxl
+    from rack15512.export_solvers import (to_rstab8_xlsx,
+                                          rstab_units_from_export,
+                                          _RSTAB_DEFAULT_UNITS)
+
+    m = build_rack(RackConfig(
+        module="single", n_bays=2, bay_width=2300.0, frame_height=5000.0,
+        levels=[LevelSpec(gap=1500.0), LevelSpec(gap=1500.0)],
+        connector_stiffness=2.039e7))
+    p0 = str(tmp_path / "default.xlsx")
+    to_rstab8_xlsx(m, p0)
+    # round trip: our default workbook detects as the factory profile
+    assert rstab_units_from_export(p0) == _RSTAB_DEFAULT_UNITS
+
+    prof = {"length": "m", "modulus": "N/mm2", "inertia": "mm4",
+            "area": "mm2", "spring_rot": "kNm/rad", "spring_tr": "N/mm",
+            "force": "N", "udl": "N/mm", "weight": "t"}
+    p1 = str(tmp_path / "custom.xlsx")
+    to_rstab8_xlsx(m, p1, units=prof)
+    wb = openpyxl.load_workbook(p1)
+    # headers carry the profile units and values are converted
+    assert wb["1.1 Nodes"].cell(2, 4).value == "X [m]"
+    zs = [r[5] for r in wb["1.1 Nodes"].iter_rows(min_row=3,
+                                                  values_only=True)]
+    assert min(zs) == -5.0                       # 5000 mm -> 5 m
+    assert wb["1.2 Materials"].cell(3, 3).value == 210000.0   # E [N/mm2]
+    hz = [r[6] for r in wb["1.4 Member Hinges"].iter_rows(min_row=3,
+                                                          values_only=True)]
+    assert 20.39 in hz                           # 2.039e7 Nmm -> kNm/rad
+    ml = next(s for s in wb.sheetnames if s.endswith("3.2 Member Loads"))
+    assert wb[ml].cell(2, 8).value == "p [N/mm]"
+    # detection round-trips on the custom profile too
+    assert rstab_units_from_export(p1) == {**_RSTAB_DEFAULT_UNITS, **prof}
