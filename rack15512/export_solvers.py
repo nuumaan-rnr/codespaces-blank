@@ -506,10 +506,14 @@ def _rstab_material_name(mat) -> str:
 # defaults below (RSTAB's factory settings, the units of every reference
 # export), or a profile auto-detected from an Excel export of the user's
 # own RSTAB via rstab_units_from_export().
+# The user's RSTAB Units-and-Decimal-Places settings (screenshots on
+# record): geometry mm, section properties cm (-> cm2/cm4), E/G kN/cm2,
+# support springs kN + cm (-> kN/cm, kNcm/rad), load forces kN with LOAD
+# LENGTHS in cm (-> line loads kN/cm, nodal moments kNcm), weights kg.
 _RSTAB_DEFAULT_UNITS = {
     "length": "mm", "modulus": "kN/cm2", "inertia": "cm4", "area": "cm2",
     "spring_rot": "kNcm/rad", "spring_tr": "kN/cm", "force": "kN",
-    "udl": "kN/m", "weight": "kg",
+    "udl": "kN/cm", "weight": "kg",
 }
 # multiply an APP value (N, mm, kg base units) by the factor to get the
 # target unit

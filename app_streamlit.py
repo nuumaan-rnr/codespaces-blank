@@ -2177,8 +2177,8 @@ def render_view_config():
         uref = st.file_uploader(
             "Match units to your RSTAB (optional): drop ANY Excel export "
             "made by your RSTAB — the workbook adopts its unit settings "
-            "automatically. Without it, RSTAB factory units are used "
-            "(mm, kN/cm², cm⁴, kNcm/rad, kN, kN/m).",
+            "automatically. Without it, the company default RSTAB units "
+            "are used (mm, kN/cm², cm⁴, kNcm/rad, kN, line loads kN/cm).",
             type=["xlsx"], key="rstab_units_ref")
         ec = st.columns(2)
         if ec[0].button("⚙ Generate RSTAB 8 / STAAD export",
