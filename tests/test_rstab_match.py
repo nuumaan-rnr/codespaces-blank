@@ -444,7 +444,9 @@ def test_rstab8_export_tables(tmp_path):
     assert _rstab_section_name("RHS100X50X1.6") == "RRO-PAR 100/50/1.6/3.2/1.6/K"
     assert _rstab_section_name("1C36X21X1.2") == "SHAPE-THIN B5H36X21T012"
     assert _rstab_section_name("UP0010") == "SHAPE-THIN UP0010"
-    assert _id_ranges([3, 1, 2, 7, 9, 10]) == "1-3,7,9-10"
+    # RSTAB list syntax: dash for runs of 3+, comma for a pair
+    assert _id_ranges([3, 1, 2, 7, 9, 10]) == "1-3,7,9,10"
+    assert _id_ranges([25, 26]) == "25,26"
 
     m = build_rack(RackConfig(
         module="single", n_bays=2, bay_width=2300.0, frame_height=5000.0,
@@ -480,8 +482,16 @@ def test_rstab8_export_tables(tmp_path):
                                               values_only=True))
     assert (30.0, 3975.0) in {(r[3], r[4]) for r in d}
     assert any(r[2] == "PZ'-" for r in d)                  # tearing (uplift)
-    n_sets = wb["1.11 Sets of Members"].max_row - 2
-    assert n_sets == 6                                     # 3 frames x 2 uprights
+    # sets: 6 continuous upright lines + per-LEVEL segment sets (one per
+    # line per storey: base->L1, L1->L2, L2->top = 3 levels x 6 lines),
+    # numbered level-major after the continuous sets (RSTAB reference)
+    set_rows = [r for r in wb["1.11 Sets of Members"].iter_rows(
+        min_row=3, values_only=True) if r[0]]
+    assert len(set_rows) == 6 + 3 * 6
+    assert sum(1 for r in set_rows if str(r[1]).startswith("Upright")) == 6
+    lvl = [r for r in set_rows if str(r[1]).startswith("LEVEL")]
+    assert {r[1] for r in lvl} == {"LEVEL1", "LEVEL2", "LEVEL3"}
+    assert min(r[0] for r in lvl) == 7                     # after continuous
     # exactly TWO native imperfection LCs with their own 3.4 sheets
     lcs = list(wb["2.1 Load Cases"].iter_rows(min_row=3, values_only=True))
     imp_lcs = [r for r in lcs if r[3] == "Imperfection"]

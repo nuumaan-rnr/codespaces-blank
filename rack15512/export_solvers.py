@@ -75,18 +75,28 @@ def _udl_load_case(model: RackModel):
 
 
 def _id_ranges(ids) -> str:
-    """RSTAB member/node list syntax: '1-5,8,10-12'."""
+    """RSTAB member/node list syntax: '1-5,8,10,11' - a dash only for runs
+    of 3 or more; a two-element run is written with a comma (RSTAB's own
+    export convention)."""
     ids = sorted(set(int(i) for i in ids))
     if not ids:
         return ""
     out, a, b = [], ids[0], ids[0]
+
+    def flush(a, b):
+        if b - a >= 2:
+            out.append(f"{a}-{b}")
+        elif b - a == 1:
+            out.append(f"{a},{b}")
+        else:
+            out.append(f"{a}")
     for i in ids[1:]:
         if i == b + 1:
             b = i
             continue
-        out.append(f"{a}-{b}" if b > a else f"{a}")
+        flush(a, b)
         a = b = i
-    out.append(f"{a}-{b}" if b > a else f"{a}")
+    flush(a, b)
     return ",".join(out)
 
 
@@ -847,17 +857,46 @@ def to_rstab8_xlsx(model: RackModel, path: str,
                "Weight", None])
     ws.append(["No.", "Description", "Type", "Members No.",
                f"[{U['length']}]", f"[{U['weight']}]", "Comment"])
-    for i, (lab, mids) in enumerate(sorted(sets.items())):
-        set_no[lab] = i + 1
+    def set_row(no, lab, mids):
         length = weight = 0.0
         for mid in mids:
             mm = model.members[mid]
             Lm = _member_length(model, mm)
             length += Lm
             weight += model.section_of(mm).A * Lm * RHO
-        ws.append([i + 1, lab, "Continuous", _id_ranges(mids),
+        ws.append([no, lab, "Continuous", _id_ranges(mids),
                    round(length * fl, 1),
                    round(weight * F["weight"], 1), ""])
+
+    for i, (lab, mids) in enumerate(sorted(sets.items())):
+        set_no[lab] = i + 1
+        set_row(i + 1, lab, mids)
+    # per-LEVEL sub-sets (RSTAB reference practice): for every upright line
+    # one set per storey segment between beam levels (base->L1, L1->L2, ...,
+    # ->top), named LEVEL1..LEVELn and numbered level-major after the
+    # continuous sets - these are the per-level buckling design segments.
+    # The imperfection cases keep referencing ONLY the continuous sets.
+    seg_map: dict = {}
+    for m in _members_of(model):
+        lab = getattr(m, "set_label", None)
+        if lab and " \u00b7 " in lab:
+            line, seg = lab.split(" \u00b7 ", 1)
+            seg_map.setdefault((line, seg), []).append(m.id)
+    if seg_map:
+        def seg_zmin(seg):
+            return min(min(model.nodes[model.members[mid].node_i].z,
+                           model.nodes[model.members[mid].node_j].z)
+                       for (ln, sg), ms in seg_map.items() if sg == seg
+                       for mid in ms)
+        seg_names = sorted({sg for _, sg in seg_map}, key=seg_zmin)
+        no = len(set_no)
+        for lv, seg in enumerate(seg_names):
+            for line in sorted(sets):
+                mids = seg_map.get((line, seg))
+                if not mids:
+                    continue
+                no += 1
+                set_row(no, f"LEVEL{lv + 1}", mids)
 
     # ---- 2.1 Load cases + the two native imperfection LCs ------------------
     CAT = {"permanent": "Dead", "variable": "Live",
