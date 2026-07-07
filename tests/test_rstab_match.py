@@ -430,11 +430,13 @@ def test_per_section_fy_override():
 
 
 def test_rstab8_export_tables(tmp_path):
-    # The RSTAB 8 export mirrors the RSTAB data tables (validated against an
-    # RSTAB 8.29 printout): kNcm/rad hinge springs (1 kNcm = 1e4 N*mm),
-    # Z-down node coordinates, RSTAB library section names, the axial-
-    # dependent base diagram sheet, imperfection LCs on the upright member
-    # sets and one CO row-group per (combination x imperfection direction).
+    # The RSTAB 8 export replicates RSTAB's OWN File > Export > Excel
+    # structure (validated against an RSTAB 8.29 export of the Zepto
+    # model): two header rows, exact sheet names (incl. the trailing
+    # space in '1.3 Cross-Sections '), hinge springs in the jy column
+    # [kNcm/rad], +/-/value support symbols, wide Factor/No. combination
+    # rows with numeric DS codes, per-load-case load sheets and native
+    # imperfection LCs.
     import openpyxl
     from rack15512.export_solvers import (to_rstab8_xlsx,
                                           _rstab_section_name, _id_ranges)
@@ -452,55 +454,59 @@ def test_rstab8_export_tables(tmp_path):
     path = str(tmp_path / "rstab8.xlsx")
     to_rstab8_xlsx(m, path)
     wb = openpyxl.load_workbook(path)
-    for sheet in ("1.1 Nodes", "1.2 Materials", "1.3 Cross-Sections",
+    for sheet in ("1.1 Nodes", "1.2 Materials", "1.3 Cross-Sections ",
                   "1.4 Member Hinges", "1.7 Members", "1.8 Nodal Supports",
-                  "1.8.7 Support Stiffness Diagram", "1.11 Sets of Members",
-                  "2.1 Load Cases", "3.1 Nodal Loads", "3.2 Member Loads",
-                  "3.4 Imperfections", "2.5 Load Combinations",
-                  "IMPORT NOTES"):
+                  "1.8.7 Stiffness Diagram", "1.11 Sets of Members",
+                  "2.1 Load Cases", "2.5 Load Combinations"):
         assert sheet in wb.sheetnames, sheet
 
-    # nodes: RSTAB global Z is DOWN -> top node exported at Z = -5000
-    zs = [r[5] for r in wb["1.1 Nodes"].iter_rows(min_row=2, values_only=True)]
+    # nodes: RSTAB header pair + Z DOWN (top node at -5000)
+    ws = wb["1.1 Nodes"]
+    assert ws.cell(2, 1).value == "No." and ws.cell(2, 6).value == "Z [mm]"
+    zs = [r[5] for r in ws.iter_rows(min_row=3, values_only=True)]
     assert min(zs) == -5000.0 and max(zs) == 0.0
-    # hinge spring in kNcm/rad: 2.039e7 N*mm/rad -> 2039
-    hz = [r[7] for r in wb["1.4 Member Hinges"].iter_rows(min_row=2,
-                                                          values_only=True)]
-    assert 2039 in hz
+    # hinge spring sits in the jy column in kNcm/rad (2.039e7 -> 2039)
+    hs = list(wb["1.4 Member Hinges"].iter_rows(min_row=3, values_only=True))
+    assert any(r[6] == 2039 for r in hs)
+    assert all(r[7] == "-" for r in hs)                    # jz released? no - rigid
+    # supports: '+' fixed translations, spring value in jY' [kNcm/rad]
+    sup = list(wb["1.8 Nodal Supports"].iter_rows(min_row=3,
+                                                  values_only=True))[0]
+    assert sup[7] == "+" and sup[8] == "+" and sup[9] == "+"
+    assert isinstance(sup[11], (int, float))               # jY' spring
     # base diagram rows in kN / kNcm/rad incl. the tearing branch
-    d = list(wb["1.8.7 Support Stiffness Diagram"].iter_rows(min_row=2,
-                                                             values_only=True))
+    d = list(wb["1.8.7 Stiffness Diagram"].iter_rows(min_row=3,
+                                                     values_only=True))
     assert (30.0, 3975.0) in {(r[3], r[4]) for r in d}
     assert any(r[2] == "PZ'-" for r in d)                  # tearing (uplift)
-    n_sets = wb["1.11 Sets of Members"].max_row - 1
+    n_sets = wb["1.11 Sets of Members"].max_row - 2
     assert n_sets == 6                                     # 3 frames x 2 uprights
-    # exactly TWO native imperfection load cases (Imp X 1/300, Imp Y 1/200)
-    lcs = list(wb["2.1 Load Cases"].iter_rows(min_row=2, values_only=True))
-    imp_lcs = [r for r in lcs if r[2] == "Imperfection"]
+    # exactly TWO native imperfection LCs with their own 3.4 sheets
+    lcs = list(wb["2.1 Load Cases"].iter_rows(min_row=3, values_only=True))
+    imp_lcs = [r for r in lcs if r[3] == "Imperfection"]
     assert len(imp_lcs) == 2
-    assert any("L/300" in str(r[1]) for r in imp_lcs)
-    assert any("L/200" in str(r[1]) for r in imp_lcs)
-    # 3.4 holds their inclinations on the upright sets; no imperfection
-    # forces appear in the load tables
-    imps = list(wb["3.4 Imperfections"].iter_rows(min_row=2, values_only=True))
-    assert {r[4] for r in imps} == {300.0, 200.0}
-    assert all(r[1] == "Set of members" for r in imps)
-    nl = list(wb["3.1 Nodal Loads"].iter_rows(min_row=2, values_only=True))
-    assert not any("mp" in str(r[5]) and "EHF" in str(r[5]) for r in nl)
-    # combinations: every (combo x imp direction) becomes its own CO block
-    # referencing the imperfection LC with factor +1 / -1 (RSTAB style)
-    co_rows = list(wb["2.5 Load Combinations"].iter_rows(min_row=2,
-                                                         values_only=True))
-    names = [r[2] for r in co_rows if r[0]]
+    imp_sheets = [s for s in wb.sheetnames if "3.4 Imperfections" in s]
+    assert len(imp_sheets) == 2
+    incl = {r[6] for s in imp_sheets
+            for r in wb[s].iter_rows(min_row=3, values_only=True)}
+    assert incl == {300.0, 200.0}
+    # combinations: WIDE rows (Factor/No. pairs), numeric DS, one row per
+    # (combination x imp direction); the -x twin references the imp LC
+    # with factor -1
+    co = list(wb["2.5 Load Combinations"].iter_rows(min_row=3,
+                                                    values_only=True))
+    names = [r[2] for r in co]
     assert "ULS1 (imp +x)" in names and "ULS1 (imp -y)" in names
-    assert any(n.startswith("SLS1") for n in names)        # SLS carries imp too
-    imp_refs = [r for r in co_rows if "Imperfection towards" in str(r[6])]
-    assert {r[4] for r in imp_refs} == {1.0, -1.0}
-    # ULS runs 2nd order, SLS linear
-    meth = {r[2]: r[7] for r in co_rows if r[0]}
-    assert meth["ULS1 (imp +x)"].startswith("Second order")
-    assert meth[[n for n in names if n.startswith("SLS1")][0]].startswith(
-        "Geometrically linear")
+    assert all(isinstance(r[1], int) for r in co)          # DS codes 1/2/5
+    assert any(r[1] == 5 for r in co)                      # SLS present
+    row_px = co[names.index("ULS1 (imp +x)")]
+    row_mx = co[names.index("ULS1 (imp -x)")]
+    pairs_px = list(zip(row_px[4::2], row_px[5::2]))
+    pairs_mx = list(zip(row_mx[4::2], row_mx[5::2]))
+    assert any(f == 1 and str(lc).startswith("LC") for f, lc in pairs_px)
+    assert any(f == -1 for f, lc in pairs_mx)
+    # per-load-case load sheets exist (RSTAB export style)
+    assert any(s.endswith("3.2 Member Loads") for s in wb.sheetnames)
 
 
 def test_staad_deck_complete_and_runnable(tmp_path):
