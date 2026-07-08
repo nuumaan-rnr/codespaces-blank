@@ -356,12 +356,15 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
     a("<h2>6. EN 15512 design verifications</h2>")
     a(_img(plot_utilization(model, checks),
           "Governing member utilisation (red > 1 fails)"))
+    from .checks.en15512 import REPORT_HIDDEN_CHECKS
     order = ["STRESS", "SHEAR", "BUCKLING", "LTB", "BRACE_BUCKLING", "CONNECTOR",
              "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT", "ANCHORAGE",
              "SPLICE", "BUILT_UP", "SEISMIC_DRIFT", "SEISMIC_PDELTA",
              "DEFLECTION", "SWAY", "ALPHA_CR", "STABILITY"]
     n = 1
     for kind in order:
+        if kind in REPORT_HIDDEN_CHECKS:
+            continue
         rows = [c for c in checks if c.check == kind]
         if not rows:
             continue
@@ -390,6 +393,15 @@ def design_validation_report(model: RackModel, cases: List[CaseResult],
             a(f"<tr><td colspan='6'>… {len(rows)-30} further rows "
               f"(see CSV / full report)</td></tr>")
         a("</tbody></table>")
+
+    a("<p class='basis'>The beam-end connector is modelled as a semi-rigid "
+      "rotational spring in the analysis; the anchor / hold-down is designed "
+      "separately in the Anchor &amp; Footplate Designer against the "
+      "governing base reactions — neither is a member check listed here. The "
+      "elastic critical load factor α<sub>cr</sub> (a 2nd-order sensitivity "
+      "indicator, EN 1993-1-1 5.2.1) is shown per combination in section 5; "
+      "the app always runs the full 2nd-order (P-Δ) analysis, so it is "
+      "informative, not a pass/fail check.</p>")
 
     # ---- ULS envelope per set of members (RSTAB table 4.2 style) ----------
     from .checks.en15512 import set_member_envelopes

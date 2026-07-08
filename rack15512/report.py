@@ -137,9 +137,12 @@ def write_report(model: RackModel, cases: List[CaseResult],
     lines += _drivein_section(model, checks)
     lines += _level_wise_utilization(model, checks)
 
+    from .checks.en15512 import REPORT_HIDDEN_CHECKS
     for kind in ("STRESS", "BUCKLING", "BRACE_BUCKLING", "CONNECTOR",
                  "BRACE_BOLT", "BASEPLATE", "BASE_RESTRAINT", "ANCHORAGE",
                  "SPLICE", "DEFLECTION", "SWAY", "ALPHA_CR", "STABILITY"):
+        if kind in REPORT_HIDDEN_CHECKS:
+            continue
         rows = [c for c in checks if c.check == kind]
         if not rows:
             continue
@@ -240,13 +243,13 @@ def _level_wise_utilization(model: RackModel,
             worst[key] = c
 
     out = ["## Utilization by level", "",
-           "Beams and connectors at the level; uprights and bracing of the "
-           "storey below it.", "",
-           "| level | elevation [mm] | uprights | beams | connectors "
-           "| bracing |", "|---|---|---|---|---|---|"]
+           "Beams at the level; uprights and bracing of the storey below it.",
+           "",
+           "| level | elevation [mm] | uprights | beams | bracing |",
+           "|---|---|---|---|---|"]
     for k, z in enumerate(beam_z, start=1):
         cells = []
-        for group in ("uprights", "beams", "connectors", "bracing"):
+        for group in ("uprights", "beams", "bracing"):
             c = worst.get((k, group))
             if c is None:
                 cells.append("-")

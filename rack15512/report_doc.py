@@ -226,7 +226,10 @@ def build_report_blocks(model, cases, checks, meta=None) -> List[tuple]:
     b.append(("image", _png(plot_utilization(model, checks)),
               "Governing member utilisation (red > 1 fails)"))
     n = 1
+    from .checks.en15512 import REPORT_HIDDEN_CHECKS
     for kind in CHECK_ORDER:
+        if kind in REPORT_HIDDEN_CHECKS:
+            continue
         crows = [c for c in checks if c.check == kind]
         if not crows:
             continue

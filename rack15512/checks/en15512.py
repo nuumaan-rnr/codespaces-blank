@@ -104,6 +104,22 @@ class CheckResult:
         return "PASS" if self.utilization <= 1.0 + 1e-9 else "FAIL"
 
 
+# Check kinds that are computed but NOT shown as design-check sections in the
+# reports:
+#   CONNECTOR  - the beam-end connector is modelled as a semi-rigid spring in
+#                the analysis; its moment capacity is a component design, not a
+#                member verification the report needs to list.
+#   ANCHORAGE  - the anchor / hold-down is designed separately in the Anchor &
+#                Footplate Designer against the governing base reactions, so it
+#                is not a required check in the member design report.
+#   ALPHA_CR   - the elastic critical load factor is the EN 1993-1-1 5.2.1
+#                indicator for whether 2nd-order analysis is needed; the app
+#                ALWAYS runs the full 2nd-order (P-Delta) analysis, so it is an
+#                informative ULS stability indicator (kept in the analysis-case
+#                summary), not a pass/fail design check.
+REPORT_HIDDEN_CHECKS = {"CONNECTOR", "ANCHORAGE", "ALPHA_CR"}
+
+
 def run_checks(model: RackModel, cases: List[CaseResult],
                progress=None) -> List[CheckResult]:
     """progress: optional callable(str) - called once per analysis case with
