@@ -275,6 +275,21 @@ class RackConfig:
     # connector_stiffness_override (when set) always wins, for any source.
     connector_stiffness_source: str = "master"
     connector_calc_factor: float = 2.0       # k = factor * E*I_b/L_b (2/4/6)
+    # moment bolts added to the beam-end connector to stiffen / strengthen it
+    # when the bare (hook) connector fails.  0 = the tested bare connector.
+    # The bolts act as a rotational spring group IN PARALLEL with the hook:
+    #   k_eff  = k_base + n * k_bolt * a^2     [N*mm/rad]
+    #   M_Rd,eff = M_Rd,base + n * F_bolt * a  [N*mm]
+    # n = connector_bolt_count, a = connector_bolt_lever (default beam depth),
+    # k_bolt = per-bolt slip stiffness (EN 1993-1-8 bearing, or the override),
+    # F_bolt = per-bolt shear resistance (cfg.bolt_d / bolt_grade).
+    connector_bolt_count: int = 0
+    connector_bolt_lever: Optional[float] = None   # [mm]; None -> beam depth
+    connector_bolt_k: Optional[float] = None       # per-bolt stiffness [N/mm]
+    # tested effective values per bolt count [[n, k_Nmm_per_rad, M_Rd_Nmm], ...]
+    # from EN 15512 Annex A tests of the bolted connector - when a row matches
+    # connector_bolt_count it OVERRIDES the calculated estimate (code-correct).
+    connector_bolt_table: Optional[List[List[float]]] = None
     # floor connection: explicit stiffness [N*mm/rad] (0 = pinned), or the
     # default 'auto' = interpolate the master's tested BASE_STIFFNESS table at
     # the estimated upright axial load (EN 15512).  With no master 'auto' falls
@@ -803,6 +818,25 @@ def build_rack(cfg: RackConfig) -> RackModel:
         else:                                  # 'master' (default)
             k_c = sec.connector_k_for(up.t) or cfg.connector_stiffness
         m_rd = sec.connector_m_rd or cfg.connector_m_rd
+        # moment bolts added to the beam-end connector (stiffen a failing
+        # connector): tested table row, else the calculated bolt-group in
+        # parallel with the hook connector (EN 1993-1-8 bolt shear/bearing)
+        if cfg.connector_bolt_count and cfg.connector_bolt_count > 0:
+            from .beam_stiffness import (bolt_bearing_stiffness,
+                                         bolt_shear_resistance,
+                                         effective_connector_with_bolts)
+            fu_beam = (sec.fu or getattr(m.checks, "fu_over_fy", 1.1)
+                       * m.materials[sec.material].fy)
+            lever = cfg.connector_bolt_lever or sec.depth_h or 0.0
+            k_bolt = (cfg.connector_bolt_k
+                      or bolt_bearing_stiffness(cfg.bolt_d, sec.t or 2.0,
+                                                fu_beam))
+            f_bolt = bolt_shear_resistance(cfg.bolt_d, cfg.bolt_grade,
+                                           getattr(m.checks, "gamma_M2", 1.25))
+            k_c, m_rd = effective_connector_with_bolts(
+                k_c, m_rd, cfg.connector_bolt_count,
+                table=cfg.connector_bolt_table, k_bolt=k_bolt,
+                lever=lever, f_bolt=f_bolt)
         loos = (sec.connector_looseness
                 if sec.connector_looseness is not None
                 else cfg.connector_looseness)

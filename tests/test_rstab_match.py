@@ -669,3 +669,50 @@ def test_set_member_envelopes_uls():
         rs = next(r for r in rows if r["set"] == seg)
         assert rl["N_kN"] >= rs["N_kN"] - 1e-6
         assert rl["Mz_kNm"] >= rs["Mz_kNm"] - 1e-6
+
+
+def test_connector_moment_bolts_increase_stiffness_and_capacity():
+    # Adding moment bolts to the beam-end connector raises both the rotational
+    # stiffness and the moment capacity: bolt group in parallel with the hook,
+    # k_eff = k + n*k_bolt*a^2, M_Rd,eff = M_Rd + n*F_bolt*a.
+    from rack15512.beam_stiffness import (effective_connector_with_bolts,
+                                          bolt_shear_resistance,
+                                          bolt_bearing_stiffness)
+
+    k0, m0 = 1.0e8, 2.5e6
+    kb = bolt_bearing_stiffness(12, 2.0, 400.0)
+    fb = bolt_shear_resistance(12, "8.8", 1.25)
+    assert kb > 0 and fb > 0
+    k1, m1 = effective_connector_with_bolts(k0, m0, 1, k_bolt=kb, lever=120.0,
+                                            f_bolt=fb)
+    k2, m2 = effective_connector_with_bolts(k0, m0, 2, k_bolt=kb, lever=120.0,
+                                            f_bolt=fb)
+    assert k0 < k1 < k2 and m0 < m1 < m2
+    assert abs(k1 - (k0 + kb * 120.0 ** 2)) < 1.0        # exactly n*k_bolt*a^2
+    assert abs(m2 - (m0 + 2 * fb * 120.0)) < 1.0
+    # a tested table overrides the calculated estimate
+    kt, mt = effective_connector_with_bolts(
+        k0, m0, 2, table=[[1, 3.0e8, 5.0e6], [2, 4.0e8, 7.0e6]],
+        k_bolt=kb, lever=120.0, f_bolt=fb)
+    assert kt == 4.0e8 and mt == 7.0e6
+    # 0 bolts is a no-op
+    assert effective_connector_with_bolts(k0, m0, 0) == (k0, m0)
+
+    # end-to-end: the built model's beam-end hinge stiffens with bolt count
+    from rack15512.master_xlsx import load_master
+    mw = load_master("examples/Master_Template_FINAL_mount_offset.xlsx")
+    base = dict(master=mw, module="single", n_bays=2, bay_width=2300.0,
+                frame_height=2200.0,
+                levels=[LevelSpec(gap=1500.0, beam_section="RHS60X40X1.6",
+                                  pallet_load=5000.0)],
+                upright_section="UP0010", connector_stiffness_source="manual",
+                connector_stiffness=1.0e8, bolt_d=12.0, bolt_grade="8.8")
+    m_no = build_rack(RackConfig(**base, connector_bolt_count=0))
+    m_yes = build_rack(RackConfig(**base, connector_bolt_count=2))
+
+    def beam_hinge_k(m):
+        for mm in m.members.values():
+            if mm.member_set == "pallet beams" and mm.hinge_i:
+                return mm.hinge_i.rz
+        return None
+    assert beam_hinge_k(m_yes) > beam_hinge_k(m_no)

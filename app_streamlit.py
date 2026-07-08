@@ -699,6 +699,12 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         connector_stiffness_source = g("connector_stiffness_source", "master")
         connector_calc_factor = float(g("connector_calc_factor", 2.0))
         connector_stiffness_val = float(g("connector_stiffness", 1.0e8))
+        # connector moment bolts (defaults; the selective form may override)
+        connector_bolt_count = int(g("connector_bolt_count", 0))
+        _cbl0 = g("connector_bolt_lever", None)
+        connector_bolt_lever = float(_cbl0) if _cbl0 else None
+        _cbk0 = g("connector_bolt_k", None)
+        connector_bolt_k = float(_cbk0) if _cbk0 else None
         # per-role material (fy) overrides: entered value wins over the master
         # per-section fy; 0 keeps the master / default grade
         ui.section("🧪", "Material per member type (0 = master / default)")
@@ -857,6 +863,37 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                           2: "manual"}[_cmodes.index(conn_mode)]
             connector_calc_factor = float(conn_factor_in)
             connector_stiffness_val = float(conn_manual_in) * 1e6
+            # moment bolts added to the beam-end connector to stiffen /
+            # strengthen a failing connector (bolt group in parallel with the
+            # hook: k_eff = k + n·k_bolt·a², M_Rd,eff = M_Rd + n·F_bolt·a)
+            cb = st.columns(3)
+            connector_bolt_count = int(cb[0].number_input(
+                "Connector moment bolts (per end)", 0, 6,
+                int(g("connector_bolt_count", 0)), 1,
+                help="Bolts added to the beam-end connector. 0 = bare tested "
+                     "(hook) connector. Each bolt adds n·k_bolt·a² to the "
+                     "rotational stiffness and n·F_bolt·a to the moment "
+                     "capacity (EN 1993-1-8 bolt shear/bearing), in parallel "
+                     "with the hook. Uses the brace bolt d/grade."))
+            _cbl = g("connector_bolt_lever", None)
+            connector_bolt_lever = cb[1].number_input(
+                "Bolt lever arm a [mm] (0 = beam depth)", 0.0, 400.0,
+                float(_cbl or 0.0), 5.0,
+                disabled=(connector_bolt_count == 0),
+                help="Vertical spread of the connector bolt group about the "
+                     "rotation centre. 0 = use the beam section depth.")
+            connector_bolt_lever = (float(connector_bolt_lever)
+                                    if connector_bolt_lever > 0 else None)
+            _cbk = g("connector_bolt_k", None)
+            connector_bolt_k = cb[2].number_input(
+                "Per-bolt stiffness k_bolt [kN/mm] (0 = calc)", 0.0, 500.0,
+                float((_cbk or 0.0) / 1e3), 1.0,
+                disabled=(connector_bolt_count == 0),
+                help="Per-bolt slip/bearing stiffness. 0 = calculate from "
+                     "EN 1993-1-8 bearing (bolt d, connector plate t, f_u). "
+                     "Enter a tested value to override.")
+            connector_bolt_k = (float(connector_bolt_k) * 1e3
+                                if connector_bolt_k > 0 else None)
             c = st.columns(3)
             brace_factor = c[0].number_input(
                 "Bracing area factor", 0.05, 1.0,
@@ -1180,6 +1217,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         connector_stiffness=connector_stiffness_val,
         connector_stiffness_source=connector_stiffness_source,
         connector_calc_factor=connector_calc_factor,
+        connector_bolt_count=connector_bolt_count,
+        connector_bolt_lever=connector_bolt_lever,
+        connector_bolt_k=connector_bolt_k,
         seismic=seismic, seismic_zone=s_zone, seismic_soil=s_soil,
         seismic_importance=s_I, seismic_response_reduction=s_R,
         seismic_structure_type=s_struct,
