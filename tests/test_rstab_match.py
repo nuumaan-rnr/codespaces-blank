@@ -475,7 +475,8 @@ def test_rstab8_export_tables(tmp_path):
     sup = list(wb["1.8 Nodal Supports"].iter_rows(min_row=3,
                                                   values_only=True))[0]
     assert sup[7] == "+" and sup[8] == "+" and sup[9] == "+"
-    assert sup[11] == 0                  # jY' zeroed - diagram on INFO sheet
+    # jY' carries the LINEAR base spring so it imports AND records directly
+    assert isinstance(sup[11], (int, float)) and sup[11] > 0
     assert sup[12] == "+"                # jZ' base-plate torsion FIXED
     # base diagram rows in kN / kNcm/rad incl. the tearing branch
     d = list(wb["INFO Base Stiffness"].iter_rows(min_row=3,
@@ -512,10 +513,9 @@ def test_rstab8_export_tables(tmp_path):
                                                               values_only=True)
             if r[0]}
     assert (1, 180) in rots and (1, 0) in rots           # both post lines
-    ws26 = wb["2.6 Result Combinations"]
-    assert ws26.max_column == 29                         # RSTAB's fixed width
-    rcs = [r for r in ws26.iter_rows(min_row=3, values_only=True) if r[0]]
-    assert rcs == []                     # headers only (FINAL reference)
+    # 2.6 Result Combinations is NOT exported: a header-only 2.6 makes
+    # RSTAB's import raise a read error, and RSTAB drops the empty table
+    assert "2.6 Result Combinations" not in wb.sheetnames
     # empty structural tables exported like RSTAB's own workbook
     for sheet in ("1.5 Member Eccentricities", "1.6 Member Divisions",
                   "1.9 Member Elastic Foundations",

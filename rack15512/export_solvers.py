@@ -822,14 +822,14 @@ def to_rstab8_xlsx(model: RackModel, path: str,
         groups.setdefault(key, []).append(nmap[sup.node])
     for i, (key, nodes) in enumerate(groups.items()):
         ux, uy, uz, rx, ry, rz = key
-        note = ("base plate (jZ' torsion fixed); jY' = 0 - enter the "
-                "axial-dependent diagram of the INFO sheet as a support "
-                "nonlinearity vs PZ' (linear equivalent: "
-                f"{dof(ry)} {U['spring_rot']})" if tbl else
+        note = ("base plate (jZ' torsion fixed); jY' = linear base spring "
+                "that IMPORTS AND RECORDS directly - optionally replace it "
+                "with the axial-dependent diagram of the INFO sheet as a "
+                "support nonlinearity vs PZ'" if tbl else
                 "base plate (jZ' torsion fixed); jY' linear base spring")
         ws.append([i + 1, _id_ranges(nodes), "XYZ", 0, 0, 0, "-",
                    dof(ux), dof(uy), dof(uz),
-                   dof(rx), 0 if tbl else dof(ry), "+", note])
+                   dof(rx), dof(ry), "+", note])
     if tbl:
         ws = wb.create_sheet("INFO Base Stiffness")
         ws.append(["Support", "Degree of", "Dependent", "Force", "C",
@@ -972,28 +972,12 @@ def to_rstab8_xlsx(model: RackModel, path: str,
         r.append(row["method"])
         ws.append(r)
 
-    # ---- 2.6 result combinations: one envelope per design situation -------
-    rc_groups: Dict[str, List[str]] = {}
-    for co_i, (row, pairs) in enumerate(pairs_data):
-        rc_groups.setdefault(row["ds"], []).append(f"CO{co_i + 1}")
-    # RSTAB's 2.6 table is 29 columns wide (6 Loading groups + Comment) -
-    # envelopes with more combinations are split over several RC rows
-    ws = wb.create_sheet("2.6 Result Combinations")
-    NGR = 6
-    h1 = ["Result", "Result Combination", None, None]
-    h2 = ["Combin.", "DS", "Description", "To Solve"]
-    for i in range(NGR):
-        h1 += [f"Loading.{i + 1}", None, None, None]
-        h2 += ["Factor", "No.", "Crit.", "Gr."]
-    ws.append(h1 + [None])
-    ws.append(h2 + ["Comment"])
-    ws.merge_cells("B1:C1")
-    for i in range(NGR):
-        c = 5 + 4 * i
-        ws.merge_cells(f"{get_column_letter(c)}1:{get_column_letter(c + 3)}1")
-    # headers only - the FINAL reference model defines no RCs; the
-    # rc_groups mapping stays available for future use
-    del rc_groups
+    # NOTE: the 2.6 Result Combinations table is intentionally NOT exported.
+    # A header-only 2.6 (no RC rows) makes RSTAB's Excel import raise a read
+    # error, and RSTAB drops the empty table on import anyway.  Result
+    # combinations (result envelopes) are RSTAB post-processing - build them
+    # in RSTAB from the imported load combinations if needed; the app's own
+    # design report already gives the ULS envelope per set of members.
 
     # ---- per-load-case load sheets (RSTAB exports ALL four tables per
     # load case, empty or not; sheet names truncate at Excel's 31 chars) ---
