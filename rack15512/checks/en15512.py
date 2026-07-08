@@ -120,6 +120,16 @@ class CheckResult:
 REPORT_HIDDEN_CHECKS = {"CONNECTOR", "ANCHORAGE", "ALPHA_CR"}
 
 
+def _sec_fy_tag(model: "RackModel", m) -> str:
+    """'<section> (fy <value> N/mm2): ' prefix for a member check detail, so
+    the report shows which section and yield strength the stress / buckling /
+    deflection etc. was verified against (the fy actually used - after any
+    per-role or per-section override)."""
+    sec = model.section_of(m)
+    fy = model.material_of(m).fy
+    return f"{sec.name} (fy {fy:.0f} N/mm2): "
+
+
 def run_checks(model: RackModel, cases: List[CaseResult],
                progress=None) -> List[CheckResult]:
     """progress: optional callable(str) - called once per analysis case with
@@ -212,7 +222,8 @@ def _stress_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
                 e += abs(s.My) / My_rd + abs(s.Mz) / Mz_rd
             if e > eta:
                 eta, st_worst = e, s
-        detail = (f"N={st_worst.N/1e3:.1f} kN, My={st_worst.My/1e6:.2f} kNm, "
+        detail = (_sec_fy_tag(model, m)
+                  + f"N={st_worst.N/1e3:.1f} kN, My={st_worst.My/1e6:.2f} kNm, "
                   f"Mz={st_worst.Mz/1e6:.2f} kNm at x={st_worst.x:.0f} mm; "
                   f"N_Rd={N_rd/1e3:.1f} kN, My_Rd={My_rd/1e6:.2f} kNm, "
                   f"Mz_Rd={Mz_rd/1e6:.2f} kNm")
@@ -255,7 +266,8 @@ def _shear_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
             eta = max(eta, comb)
         res.append(CheckResult(
             "SHEAR", case.name, f"member {mid}", m.member_set, eta,
-            f"V_Ed={v_ed/1e3:.2f} kN at x={st.x:.0f} mm, A_v={a_v:.0f} mm^2, "
+            _sec_fy_tag(model, m)
+            + f"V_Ed={v_ed/1e3:.2f} kN at x={st.x:.0f} mm, A_v={a_v:.0f} mm^2, "
             f"V_c,Rd={v_c_rd/1e3:.2f} kN{note}"))
     if missing:                            # one consolidated note, not per member
         res.append(CheckResult(
@@ -327,7 +339,8 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         if st_g is None:
             continue                       # no compressed station
         Nc, My_g, Mz_g = abs(st_g.N), abs(st_g.My), abs(st_g.Mz)
-        detail = (f"Nc={Nc/1e3:.1f} kN, My={My_g/1e6:.2f} kNm, "
+        detail = (_sec_fy_tag(model, m)
+                  + f"Nc={Nc/1e3:.1f} kN, My={My_g/1e6:.2f} kNm, "
                   f"Mz={Mz_g/1e6:.2f} kNm (concurrent, x={st_g.x:.0f} mm); "
                   f"Lcr_y={Lcr_y:.0f}, Lcr_z={Lcr_z:.0f} mm, "
                   f"lambda_y={lam_y:.2f}, lambda_z={lam_z:.2f}, "
@@ -382,7 +395,8 @@ def _ltb_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         eta = my_ed / Mb_rd if Mb_rd > 0 else 99.0
         res.append(CheckResult(
             "LTB", case.name, f"member {mid}", m.member_set, eta,
-            f"My_Ed={my_ed/1e6:.2f} kNm, M_cr={Mcr/1e6:.2f} kNm, "
+            _sec_fy_tag(model, m)
+            + f"My_Ed={my_ed/1e6:.2f} kNm, M_cr={Mcr/1e6:.2f} kNm, "
             f"lambda_LT={lam_lt:.2f}, chi_LT={chi_lt:.3f}, "
             f"Mb_Rd={Mb_rd/1e6:.2f} kNm"))
     if restrained and n_restrained:        # one consolidated note, not per beam
@@ -498,7 +512,8 @@ def _dsm_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
                   f"My_Rd={My_rd/1e6:.2f}({y_src}), Mz_Rd={Mz_rd/1e6:.2f}({z_src})"
                   f" kNm")
         res.append(CheckResult("DSM_BC", case.name, f"member {mid}",
-                               m.member_set, eta, detail,
+                               m.member_set, eta,
+                               _sec_fy_tag(model, m) + detail,
                                extra={"Pn": col.Pn, "Pne": col.Pne,
                                       "Pnl": col.Pnl, "Pnd": col.Pnd,
                                       "governs": col.governs, "Pcre": Pcre}))
@@ -583,7 +598,8 @@ def _brace_buckling_checks(model: RackModel,
                     f"Nt={mr.N_max/1e3:.2f} kN / Nt,Rd={nt_rd/1e3:.2f} kN "
                     f"(net section, Anet={anet:.0f} mm2, fu={fu:.0f} MPa)")
         res.append(CheckResult("BRACE_BUCKLING", case.name, f"member {mid}",
-                               m.member_set, util, detail))
+                               m.member_set, util,
+                               _sec_fy_tag(model, m) + detail))
     return res
 
 
@@ -1162,7 +1178,8 @@ def _deflection_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
         res.append(CheckResult(
             "DEFLECTION", case.name, f"member {mid}", m.member_set,
             d / limit,
-            f"defl={d:.2f} mm, limit=L/{ratio:.0f}={limit:.2f} mm"))
+            _sec_fy_tag(model, m)
+            + f"defl={d:.2f} mm, limit=L/{ratio:.0f}={limit:.2f} mm"))
     return res
 
 
