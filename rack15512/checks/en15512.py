@@ -104,9 +104,15 @@ class CheckResult:
         return "PASS" if self.utilization <= 1.0 + 1e-9 else "FAIL"
 
 
-def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
+def run_checks(model: RackModel, cases: List[CaseResult],
+               progress=None) -> List[CheckResult]:
+    """progress: optional callable(str) - called once per analysis case with
+    a running check count, and once with the final summary."""
     out: List[CheckResult] = []
     for case in cases:
+        if progress:
+            progress(f"Design checks: {case.name} "
+                     f"({len(out)} checks so far)")
         if not case.converged:
             out.append(CheckResult(
                 "STABILITY", case.name, "frame", "-", 99.0,
@@ -162,6 +168,10 @@ def run_checks(model: RackModel, cases: List[CaseResult]) -> List[CheckResult]:
         for c in out:
             if c.check not in core:
                 c.informative = True
+    if progress:
+        fails = sum(1 for c in out if not c.ok)
+        progress(f"Design checks complete: {len(out)} checks, "
+                 f"{fails} failing")
     return out
 
 

@@ -53,13 +53,19 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     step("Building the 3D model", 0.10)
     model = build_rack(cfg)
     seismic_on = bool(model.seismic and model.seismic.enabled)
+    step(f"Model built: {len(model.nodes)} nodes, {len(model.members)} "
+         f"members, {len(model.sections)} sections, "
+         f"{len(model.load_cases)} load cases, "
+         f"{len(model.combinations)} combinations", 0.20)
     step("Running second-order analysis (gravity combinations)", 0.30)
     # run_all reports finer seismic sub-stages (0.45..0.72) via `progress`
     cases = run_all(model, progress=progress, should_cancel=should_cancel)
+    conv = sum(1 for c in cases if c.converged)
+    step(f"Analysis done: {conv}/{len(cases)} cases converged", 0.74)
     step("Verifying " + ("EN 15512 + IS 1893 design checks" if seismic_on
                          else "EN 15512 design checks"), 0.75)
-    checks = run_checks(model, cases)
-    step("Writing report and plots", 0.90)
+    checks = run_checks(model, cases,
+                        progress=lambda msg: step(msg, 0.78))
 
     cdir = store.config_dir(project_id, system_id, config_id)
     os.makedirs(cdir, exist_ok=True)
@@ -73,10 +79,13 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
     import pickle
     try:
         save_model(model, os.path.join(cdir, "model.json"))
+        step("Saved model.json", 0.81)
         with open(os.path.join(cdir, "results.pkl"), "wb") as f:
             pickle.dump({"cases": cases, "checks": checks}, f)
+        step("Saved results.pkl", 0.82)
     except Exception as exc:
         print(f"Could not persist model/results.pkl: {exc}")
+        step(f"WARNING: could not persist model/results: {exc}", 0.82)
     summary = summarize_run(model, cases, checks)
     store.update_run_summary(project_id, system_id, config_id, summary)
 
@@ -86,16 +95,20 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
             "configuration": conf.name, "client": project.client,
             "location": project.location, "engineer": project.engineer}
     try:
+        step("Writing report.md (check report)", 0.90)
         with open(os.path.join(cdir, "report.md"), "w", encoding="utf-8") as f:
             f.write(_project_header(project, system, conf) +
                     write_report(model, cases, checks))
+        step("Writing design_validation_report.html", 0.91)
         from .report_html import design_validation_report
         with open(os.path.join(cdir, "design_validation_report.html"), "w",
                   encoding="utf-8") as f:
             f.write(design_validation_report(model, cases, checks, meta))
     except Exception as exc:
         print(f"Report (md/html) generation skipped: {exc}")
+        step(f"WARNING: report md/html skipped: {exc}", 0.91)
     try:
+        step("Writing design_validation_report.docx / .pdf", 0.93)
         from .report_doc import write_reports
         write_reports(model, cases, checks, meta,
                       docx_path=os.path.join(cdir,
@@ -104,20 +117,26 @@ def run_configuration(store: ProjectStore, project_id: str, system_id: str,
                                             "design_validation_report.pdf"))
     except Exception as exc:                # optional deps (docx/reportlab)
         print(f"DOCX/PDF report skipped: {exc}")
+        step(f"WARNING: DOCX/PDF skipped: {exc}", 0.93)
     if plots:
         try:
+            step("Plot: model.png (3D view)", 0.95)
             plot_model(model, os.path.join(cdir, "model.png"))
+            step("Plot: frame_elevation.png", 0.96)
             plot_frame_elevation(model, 0.0,
                                  os.path.join(cdir, "frame_elevation.png"))
+            step("Plot: utilization.png", 0.97)
             plot_utilization(model, checks,
                              os.path.join(cdir, "utilization.png"))
             for case in cases:
                 if case.converged and case.kind == "ULS":
+                    step(f"Plot: deformed.png ({case.name})", 0.98)
                     plot_deformed(model, case,
                                   path=os.path.join(cdir, "deformed.png"))
                     break
         except Exception as exc:
             print(f"Plot generation skipped: {exc}")
+            step(f"WARNING: plots skipped: {exc}", 0.98)
 
     step("Complete", 1.0)
     return summary, cdir
