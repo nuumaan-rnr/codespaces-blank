@@ -363,12 +363,16 @@ class RackConfig:
     # base_stiffness='auto': OPT-IN stepped AXIAL-DEPENDENT base - apply the
     # master's tested BASE_STIFFNESS table as a per-column stiffness diagram
     # (RSTAB style, tearing toward zero axial) instead of one value
-    # interpolated at the estimated axial.  Default OFF: the diagram softens
-    # the windward bases toward zero below the table's first anchor, which can
-    # push tall down-aisle frames to the stability limit and multiplies the
-    # solve count (fixed-point re-solves) - only enable when matching a tested
-    # axial-dependent base.  An explicit base_axial_table always applies.
-    base_axial_dependent: bool = False
+    # interpolated at the estimated axial.  Default ON: this is the RSTAB /
+    # physically-correct base - the base-plate rotational stiffness genuinely
+    # depends on the column axial (contact area), so a low-axial upright gets
+    # a softer base and a flat linear spring over-stiffens it and over-
+    # predicts the base moment (the app previously reported stress/buckling
+    # failures that RSTAB did not).  Set False for the flat linear base
+    # (interpolated once at the estimated axial) if a frame is genuinely at
+    # the stability limit and the per-column tearing prevents convergence.
+    # An explicit base_axial_table always applies regardless of this flag.
+    base_axial_dependent: bool = True
     # steel elastic constants override applied to every material (e.g. IS 2062:
     # E=200000, G=76900); None keeps the default 210000/81000.
     steel_E: Optional[float] = None

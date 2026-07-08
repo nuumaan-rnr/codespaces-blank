@@ -231,13 +231,14 @@ def test_rstab_behavior_defaults():
     # SLS combos run geometrically linear (RSTAB), ULS at the model order
     assert all(c.order == 1 for c in m.combinations if c.kind == "SLS")
     assert all(c.order in (None, 2) for c in m.combinations if c.kind == "ULS")
-    # default: auto base = single interpolated value (fast, proven); the
-    # stepped axial-dependent table only when opted in
-    assert m.base_axial_table is None
-    m_ax = build_rack(RackConfig(**kw, base_axial_dependent=True))
-    assert m_ax.base_axial_table is not None
-    assert m_ax.base_axial_table[0][0] == 0.0
-    assert m_ax.base_axial_table[1][0] == 30.0
+    # default: auto base uses the master's tested table as a per-column
+    # AXIAL-DEPENDENT stiffness diagram (RSTAB behaviour) when available
+    assert m.base_axial_table is not None
+    assert m.base_axial_table[0][0] == 0.0
+    assert m.base_axial_table[1][0] == 30.0
+    # opting out gives the flat linear base (single interpolated value)
+    m_flat = build_rack(RackConfig(**kw, base_axial_dependent=False))
+    assert m_flat.base_axial_table is None
     # EN1993 flat imperfection defaults
     assert m.imperfection.standard == "EN1993"
     assert abs(1 / m.imperfection.value_for("+x") - 300) < 1

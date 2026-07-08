@@ -420,7 +420,11 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
               steel_fy=FY_UPRIGHT, fy_override=True,
               gamma_G=CHART_GAMMA_G, gamma_G_uls=CHART_GAMMA_G,
               gamma_Q=CHART_GAMMA_Q, pay_placement_factor=CHART_GAMMA_Q,
-              include_self_weight=False)   # pallet capacity; self-wt negligible
+              include_self_weight=False,   # pallet capacity; self-wt negligible
+              base_axial_dependent=False)  # flat linear base for the fast sweep
+                                           # (axial-dependent diagram + fixed-
+                                           # point re-solves would slow it and
+                                           # the base moment is not governing)
     if xs:
         depth = round(mw.library.get(section).depth_h or 0.0)
         st = {90: "IN_STIFFENER90X1.6", 120: "IN_STIFFENER120X1.6"}.get(depth)

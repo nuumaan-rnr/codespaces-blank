@@ -74,6 +74,15 @@ def rackconfig_from_dict(d: Dict[str, Any], *, master=None,
     # fixed at 1.0; material effects are covered by the entered data) -
     # normalise legacy configs that stored a reduction
     data["stiffness_gamma_m"] = 1.0
+    # base_stiffness='auto' uses the master's tested base table as a per-
+    # column AXIAL-DEPENDENT stiffness diagram (RSTAB behaviour): the base-
+    # plate rotational stiffness depends on the column axial, so a low-axial
+    # upright gets a softer base.  This is not exposed in the app, so the
+    # stored value is only the creation-time default; force the RSTAB-matching
+    # diagram on so saved projects don't over-stiffen the base and over-report
+    # base moments (stress/buckling failures RSTAB doesn't show).
+    if data.get("base_stiffness", "auto") == "auto":
+        data["base_axial_dependent"] = True
     cfg = RackConfig(**data)
     if levels:
         cfg.levels = [LevelSpec(**ls) for ls in levels]
