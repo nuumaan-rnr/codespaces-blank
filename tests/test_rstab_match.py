@@ -671,34 +671,34 @@ def test_set_member_envelopes_uls():
         assert rl["Mz_kNm"] >= rs["Mz_kNm"] - 1e-6
 
 
-def test_connector_moment_bolts_increase_stiffness_and_capacity():
-    # Adding moment bolts to the beam-end connector raises both the rotational
-    # stiffness and the moment capacity: bolt group in parallel with the hook,
-    # k_eff = k + n*k_bolt*a^2, M_Rd,eff = M_Rd + n*F_bolt*a.
+def test_connector_moment_bolts_capacity_and_tested_stiffness():
+    # Adding moment bolts raises the connector MOMENT CAPACITY via the bolt
+    # tension couple (M_Rd += n*F_t,Rd*a); it does NOT raise the stiffness by
+    # calculation (bracket/upright-face bending governs and must be tested) -
+    # only a tested table raises the stiffness.
     from rack15512.beam_stiffness import (effective_connector_with_bolts,
-                                          bolt_shear_resistance,
-                                          bolt_bearing_stiffness)
+                                          bolt_tension_resistance)
 
     k0, m0 = 1.0e8, 2.5e6
-    kb = bolt_bearing_stiffness(12, 2.0, 400.0)
-    fb = bolt_shear_resistance(12, "8.8", 1.25)
-    assert kb > 0 and fb > 0
-    k1, m1 = effective_connector_with_bolts(k0, m0, 1, k_bolt=kb, lever=120.0,
-                                            f_bolt=fb)
-    k2, m2 = effective_connector_with_bolts(k0, m0, 2, k_bolt=kb, lever=120.0,
-                                            f_bolt=fb)
-    assert k0 < k1 < k2 and m0 < m1 < m2
-    assert abs(k1 - (k0 + kb * 120.0 ** 2)) < 1.0        # exactly n*k_bolt*a^2
-    assert abs(m2 - (m0 + 2 * fb * 120.0)) < 1.0
-    # a tested table overrides the calculated estimate
+    import math
+    ft = bolt_tension_resistance(12, "8.8", 1.25)
+    assert abs(ft - 0.9 * 800.0 * 0.78 * (math.pi / 4) * 144 / 1.25) < 1.0
+    k1, m1 = effective_connector_with_bolts(k0, m0, 1, lever=120.0, f_t_rd=ft)
+    k2, m2 = effective_connector_with_bolts(k0, m0, 2, lever=120.0, f_t_rd=ft)
+    # capacity rises with bolt count; stiffness is UNCHANGED (no calc)
+    assert m0 < m1 < m2
+    assert k1 == k0 and k2 == k0
+    assert abs(m2 - (m0 + 2 * ft * 120.0)) < 1.0         # exactly n*F_t,Rd*a
+    # a tested table sets BOTH stiffness and capacity
     kt, mt = effective_connector_with_bolts(
         k0, m0, 2, table=[[1, 3.0e8, 5.0e6], [2, 4.0e8, 7.0e6]],
-        k_bolt=kb, lever=120.0, f_bolt=fb)
+        lever=120.0, f_t_rd=ft)
     assert kt == 4.0e8 and mt == 7.0e6
     # 0 bolts is a no-op
     assert effective_connector_with_bolts(k0, m0, 0) == (k0, m0)
 
-    # end-to-end: the built model's beam-end hinge stiffens with bolt count
+    # end-to-end: the built model's beam-end hinge gains M_Rd (not stiffness),
+    # and a tested table sets both
     from rack15512.master_xlsx import load_master
     mw = load_master("examples/Master_Template_FINAL_mount_offset.xlsx")
     base = dict(master=mw, module="single", n_bays=2, bay_width=2300.0,
@@ -709,10 +709,17 @@ def test_connector_moment_bolts_increase_stiffness_and_capacity():
                 connector_stiffness=1.0e8, bolt_d=12.0, bolt_grade="8.8")
     m_no = build_rack(RackConfig(**base, connector_bolt_count=0))
     m_yes = build_rack(RackConfig(**base, connector_bolt_count=2))
+    m_tab = build_rack(RackConfig(
+        **base, connector_bolt_count=2,
+        connector_bolt_table=[[2, 3.0e8, 8.0e6]]))
 
-    def beam_hinge_k(m):
+    def beam_hinge(m):
         for mm in m.members.values():
             if mm.member_set == "pallet beams" and mm.hinge_i:
-                return mm.hinge_i.rz
-        return None
-    assert beam_hinge_k(m_yes) > beam_hinge_k(m_no)
+                return mm.hinge_i.rz, mm.hinge_i.m_rd_z
+        return None, None
+    k_no, mrd_no = beam_hinge(m_no)
+    k_yes, mrd_yes = beam_hinge(m_yes)
+    k_tab, mrd_tab = beam_hinge(m_tab)
+    assert mrd_yes > mrd_no and k_yes == k_no          # capacity up, k same
+    assert k_tab == 3.0e8 and mrd_tab == 8.0e6

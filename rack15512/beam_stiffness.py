@@ -57,40 +57,49 @@ def bolt_shear_resistance(d: float, grade: str, gamma_M2: float = 1.25,
     return max(planes, 1) * 0.6 * A_s * f_ub / max(gamma_M2, 1e-6)
 
 
-def bolt_bearing_stiffness(d: float, t: float, fu: float,
-                           e1: Optional[float] = None) -> float:
-    """Per-bolt slip / bearing spring stiffness [N/mm] (EN 1993-1-8 6.3.2,
-    bearing component): S = E * k, with the coefficient k = 24*k_b*k_t*d*f_u/E,
-    so S = 24*k_b*k_t*d*f_u.  k_b from the end distance (0.25*e1/d + 0.375,
-    capped at 1.0/0.625), k_t = 1.5*t/d_M16 (d_M16 = 16 mm, capped 2.5).
-    A code-referenced estimate for the connector plate; use a tested value
-    when available."""
-    d = float(d); t = float(t); fu = float(fu)
-    if d <= 0 or t <= 0 or fu <= 0:
-        return 0.0
-    e1 = e1 if (e1 and e1 > 0) else 1.5 * d
-    k_b = min(0.25 * e1 / d + 0.375, 0.625)
-    k_t = min(1.5 * t / 16.0, 2.5)
-    return 24.0 * k_b * k_t * d * fu
+def bolt_tension_resistance(d: float, grade: str,
+                            gamma_M2: float = 1.25) -> float:
+    """Per-bolt tension resistance F_t,Rd [N] (EN 1993-1-8 Table 3.4):
+    F_t,Rd = 0.9 * f_ub * A_s / gamma_M2, with A_s = 0.78*(pi/4)*d^2 and
+    f_ub = 100*grade-lead.  Under a beam-end moment the connector bolts on the
+    tension side go into TENSION (they resist the opening of the joint), so
+    this - not the shear/bearing value - is the moment-couple resistance."""
+    try:
+        lead = int(str(grade).split(".")[0])
+    except (ValueError, AttributeError, IndexError):
+        lead = 8
+    A_s = 0.78 * (math.pi / 4.0) * float(d) ** 2
+    f_ub = 100.0 * lead
+    return 0.9 * f_ub * A_s / max(gamma_M2, 1e-6)
 
 
 def effective_connector_with_bolts(k_base: float, m_rd_base: Optional[float],
                                    n_bolts: int, *,
                                    table: Optional[list] = None,
-                                   k_bolt: Optional[float] = None,
                                    lever: Optional[float] = None,
-                                   f_bolt: Optional[float] = None):
+                                   f_t_rd: Optional[float] = None):
     """Effective beam-end connector rotational stiffness [N*mm/rad] and moment
     capacity [N*mm] after adding `n_bolts` moment bolts.
 
-    1. If a tested `table` [[n, k, M_Rd], ...] has a row with n <= n_bolts, the
-       nearest such row is used directly (EN 15512 Annex A, code-correct).
-    2. Otherwise the bolts are a rotational spring group IN PARALLEL with the
-       bare hook connector:
-            k_eff    = k_base   + n_bolts * k_bolt * a^2
-            M_Rd,eff = M_Rd_base + n_bolts * f_bolt * a
-       with a = `lever` (bolt lever arm from the rotation centre).  Terms
-       whose inputs are missing are simply not added (no stiffness invented).
+    STIFFNESS.  A rack beam-end connector's rotational flexibility is dominated
+    by the bending of the bracket and the perforated upright face - components
+    that act IN SERIES with the (stiff) bolts, so the bolt stiffness does NOT
+    add to the connector stiffness by any simple k_bolt*a^2 rule; the softest
+    series component governs.  EN 15512 therefore requires the connector
+    stiffness of each bolted configuration to be measured (Annex A bending
+    test).  So the stiffness is raised ONLY when a tested `table`
+    [[n_bolts, k, M_Rd], ...] provides it; otherwise k_eff = k_base (the bolts
+    add capacity, not a calculated stiffness).
+
+    MOMENT CAPACITY.  The bolts on the tension side resist the beam-end moment
+    as a TENSION couple about the compression edge:
+        M_Rd,eff = M_Rd_base + n_bolts * F_t,Rd * a          (a = `lever`)
+    with F_t,Rd = `f_t_rd` the per-bolt tension resistance (EN 1993-1-8
+    Table 3.4).  The concurrent shear V (beam reaction) shares the same bolts,
+    so the usable moment is further limited by the connector M-V interaction
+    (EN 15512 9.5.4, applied in the connector check) and the bolts must satisfy
+    the tension+shear interaction (EN 1993-1-8 Table 3.4) - this M_Rd is the
+    pure-bending upper bound before that reduction.
 
     Returns (k_eff, m_rd_eff).
     """
@@ -105,9 +114,7 @@ def effective_connector_with_bolts(k_base: float, m_rd_base: Optional[float],
             mr = (float(r[2]) if len(r) > 2 and r[2] else m_rd_base)
             return k, mr
     a = float(lever) if lever and lever > 0 else 0.0
-    k_eff = k_base + (n_bolts * float(k_bolt) * a * a
-                      if (k_bolt and a) else 0.0)
     m_eff = m_rd_base
-    if m_rd_base is not None and f_bolt and a:
-        m_eff = m_rd_base + n_bolts * float(f_bolt) * a
-    return k_eff, m_eff
+    if m_rd_base is not None and f_t_rd and a:
+        m_eff = m_rd_base + n_bolts * float(f_t_rd) * a
+    return k_base, m_eff        # stiffness unchanged without a tested value
