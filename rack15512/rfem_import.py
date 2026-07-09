@@ -78,7 +78,8 @@ def _id_list(spec: str) -> List[int]:
     return out
 
 
-def load_rfem(path: str, fy: float = 250.0, master=None) -> RackModel:
+def load_rfem(path: str, fy: float = 250.0, master=None,
+              base_stiffness: Optional[float] = None) -> RackModel:
     """Build a RackModel from an RFEM data export.  fy is the design yield
     strength [MPa] (RFEM does not export it; IS 2062 E250 -> 250).
 
@@ -141,6 +142,18 @@ def load_rfem(path: str, fy: float = 250.0, master=None) -> RackModel:
             description="RFEM import; Wel estimated as I/(dim/2)")
         sec_name[no] = name
 
+    # synthetic stiff section for RSTAB COUPLING members (rigid / hinge links,
+    # typically short ~30 mm offsets between a beam and the upright face or the
+    # back-to-back tie).  A coupling carries no cross-section in the export, so
+    # it is modelled as a very stiff short beam with a moment release at the
+    # 'Hinge' end - the same behaviour as the RSTAB coupling.
+    _coup_mat = next(iter(model.materials), None)
+    if _coup_mat is not None:
+        model.sections["COUPLING"] = CrossSection(
+            name="COUPLING", material=_coup_mat, A=1.0e4,
+            Iy=1.0e8, Iz=1.0e8, J=1.0e8, Wely=1.0e6, Welz=1.0e6,
+            description="RSTAB coupling member (stiff rigid/hinge link)")
+
     # ---- member hinges (swap y/z) -------------------------------------------
     hinges: Dict[int, Hinge] = {}
     for r in _rows(wb, "1.4 Member Hinges")[2:]:
@@ -160,21 +173,42 @@ def load_rfem(path: str, fy: float = 250.0, master=None) -> RackModel:
         hinges[int(r[0])] = Hinge(rx=rot(r[5]), rz=rot(r[6]), ry=rot(r[7]))
 
     # ---- members -------------------------------------------------------------
+    def copy_h(h: Optional[Hinge]) -> Optional[Hinge]:
+        return Hinge(rz=h.rz, ry=h.ry, rx=h.rx) if h else None
+
     for r in _rows(wb, "1.7 Members")[2:]:
-        if _s(r[1]) == "":
+        typ = _s(r[1])
+        if typ == "":
             continue
         mid = int(r[0])
         beta = abs(_f(r[5], 0.0)) % 360.0
         if min(abs(beta - a) for a in (0.0, 180.0, 360.0)) > 5.0:
             raise ValueError(f"Member {mid}: rotation beta={beta:.1f} deg "
                              "not supported (only 0/180)")
-        mtype = "truss" if _s(r[1]).lower().startswith("truss") else "beam"
+        tl = typ.lower()
+        if "coupling" in tl:
+            # RSTAB coupling: stiff rigid/hinge link.  The type reads
+            # '<start>-<end>' after 'Coupling', each Rigid or Hinge; the Hinge
+            # end gets a full moment release (a pin) on the stiff beam.
+            if "COUPLING" not in model.sections:
+                continue                       # no material -> cannot build
+            ends = tl.replace("coupling", "").replace("only n", "").strip()
+            parts = [p.strip() for p in ends.split("-")] if ends else []
+            start_pin = bool(parts) and "hinge" in parts[0]
+            end_pin = len(parts) > 1 and "hinge" in parts[-1]
+            pin = Hinge(rx=0.0, ry=0.0, rz=0.0)
+            model.add_member(mid, int(r[2]), int(r[3]), "COUPLING",
+                             mtype="beam",
+                             hinge_i=copy_h(pin) if start_pin else None,
+                             hinge_j=copy_h(pin) if end_pin else None,
+                             mesh=1, member_set="coupling")
+            continue
+        if r[6] is None:
+            continue                           # non-coupling member w/o section
+        mtype = "truss" if tl.startswith("truss") else "beam"
         sec = sec_name[int(r[6])]
         h_i = hinges.get(int(_f(r[8], 0) or 0)) if mtype == "beam" else None
         h_j = hinges.get(int(_f(r[9], 0) or 0)) if mtype == "beam" else None
-
-        def copy_h(h: Optional[Hinge]) -> Optional[Hinge]:
-            return Hinge(rz=h.rz, ry=h.ry, rx=h.rx) if h else None
         model.add_member(mid, int(r[2]), int(r[3]), sec, mtype=mtype,
                          hinge_i=copy_h(h_i), hinge_j=copy_h(h_j),
                          mesh=2 if mtype == "beam" else 1,
@@ -206,6 +240,19 @@ def load_rfem(path: str, fy: float = 250.0, master=None) -> RackModel:
                 nid, ux=restraint(r[7]), uy=restraint(r[8]),
                 uz=restraint(r[9]), rx=rot_restraint(r[10]),
                 ry=rot_restraint(r[11]), rz=rot_restraint(r[12])))
+
+    # RSTAB / RFEM stores the semi-rigid floor connection as a NONLINEAR
+    # support diagram, which is NOT written to the Excel export - the support
+    # table shows the base rotation as free (jY' = 0).  A free base makes the
+    # down-aisle frame a sway mechanism, so the second-order combinations
+    # diverge on import.  Apply a supplied base_stiffness [N*mm/rad] to the
+    # down-aisle rotation (ry) of every base support that came in with a free
+    # ry, so the imported model is runnable (matches how RSTAB actually runs).
+    if base_stiffness and base_stiffness > 0:
+        z_base = min(n.z for n in model.nodes.values())
+        for sup in model.supports:
+            if model.nodes[sup.node].z <= z_base + 1.0 and sup.ry is False:
+                sup.ry = float(base_stiffness)
 
     # ---- load cases ------------------------------------------------------------
     imp_dir_of_lc: Dict[str, str] = {}

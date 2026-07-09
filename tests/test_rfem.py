@@ -119,3 +119,61 @@ def test_rfem_second_order_with_base_springs_matches():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_rfem_import_coupling_members_and_base_stiffness(tmp_path):
+    # RSTAB 'Coupling' members (rigid/hinge links, no cross-section) must not
+    # crash the importer; they become a stiff COUPLING beam with a moment
+    # release at the Hinge end.  A supplied base_stiffness fills the free base
+    # rotation that RSTAB omits from the Excel export.
+    import openpyxl
+    from rack15512.rfem_import import load_rfem
+
+    wb = openpyxl.Workbook()
+    def sheet(name, header, rows):
+        ws = wb.create_sheet(name)
+        ws.append(["h"] * len(header[0]))          # row 1 (group headers)
+        ws.append(header[1])                        # row 2 (column headers)
+        for r in rows:
+            ws.append(r)
+    wb.remove(wb.active)
+    sheet("1.1 Nodes",
+          [[], ["No.", "Ref", "Sys", "X", "Y", "Z", "C"]],
+          [[1, 0, "Cartesian", 0, 0, 0, ""],
+           [2, 0, "Cartesian", 0, 0, -1000, ""],
+           [3, 0, "Cartesian", 0, 0, -1031, ""]])   # 31 mm above node 2
+    sheet("1.2 Materials",
+          [[], ["No.", "Desc", "E", "G", "n", "g", "a", "gM", "Model", "C"]],
+          [[1, "Steel", 20000, 7690, 0.3, 78.5, 1.2e-5, 1.0, "Elastic", ""]])
+    sheet("1.3 Cross-Sections ",
+          [[], ["No.", "Desc", "Matl", "J", "Iy", "Iz", "A", "Ay", "Az",
+                "a", "a'", "b", "h", "C"]],
+          [[1, "UP", 1, 20.0, 150.0, 350.0, 3.5, 1.0, 1.0, 0, 0, 63, 90, ""]])
+    sheet("1.4 Member Hinges",
+          [[], ["No.", "Sys", "ux", "uy", "uz", "jx", "jy", "jz", "C"]], [])
+    sheet("1.7 Members",
+          [[], ["No.", "Type", "Start", "End", "RotType", "b", "CSs", "CSe",
+                "Hs", "He", "Ecc", "Div", "Shape", "L", "W", "", "C"]],
+          [[1, "Beam", 1, 2, "Angle", 0, 1, 1, 0, 0, 0, 0, "", 1000, 1, "Z", ""],
+           [2, "Coupling Rigid-Hinge", 2, 3, "", 0, None, None, None, None,
+            0, 0, "", 31, 0, "", ""]])
+    sheet("1.8 Nodal Supports",
+          [[], ["No.", "Nodes", "Seq", "aX", "aY", "aZ", "inZ",
+                "uX", "uY", "uZ", "jX", "jY", "jZ", "C"]],
+          [[1, "1", "XYZ", 0, 0, 0, "-", "+", "+", "+", "-", "0", "+",
+            "UP-BASE"]])
+    p = str(tmp_path / "coupling.xlsx")
+    wb.save(p)
+
+    m = load_rfem(p, fy=355.0, base_stiffness=5.0e7)
+    # coupling imported as a stiff COUPLING beam with a moment release (pin) at
+    # the Hinge (end) node
+    coup = [mm for mm in m.members.values() if mm.member_set == "coupling"]
+    assert len(coup) == 1
+    c = coup[0]
+    assert c.section == "COUPLING" and c.hinge_i is None
+    assert c.hinge_j is not None and c.hinge_j.rz == 0.0     # pinned end
+    assert "COUPLING" in m.sections and m.sections["COUPLING"].A >= 1.0e4
+    # base stiffness filled the free base rotation
+    base = m.supports[0]
+    assert base.ry == 5.0e7
