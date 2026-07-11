@@ -175,6 +175,7 @@ def _combo_rows(model: RackModel) -> List[dict]:
             cname = c.name.replace("@", "-")     # RSTAB drops '@' in names
             out.append({
                 "name": cname + (f" (imp {d})" if d else ""),
+                "combo": cname,          # base name (matches CaseResult.combo)
                 "kind": c.kind, "ds": ds, "imp": d,
                 "method": ("Second order analysis (P-Delta)"
                            if c.kind == "ULS"

@@ -104,8 +104,11 @@ def _rstab_results_compare(model, res, cdir, conf):
                  "from RSTAB (Tables → Results → Members).")
         return
     cases = res["cases"]
-    comps = rc.compare_results(model, cases, rfem)
-    cov = rc.coverage(model, cases, rfem)
+    # the RSTAB file is this app's own export, so reproduce the exact CO
+    # numbering the exporter assigned (per combination x imperfection dir)
+    co_for = rc.export_co_map(model)
+    comps = rc.compare_results(model, cases, rfem, co_for=co_for)
+    cov = rc.coverage(model, cases, rfem, co_for=co_for)
     if not comps:
         st.warning("The workbook was read but no combination numbers matched "
                    "this configuration's combinations. RSTAB combinations: "
@@ -157,7 +160,8 @@ def _rstab_results_compare(model, res, cdir, conf):
                           key="dl_rstab_cmp_md")
     xlsx_path = os.path.join(cdir, "rstab_comparison.xlsx")
     try:
-        rc.write_comparison_workbook(model, cases, rfem, xlsx_path)
+        rc.write_comparison_workbook(model, cases, rfem, xlsx_path,
+                                     co_for=co_for)
         with open(xlsx_path, "rb") as f:
             dc[1].download_button(
                 "⬇ Comparison workbook (xlsx)", f.read(),

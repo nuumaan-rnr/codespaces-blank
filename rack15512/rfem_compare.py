@@ -83,13 +83,41 @@ class Comparison:
         return abs(self.ours - self.theirs) / scale if scale else 0.0
 
 
+def export_co_map(model: RackModel):
+    """Map an app CaseResult to the combination id RSTAB will show, when the
+    results workbook was produced from THIS app's own RSTAB export.
+
+    The exporter (to_rstab8_xlsx) numbers the expanded (combination x
+    imperfection direction) rows CO1, CO2, ... in `_combo_rows` order, so the
+    same reproduces the numbering exactly.  Returns a callable case -> 'COn'
+    (or None if the case has no exported row).
+    """
+    from .export_solvers import _combo_rows
+    idx: Dict[Tuple[str, str], str] = {}
+    for i, row in enumerate(_combo_rows(model)):
+        idx[(row["combo"], row["imp"] or "")] = f"CO{i + 1}"
+
+    def resolve(case: CaseResult) -> Optional[str]:
+        base = (case.combo or "").replace("@", "-")
+        return idx.get((base, case.imp_direction or ""))
+
+    return resolve
+
+
+def _default_co(case: CaseResult) -> str:
+    # imported RFEM/RSTAB models already name the case 'CO1 ...'
+    return (case.combo or "").split(" ")[0]
+
+
 def compare_results(model: RackModel, cases: List[CaseResult],
                     rfem: Dict[str, Dict[int, MemberRef]],
-                    skip_members: Tuple[int, ...] = ()) -> List[Comparison]:
+                    skip_members: Tuple[int, ...] = (),
+                    co_for=None) -> List[Comparison]:
+    co_for = co_for or _default_co
     comps: List[Comparison] = []
     for case in cases:
-        co = case.combo.split(" ")[0]
-        ref = rfem.get(co)
+        co = co_for(case)
+        ref = rfem.get(co) if co else None
         if ref is None or not case.converged:
             continue
         for mid, mr in case.members.items():
@@ -202,9 +230,11 @@ def section_gov_rows(govs: List[SectionGov]) -> List[dict]:
 
 
 def coverage(model: RackModel, cases: List[CaseResult],
-             rfem: Dict[str, Dict[int, MemberRef]]) -> dict:
+             rfem: Dict[str, Dict[int, MemberRef]], co_for=None) -> dict:
     """What matched and what didn't, so the UI can be honest about scope."""
-    our_combos = {c.combo.split(" ")[0] for c in cases if c.converged}
+    co_for = co_for or _default_co
+    our_combos = {co_for(c) for c in cases if c.converged}
+    our_combos.discard(None)
     their_combos = set(rfem)
     return {
         "our_combos": sorted(our_combos, key=lambda s: (len(s), s)),
@@ -302,13 +332,15 @@ def summarize(comps: List[Comparison]) -> str:
 def write_comparison_workbook(model: RackModel, cases: List[CaseResult],
                               rfem: Dict[str, Dict[int, MemberRef]],
                               path: str,
-                              skip_members: Tuple[int, ...] = ()) -> str:
+                              skip_members: Tuple[int, ...] = (),
+                              co_for=None) -> str:
     """Write a multi-sheet .xlsx: governing-per-section summary, the full
     per-member/per-combination comparison, and the match coverage."""
     import openpyxl
-    comps = compare_results(model, cases, rfem, skip_members=skip_members)
+    comps = compare_results(model, cases, rfem, skip_members=skip_members,
+                            co_for=co_for)
     govs = governing_by_section(model, comps)
-    cov = coverage(model, cases, rfem)
+    cov = coverage(model, cases, rfem, co_for=co_for)
 
     wb = openpyxl.Workbook()
     ws = wb.active

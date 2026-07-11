@@ -13,9 +13,9 @@ from rack15512.engine.opensees import OpenSeesEngine
 from rack15512.master_xlsx import load_master
 from rack15512.model import DIRECTION_VECTORS, Combination
 from rack15512.rfem_compare import (MemberRef, comparison_rows, compare_results,
-                                    coverage, governing_by_section,
-                                    read_rfem_results, section_gov_rows,
-                                    write_comparison_workbook)
+                                    coverage, export_co_map,
+                                    governing_by_section, read_rfem_results,
+                                    section_gov_rows, write_comparison_workbook)
 from rack15512.rfem_import import load_rfem
 
 HERE = os.path.dirname(__file__)
@@ -160,6 +160,35 @@ def test_rfem_governing_by_section_and_rows(model, tmp_path):
     wb = openpyxl.load_workbook(out, read_only=True)
     assert "Governing per section" in wb.sheetnames
     assert "All members x combos" in wb.sheetnames
+
+
+@needs_data
+def test_export_co_map_matches_workbook(model, tmp_path):
+    """When the RSTAB results file is this app's own export, an app case maps
+    to the exact CO id the exporter wrote in the 2.5 Load Combinations sheet."""
+    import openpyxl
+    from rack15512.export_solvers import _combo_rows, to_rstab8_xlsx
+    from rack15512.results import CaseResult
+
+    p = str(tmp_path / "exp.xlsx")
+    to_rstab8_xlsx(model, p)
+    wb = openpyxl.load_workbook(p, data_only=True, read_only=True)
+    written = {}
+    for r in wb["2.5 Load Combinations"].iter_rows(min_row=3, values_only=True):
+        if r[0] and str(r[0]).startswith("CO"):
+            written[str(r[0])] = str(r[2])         # col C = description
+
+    resolve = export_co_map(model)
+    rows = _combo_rows(model)
+    assert len(written) == len(rows)
+    for i, row in enumerate(rows):
+        co = f"CO{i + 1}"
+        assert written[co] == row["name"]
+        # a synthetic app case exactly as analysis.run_all names them
+        case = CaseResult(name=row["name"], combo=row["combo"],
+                          kind=row["kind"], order=2,
+                          imp_direction=row["imp"] or "", converged=True)
+        assert resolve(case) == co
 
 
 if __name__ == "__main__":
