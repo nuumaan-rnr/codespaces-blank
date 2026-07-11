@@ -12,8 +12,10 @@ from rack15512.combos import assemble, apply_ehf
 from rack15512.engine.opensees import OpenSeesEngine
 from rack15512.master_xlsx import load_master
 from rack15512.model import DIRECTION_VECTORS, Combination
-from rack15512.rfem_compare import (MemberRef, compare_results,
-                                    read_rfem_results)
+from rack15512.rfem_compare import (MemberRef, comparison_rows, compare_results,
+                                    coverage, governing_by_section,
+                                    read_rfem_results, section_gov_rows,
+                                    write_comparison_workbook)
 from rack15512.rfem_import import load_rfem
 
 HERE = os.path.dirname(__file__)
@@ -115,6 +117,49 @@ def test_rfem_second_order_with_base_springs_matches():
     ax = sorted(c.rel_diff for c in comps if c.quantity.startswith("N"))
     assert ax[len(ax) // 2] < 0.01                # axials median < 1%
     assert mo[len(mo) // 2] < 0.03                # moments median < 3%
+
+
+@needs_data
+def test_rfem_governing_by_section_and_rows(model, tmp_path):
+    """The per-section governing summary and the flat UI rows are derived from
+    the same comparisons and stay consistent with them."""
+    ref = read_rfem_results(DATA)          # CO<n> result sheets only
+    co = next(iter(ref))
+    # a converged case whose combo id matches a result combination; absolute
+    # accuracy is covered elsewhere, this test checks summary consistency
+    case = OpenSeesEngine().run_case(
+        model, assemble(model, Combination("LC2", "SLS", {"LC2": 1.0})),
+        name=co, combo=co, kind="SLS", order=1)
+    comps = compare_results(model, [case], {co: ref[co]}, skip_members=SPLIT)
+    assert comps
+
+    govs = governing_by_section(model, comps)
+    assert govs
+    # one governing pick per (section, quantity), and it is the app-worst
+    for g in govs:
+        peers = [c for c in comps
+                 if model.members[c.member].section == g.section
+                 and c.quantity == g.quantity]
+        assert abs(g.ours) == max(abs(c.ours) for c in peers)
+    assert len({(g.section, g.quantity) for g in govs}) == len(govs)
+
+    rows = comparison_rows(comps)
+    assert len(rows) == len(comps)
+    assert set(rows[0]) >= {"combination", "member", "ours", "RSTAB",
+                            "rel diff %"}
+    srows = section_gov_rows(govs)
+    assert len(srows) == len(govs)
+
+    cov = coverage(model, [case], ref)
+    assert co in cov["matched_combos"]
+
+    out = str(tmp_path / "cmp.xlsx")
+    write_comparison_workbook(model, [case], {co: ref[co]}, out,
+                              skip_members=SPLIT)
+    import openpyxl
+    wb = openpyxl.load_workbook(out, read_only=True)
+    assert "Governing per section" in wb.sheetnames
+    assert "All members x combos" in wb.sheetnames
 
 
 if __name__ == "__main__":

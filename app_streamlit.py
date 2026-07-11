@@ -70,6 +70,105 @@ def _load_results(cdir):
         return None
 
 
+def _rstab_results_compare(model, res, cdir, conf):
+    """Upload an RSTAB results workbook and compare it against this
+    configuration's own analysis: every load combination, every member, and a
+    governing-per-section summary."""
+    st.markdown("#### RSTAB results comparison — validate the app against RSTAB")
+    st.caption("Drop the RSTAB *results* export (the workbook with "
+               "'COn - 4.1 Members - Internal Forces' sheets). Each RSTAB "
+               "load combination COn is matched to this app's combination of "
+               "the same number, then N / My / Mz are compared for every "
+               "member, with a governing load-combination per cross-section.")
+    up = st.file_uploader(
+        "RSTAB results workbook (.xlsx)", type=["xlsx"],
+        key="rstab_results_ref")
+    if up is None:
+        return
+    if not res:
+        st.info("Run the configuration first — there are no app results to "
+                "compare against yet.")
+        return
+    ref_path = os.path.join(cdir, "_rstab_results.xlsx")
+    with open(ref_path, "wb") as f:
+        f.write(up.getbuffer())
+    from rack15512 import rfem_compare as rc
+    try:
+        rfem = rc.read_rfem_results(ref_path)
+    except Exception as exc:
+        st.error(f"Could not read the RSTAB results workbook: {exc}")
+        return
+    if not rfem:
+        st.error("No 'COn - 4.1 Members' result sheets were found in that "
+                 "workbook — export the member internal forces per combination "
+                 "from RSTAB (Tables → Results → Members).")
+        return
+    cases = res["cases"]
+    comps = rc.compare_results(model, cases, rfem)
+    cov = rc.coverage(model, cases, rfem)
+    if not comps:
+        st.warning("The workbook was read but no combination numbers matched "
+                   "this configuration's combinations. RSTAB combinations: "
+                   f"{', '.join(cov['their_combos']) or '-'}; app "
+                   f"combinations: {', '.join(cov['our_combos']) or '-'}.")
+        return
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Combinations compared", len(cov["matched_combos"]))
+    diffs = sorted(c.rel_diff for c in comps)
+    med = 100.0 * diffs[len(diffs) // 2]
+    p95 = 100.0 * diffs[min(int(0.95 * len(diffs)), len(diffs) - 1)]
+    m2.metric("Median difference", f"{med:.1f}%")
+    m3.metric("95th percentile", f"{p95:.1f}%")
+    if cov["only_theirs"]:
+        st.caption("⚠ In RSTAB but not run here: "
+                   + ", ".join(cov["only_theirs"]))
+    if cov["only_ours"]:
+        st.caption("⚠ Run here but absent from the RSTAB workbook: "
+                   + ", ".join(cov["only_ours"]))
+
+    govs = rc.governing_by_section(model, comps)
+    st.markdown("**Governing load combination per cross-section** — the "
+                "combination that sizes each section (worst by this app), with "
+                "the RSTAB value at the same member and combination.")
+    st.dataframe(rc.section_gov_rows(govs), width="stretch",
+                 hide_index=True)
+
+    with st.expander("Every member × every load combination"):
+        rows = rc.comparison_rows(comps)
+        combos = sorted({r["combination"] for r in rows},
+                        key=lambda s: (len(s), s))
+        pick = st.multiselect("Load combinations", combos, default=combos,
+                              key="rstab_cmp_combos")
+        qs = sorted({r["quantity"] for r in rows})
+        qpick = st.multiselect("Quantities", qs, default=qs,
+                               key="rstab_cmp_quant")
+        shown = [r for r in rows if r["combination"] in pick
+                 and r["quantity"] in qpick]
+        st.caption(f"{len(shown)} of {len(rows)} compared values")
+        st.dataframe(sorted(shown, key=lambda r: -r["rel diff %"]),
+                     width="stretch", hide_index=True)
+
+    dc = st.columns(2)
+    md = rc.summarize(comps)
+    dc[0].download_button("⬇ Comparison report (markdown)", md,
+                          f"{conf.id}_rstab_comparison.md",
+                          mime="text/markdown", width="stretch",
+                          key="dl_rstab_cmp_md")
+    xlsx_path = os.path.join(cdir, "rstab_comparison.xlsx")
+    try:
+        rc.write_comparison_workbook(model, cases, rfem, xlsx_path)
+        with open(xlsx_path, "rb") as f:
+            dc[1].download_button(
+                "⬇ Comparison workbook (xlsx)", f.read(),
+                f"{conf.id}_rstab_comparison.xlsx",
+                mime="application/vnd.openxmlformats-officedocument."
+                     "spreadsheetml.sheet",
+                width="stretch", key="dl_rstab_cmp_xlsx")
+    except Exception as exc:
+        dc[1].caption(f"Workbook export unavailable: {exc}")
+
+
 # view_config section selector (state-driven so we can jump to a tab)
 _VC_TABS = ["🧱 Model", "📊 Results", "📄 Report", "⚙️ Parameters"]
 
@@ -2243,6 +2342,8 @@ def render_view_config():
                         f"Download {fname}", f.read(),
                         f"{conf.id}_{fname}", mime=mime,
                         width="stretch", key=f"dl_{fname}")
+
+        _rstab_results_compare(model, res, cdir, conf)
 
     if active == _VC_TABS[3]:
         ui.section("⚙️", "Configuration — edit the inputs and re-run")
