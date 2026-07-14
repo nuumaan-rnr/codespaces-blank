@@ -185,18 +185,22 @@ def _rstab_results_compare(model, res, cdir, conf):
         st.dataframe(sorted(shown, key=lambda r: -r["max Δ%"]),
                      width="stretch", hide_index=True)
 
-    # ---- buckling validation per SET OF MEMBERS -----------------------
-    st.markdown("**Buckling validation — set of members (design envelope)**")
-    st.caption("For every upright set of members (the continuous lines and the "
-               "per-level storey segments used for the EN 15512 buckling "
-               "check): the ULS design envelope of N / My / Mz, app vs RSTAB "
-               "(RSTAB aggregated over the set's members from its member "
-               "results). This validates the buckling DEMAND; the buckling "
-               "utilisation shown is this app's EN 15512 resistance check "
-               "(RSTAB's member buckling check is in its RF-/STEEL add-on, not "
-               "the internal-forces export).")
+    # ---- buckling + stress per SET OF MEMBERS (each upright) -----------
+    st.markdown("**Buckling & stress check per upright — app vs RSTAB**")
+    st.caption("For every upright set of members (continuous lines and "
+               "per-level storey segments): the ULS design envelope of "
+               "N / My / Mz, and the EN 15512 **stress** and **buckling** "
+               "utilisation computed the SAME way from each side's forces "
+               "(most-compressive N with the |My|/|Mz| envelope, identical "
+               "resistance on the set's most-slender upright). The util "
+               "columns isolate the analysis from the code calc — matching "
+               "forces give matching ratios. `util (ours, design)` is this "
+               "app's station-concurrent design check. RSTAB's own steel "
+               "buckling ratio lives in its RF-/STEEL add-on, not the "
+               "internal-forces export, so the RSTAB util here is that same "
+               "EN 15512 resistance applied to RSTAB's forces.")
+    checks = res.get("checks") if isinstance(res, dict) else None
     try:
-        checks = res.get("checks") if isinstance(res, dict) else None
         buck = rc.set_buckling_comparison(model, cases, rfem, co_for=co_for,
                                           checks=checks)
         if buck:
@@ -205,6 +209,35 @@ def _rstab_results_compare(model, res, cdir, conf):
             st.info("No upright sets of members found for this configuration.")
     except Exception as exc:
         st.warning(f"Buckling comparison unavailable: {exc}")
+
+    # ---- load-beam deflection (SLS) app vs RSTAB ----------------------
+    st.markdown("**Load-beam deflection (SLS) — app vs RSTAB**")
+    rfem_defl = None
+    try:
+        rfem_defl = rc.read_rfem_deflections(ref_path)
+    except Exception:
+        rfem_defl = None
+    st.caption("Worst SLS transverse deflection of each load beam, with the "
+               "span and the L/{:.0f} limit. The RSTAB column fills when the "
+               "uploaded workbook also contains RSTAB member deformation "
+               "results ('COn - 4.x Members - Local Deformations'); the 4.1 "
+               "internal-forces export alone carries no deflections."
+               .format(model.checks.beam_defl_limit_ratio))
+    try:
+        defl = rc.beam_deflection_comparison(model, cases, rfem_defl=rfem_defl,
+                                             co_for=co_for)
+        if defl:
+            if not rfem_defl:
+                st.info("No RSTAB deformation table found in the workbook — "
+                        "showing this app's deflections. Export RSTAB's "
+                        "'Members - Local Deformations' into the same workbook "
+                        "to fill the RSTAB column.")
+            st.dataframe(defl, width="stretch", hide_index=True)
+        else:
+            st.info("No SLS results to report beam deflections (run an SLS "
+                    "combination).")
+    except Exception as exc:
+        st.warning(f"Deflection comparison unavailable: {exc}")
 
     with st.expander("Every member × every load combination (single quantity)"):
         rows = rc.comparison_rows(comps)

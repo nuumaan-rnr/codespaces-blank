@@ -356,6 +356,57 @@ def _buckling_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     return res
 
 
+def member_stress_utilization(model: RackModel, m, N: float, My: float,
+                              Mz: float) -> float:
+    """EN 15512 cross-section (stress) utilisation for a member under a given
+    (N, My, Mz) in base units [N, N*mm].  Same resistance as _stress_checks
+    (gamma_M0), so it can be applied to this app's OR RSTAB's forces to
+    compare the check on a like-for-like basis."""
+    sec = model.section_of(m)
+    fy = model.material_of(m).fy
+    g = model.checks.gamma_M0
+    eta = abs(N) / (sec.area_eff * fy / g)
+    if m.mtype == "beam":
+        eta += abs(My) / (sec.mod_y_eff * fy / g)
+        eta += abs(Mz) / (sec.mod_z_eff * fy / g)
+    return eta
+
+
+def member_buckling_utilization(model: RackModel, m, N: float, My: float,
+                                Mz: float, length: Optional[float] = None
+                                ) -> float:
+    """EN 15512 buckling utilisation for a member under a given (N, My, Mz)
+    in base units [N, N*mm]; tension (N >= 0) returns 0.  Same resistance as
+    _buckling_checks (chi_min incl. flexural-torsional, gamma_M1, k_M), so it
+    applies equally to this app's or RSTAB's forces."""
+    if N >= 0.0:
+        return 0.0
+    sec = model.section_of(m)
+    mat = model.material_of(m)
+    g = model.checks.gamma_M1
+    kM = model.checks.k_M
+    L = length if length else model.member_length(m)
+    Lcr_y = m.L_buckling_y if m.L_buckling_y else m.k_buckling_y * L
+    Lcr_z = m.L_buckling_z if m.L_buckling_z else m.k_buckling_z * L
+    Ncr_y = buckling.n_cr(mat.E, sec.Iy, Lcr_y)
+    Ncr_z = buckling.n_cr(mat.E, sec.Iz, Lcr_z)
+    chi_y = buckling.chi(buckling.lambda_bar(sec.area_eff, mat.fy, Ncr_y),
+                         sec.buckling_curve_y)
+    chi_z = buckling.chi(buckling.lambda_bar(sec.area_eff, mat.fy, Ncr_z),
+                         sec.buckling_curve_z)
+    chi_min = min(chi_y, chi_z)
+    L_tors = getattr(m, "L_torsion", None) or m.L_buckling_y or L
+    chi_ft = _chi_ft(sec, mat, L_tors, Ncr_y, model.checks.beta_T)
+    if chi_ft is not None and chi_ft < chi_min:
+        chi_min = chi_ft
+    Nb_rd = chi_min * sec.area_eff * mat.fy / g
+    eta = abs(N) / Nb_rd
+    if m.mtype == "beam":
+        eta += kM * abs(My) / (sec.mod_y_eff * mat.fy / g)
+        eta += kM * abs(Mz) / (sec.mod_z_eff * mat.fy / g)
+    return eta
+
+
 def _ltb_checks(model: RackModel, case: CaseResult) -> List[CheckResult]:
     """Lateral-torsional buckling of pallet beams (EN 15512 9.4 / EN 1993-1-1
     6.3.2).  Pallet beams are normally laterally restrained by the unit load;

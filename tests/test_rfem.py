@@ -231,6 +231,57 @@ def test_verify_rstab_export_replica(tmp_path):
     assert bad["nodes (by coordinate)"]["status"] == "review"
 
 
+def test_set_buckling_and_deflection_comparison():
+    """Per-upright stress/buckling utilisation and beam deflection compare on a
+    like-for-like basis: fed identical forces, the app and 'RSTAB' utilisation
+    columns are equal (the resistance calc is shared), so any difference in the
+    real comparison is a force/analysis difference, not the code."""
+    from rack15512.builder import RackConfig, build_rack, LevelSpec
+    from rack15512.combos import apply_ehf, assemble
+    from rack15512.model import DIRECTION_VECTORS
+    from rack15512.rfem_compare import (MemberRef, beam_deflection_comparison,
+                                        export_co_map, set_buckling_comparison)
+
+    m = build_rack(RackConfig(module="single", n_bays=2,
+                              levels=[LevelSpec(gap=2000.0),
+                                      LevelSpec(gap=2000.0)],
+                              frame_height=4400.0))
+    eng = OpenSeesEngine()
+    cases = []
+    for combo in m.combinations:
+        loads = assemble(m, combo)
+        d = ""
+        if combo.imperfection and combo.kind == "ULS":
+            loads = apply_ehf(m, loads, m.imperfection.value(),
+                              DIRECTION_VECTORS["+x"])
+            d = "+x"
+        cases.append(eng.run_case(
+            m, loads, name=combo.name, combo=combo.name, kind=combo.kind,
+            order=2 if combo.kind == "ULS" else 1, imp_direction=d))
+    co_for = export_co_map(m)
+    rfem = {co_for(c): {mid: MemberRef(mr.N_min, mr.N_max, mr.My_absmax,
+                                       mr.Mz_absmax)
+                        for mid, mr in c.members.items()}
+            for c in cases if c.kind == "ULS" and co_for(c)}
+
+    rows = set_buckling_comparison(m, cases, rfem, co_for=co_for)
+    assert rows
+    got_util = [r for r in rows if r.get("buckling util RSTAB") is not None]
+    assert got_util
+    for r in got_util:                       # identical forces -> identical util
+        assert r["buckling util ours"] == pytest.approx(
+            r["buckling util RSTAB"], abs=1e-6)
+        assert r["stress util ours"] == pytest.approx(
+            r["stress util RSTAB"], abs=1e-6)
+    assert max(r["buckling util ours"] for r in got_util) > 0.0
+
+    defl = beam_deflection_comparison(m, cases, rfem_defl=None, co_for=co_for)
+    assert defl
+    r0 = defl[0]
+    assert r0["set"] == "pallet beams" and r0["defl ours [mm]"] > 0
+    assert "util ours" in r0 and "defl RSTAB [mm]" not in r0   # no RSTAB table
+
+
 def test_within_tolerance_absorbs_small_axial_tail():
     """A tiny axial that RSTAB reports as ~0 but the app reports as ~1-2 kN
     (the imperfection load-path tail) agrees within absolute tolerance, so it
