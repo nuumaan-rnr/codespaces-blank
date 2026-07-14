@@ -249,22 +249,32 @@ def test_set_buckling_and_deflection_comparison():
     eng = OpenSeesEngine()
     cases = []
     for combo in m.combinations:
-        loads = assemble(m, combo)
-        d = ""
-        if combo.imperfection and combo.kind == "ULS":
-            loads = apply_ehf(m, loads, m.imperfection.value(),
-                              DIRECTION_VECTORS["+x"])
-            d = "+x"
-        cases.append(eng.run_case(
-            m, loads, name=combo.name, combo=combo.name, kind=combo.kind,
-            order=2 if combo.kind == "ULS" else 1, imp_direction=d))
+        base = assemble(m, combo)
+        dirs = ([""] if not (combo.imperfection and combo.kind == "ULS")
+                else (combo.imp_directions or m.imperfection.directions))
+        for d in dirs:
+            loads = base
+            if d:
+                loads = apply_ehf(m, base, m.imperfection.value_for(d),
+                                  DIRECTION_VECTORS[d])
+            cases.append(eng.run_case(
+                m, loads, name=f"{combo.name} ({d})" if d else combo.name,
+                combo=combo.name, kind=combo.kind,
+                order=2 if combo.kind == "ULS" else 1, imp_direction=d))
     co_for = export_co_map(m)
     rfem = {co_for(c): {mid: MemberRef(mr.N_min, mr.N_max, mr.My_absmax,
                                        mr.Mz_absmax)
                         for mid, mr in c.members.items()}
             for c in cases if c.kind == "ULS" and co_for(c)}
+    # RSTAB per-station forces faked from OUR stations (identical data) so the
+    # concurrent utilisation must come out equal on both sides
+    rfem_st = {co_for(c): {mid: [(s.N, s.My, s.Mz)
+                                 for s in mr.stations]
+                           for mid, mr in c.members.items()}
+               for c in cases if c.kind == "ULS" and co_for(c)}
 
-    rows = set_buckling_comparison(m, cases, rfem, co_for=co_for)
+    rows = set_buckling_comparison(m, cases, rfem, co_for=co_for,
+                                   rfem_stations=rfem_st)
     assert rows
     got_util = [r for r in rows if r.get("buckling util RSTAB") is not None]
     assert got_util
@@ -273,13 +283,16 @@ def test_set_buckling_and_deflection_comparison():
             r["buckling util RSTAB"], abs=1e-6)
         assert r["stress util ours"] == pytest.approx(
             r["stress util RSTAB"], abs=1e-6)
+        assert r["ours"] in ("PASS", "FAIL")
+        assert r["ours"] == r["RSTAB"]
     assert max(r["buckling util ours"] for r in got_util) > 0.0
 
     defl = beam_deflection_comparison(m, cases, rfem_defl=None, co_for=co_for)
     assert defl
     r0 = defl[0]
-    assert r0["set"] == "pallet beams" and r0["defl ours [mm]"] > 0
-    assert "util ours" in r0 and "defl RSTAB [mm]" not in r0   # no RSTAB table
+    assert r0["set"] == "pallet beams" and r0["defl ours (SLS) [mm]"] > 0
+    assert "util ours (SLS)" in r0
+    assert "defl RSTAB [mm]" not in r0        # no RSTAB deformation table given
 
 
 def test_within_tolerance_absorbs_small_axial_tail():

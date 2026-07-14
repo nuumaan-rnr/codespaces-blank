@@ -188,22 +188,35 @@ def _rstab_results_compare(model, res, cdir, conf):
     # ---- buckling + stress per SET OF MEMBERS (each upright) -----------
     st.markdown("**Buckling & stress check per upright — app vs RSTAB**")
     st.caption("For every upright set of members (continuous lines and "
-               "per-level storey segments): the ULS design envelope of "
-               "N / My / Mz, and the EN 15512 **stress** and **buckling** "
-               "utilisation computed the SAME way from each side's forces "
-               "(most-compressive N with the |My|/|Mz| envelope, identical "
-               "resistance on the set's most-slender upright). The util "
-               "columns isolate the analysis from the code calc — matching "
-               "forces give matching ratios. `util (ours, design)` is this "
-               "app's station-concurrent design check. RSTAB's own steel "
-               "buckling ratio lives in its RF-/STEEL add-on, not the "
-               "internal-forces export, so the RSTAB util here is that same "
-               "EN 15512 resistance applied to RSTAB's forces.")
+               "per-level storey segments): the governing upright's EN 15512 "
+               "**stress** and **buckling** utilisation, app vs RSTAB. The "
+               "utilisation is **station-concurrent** (each station's "
+               "simultaneous N, My, Mz — exactly like the design check), NOT "
+               "an envelope of separate maxima (which would over-predict and "
+               "read as a false FAIL on both sides). Both sides use the "
+               "identical EN 15512 resistance, so the columns isolate the "
+               "forces from the code calc. The RSTAB column needs the RSTAB "
+               "member internal forces per station (the 4.1 sheets you "
+               "uploaded); RSTAB's own steel-design ratio lives in its "
+               "RF-/STEEL add-on.")
     checks = res.get("checks") if isinstance(res, dict) else None
+    rfem_stations = None
+    try:
+        rfem_stations = rc.read_rfem_stations(ref_path)
+    except Exception:
+        rfem_stations = None
     try:
         buck = rc.set_buckling_comparison(model, cases, rfem, co_for=co_for,
-                                          checks=checks)
+                                          checks=checks,
+                                          rfem_stations=rfem_stations)
         if buck:
+            n_fail = sum(1 for r in buck if r.get("ours") == "FAIL"
+                         or r.get("RSTAB") == "FAIL")
+            if n_fail:
+                st.warning(f"{n_fail} upright set(s) exceed utilisation 1.0 — "
+                           "see the FAIL rows.")
+            else:
+                st.success("All uprights PASS buckling & stress on both sides.")
             st.dataframe(buck, width="stretch", hide_index=True)
         else:
             st.info("No upright sets of members found for this configuration.")
@@ -217,10 +230,15 @@ def _rstab_results_compare(model, res, cdir, conf):
         rfem_defl = rc.read_rfem_deflections(ref_path)
     except Exception:
         rfem_defl = None
-    st.caption("Worst SLS transverse deflection of each load beam, with the "
-               "span and the L/{:.0f} limit. The RSTAB column fills when the "
-               "uploaded workbook also contains RSTAB member deformation "
-               "results ('COn - 4.x Members - Local Deformations'); the 4.1 "
+    st.caption("Two groups. **SLS**: this app's serviceability deflection and "
+               "L/{:.0f} utilisation (the design check). **RSTAB**: the "
+               "chord-relative deflection compared on whatever combinations "
+               "RSTAB exported member deformations for — often the ULS combos "
+               "('COn - 4.7 Members - Local Deformations'); `RSTAB basis` "
+               "shows which, and `defl ours (cmp)` is this app on those same "
+               "combos so the Δ% is like-for-like. RSTAB lists absolute local "
+               "displacements, so the chord (end-node) movement is subtracted "
+               "to match this app's chord-relative check. The 4.1 "
                "internal-forces export alone carries no deflections."
                .format(model.checks.beam_defl_limit_ratio))
     try:

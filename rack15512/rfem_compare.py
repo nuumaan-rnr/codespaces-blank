@@ -377,25 +377,24 @@ def member_triples(model: RackModel, cases: List[CaseResult],
 def set_buckling_comparison(model: RackModel, cases: List[CaseResult],
                             rfem: Dict[str, Dict[int, MemberRef]],
                             co_for=None,
-                            checks: Optional[List] = None) -> List[dict]:
+                            checks: Optional[List] = None,
+                            rfem_stations: Optional[Dict] = None) -> List[dict]:
     """Per SET OF MEMBERS (the upright storey segments / continuous lines used
-    for the EN 15512 buckling check): the ULS design envelope of N / My / Mz
-    from this app vs RSTAB, AND the EN 15512 STRESS and BUCKLING utilisation
-    computed the SAME way from each side's forces.
+    for the EN 15512 buckling check): the ULS most-compressive N app vs RSTAB,
+    and the EN 15512 STRESS and BUCKLING utilisation for each side.
 
-    For every set both sides use the identical envelope (most-compressive N
-    with the |My| / |Mz| envelope) and the identical EN 15512 resistance on
-    the set's most-slender upright element, so the utilisation columns isolate
-    the analysis (force) difference from the code calc: if the forces match,
-    the ratios match.  This app's OWN design buckling utilisation (the
-    station-concurrent check) is shown too when the run results are supplied.
+    The utilisation is STATION-CONCURRENT (each station's simultaneous
+    N, My, Mz), exactly like this app's design check - NOT an envelope of
+    separate maxima, which would over-predict and read as a false failure.
+    Both sides use the identical EN 15512 resistance, so the util columns
+    isolate the analysis (forces) from the code calc.  RSTAB utilisation
+    needs the per-station member forces (rfem_stations, read_rfem_stations);
+    without them only this app's utilisation is shown.
     """
     from .checks.en15512 import (member_buckling_utilization,
-                                 member_stress_utilization,
-                                 upright_set_buckling_rows)
+                                 member_stress_utilization)
 
     co_for = co_for or _default_co
-    # set label -> member ids (both the continuous line and the segment label)
     members_of: Dict[str, List[int]] = {}
     for mid, m in model.members.items():
         lbl = getattr(m, "set_label", None)
@@ -406,87 +405,79 @@ def set_buckling_comparison(model: RackModel, cases: List[CaseResult],
         if line != lbl:
             members_of.setdefault(line, []).append(mid)
 
-    # our per-member ULS envelope, in the SAME MemberRef shape as RSTAB, so
-    # both sides go through one identical aggregation (only the forces differ)
-    ours_by_co: Dict[str, Dict[int, MemberRef]] = {}
+    uprights = {mid for mid, m in model.members.items()
+                if m.member_set == "uprights"}
+
+    # --- station-concurrent utilisation per upright member, both sides ------
+    # ours: from our own per-station results; RSTAB: from its 4.1 stations.
+    ob = {}
+    os_ = {}
     for c in cases:
         if c.kind != "ULS" or not c.converged:
             continue
-        co = co_for(c)
-        if not co:
+        for mid in uprights & set(c.members):
+            m = model.members[mid]
+            for s in c.members[mid].stations:
+                b = member_buckling_utilization(model, m, s.N, s.My, s.Mz)
+                st = member_stress_utilization(model, m, s.N, s.My, s.Mz)
+                if b > ob.get(mid, 0.0):
+                    ob[mid] = b
+                if st > os_.get(mid, 0.0):
+                    os_[mid] = st
+
+    rb = {}
+    rs = {}
+    if rfem_stations:
+        uls_cos = {co_for(c) for c in cases
+                   if c.kind == "ULS" and c.converged}
+        uls_cos.discard(None)
+        for co, md in rfem_stations.items():
+            if uls_cos and co not in uls_cos:
+                continue
+            for mid in uprights & set(md):
+                m = model.members[mid]
+                for (N, My, Mz) in md[mid]:
+                    b = member_buckling_utilization(model, m, N, My, Mz)
+                    st = member_stress_utilization(model, m, N, My, Mz)
+                    if b > rb.get(mid, 0.0):
+                        rb[mid] = b
+                    if st > rs.get(mid, 0.0):
+                        rs[mid] = st
+
+    # most-compressive N per member (ours) for context
+    ncomp: Dict[int, float] = {}
+    for c in cases:
+        if c.kind != "ULS" or not c.converged:
             continue
-        ours_by_co[co] = {mid: MemberRef(mr.N_min, mr.N_max,
-                                         mr.My_absmax, mr.Mz_absmax)
-                          for mid, mr in c.members.items()}
+        for mid in uprights & set(c.members):
+            ncomp[mid] = min(ncomp.get(mid, 0.0), c.members[mid].N_min)
+    rncomp: Dict[int, float] = {}
+    for co, ref in rfem.items():
+        for mid in uprights & set(ref):
+            rncomp[mid] = min(rncomp.get(mid, 0.0), ref[mid].N_min)
 
-    def env(source: Dict[str, Dict[int, MemberRef]],
-            mids: List[int]) -> Optional[dict]:
-        n = my = mz = 0.0
-        seen = False
-        for ref in source.values():
-            for mid in mids:
-                rm = ref.get(mid)
-                if rm is None:
-                    continue
-                seen = True
-                n = min(n, rm.N_min)
-                my = max(my, rm.My_absmax)
-                mz = max(mz, rm.Mz_absmax)
-        return {"N": n, "My": my, "Mz": mz} if seen else None
-
-    def rep_member(mids: List[int]):
-        """The set's most slender upright element (longest buckling length) -
-        the one that governs the set's buckling check."""
-        ups = [model.members[i] for i in mids
-               if model.members[i].member_set == "uprights"]
-        if not ups:
-            return None
-        return max(ups, key=lambda m: (m.L_buckling_z or 0.0,
-                                       model.member_length(m)))
-
-    # this app's OWN design buckling utilisation per set (station-concurrent)
-    design = {}
-    if checks:
-        for r in upright_set_buckling_rows(model, checks):
-            design[r["set"]] = r
-
-    # every set label present in our results (lines + segments)
     labels = sorted(members_of, key=lambda s: (" · " in s, s))
     rows: List[dict] = []
     for lbl in labels:
-        mids = members_of[lbl]
-        ov = env(ours_by_co, mids)
-        if ov is None:
+        ups = [i for i in members_of[lbl] if i in uprights and i in ob]
+        if not ups:
             continue
-        m = rep_member(mids)
-        if m is None:
-            continue
-        rv = env(rfem, mids)
+        gov = max(ups, key=lambda i: ob.get(i, 0.0))   # governing upright
         row = {
             "set": lbl,
-            "N ours [kN]": round(-ov["N"] / KN, 2),
-            "N RSTAB [kN]": round(-rv["N"] / KN, 2) if rv else None,
-            "My ours [kNcm]": round(ov["My"] / KNCM, 2),
-            "My RSTAB [kNcm]": round(rv["My"] / KNCM, 2) if rv else None,
-            "Mz ours [kNcm]": round(ov["Mz"] / KNCM, 2),
-            "Mz RSTAB [kNcm]": round(rv["Mz"] / KNCM, 2) if rv else None,
-            "stress util ours": round(
-                member_stress_utilization(model, m, ov["N"], ov["My"],
-                                          ov["Mz"]), 3),
-            "buckling util ours": round(
-                member_buckling_utilization(model, m, ov["N"], ov["My"],
-                                            ov["Mz"]), 3),
+            "member": gov,
+            "N ours [kN]": round(-ncomp.get(gov, 0.0) / KN, 2),
+            "N RSTAB [kN]": (round(-rncomp[gov] / KN, 2)
+                             if gov in rncomp else None),
+            "stress util ours": round(os_.get(gov, 0.0), 3),
+            "stress util RSTAB": round(rs[gov], 3) if gov in rs else None,
+            "buckling util ours": round(ob.get(gov, 0.0), 3),
+            "buckling util RSTAB": round(rb[gov], 3) if gov in rb else None,
+            "ours": "PASS" if ob.get(gov, 0.0) <= 1.0 else "FAIL",
         }
-        if rv:
-            row["stress util RSTAB"] = round(member_stress_utilization(
-                model, m, rv["N"], rv["My"], rv["Mz"]), 3)
-            row["buckling util RSTAB"] = round(member_buckling_utilization(
-                model, m, rv["N"], rv["My"], rv["Mz"]), 3)
-            row["buckling Δ%"] = _pct(row["buckling util ours"],
-                                      row["buckling util RSTAB"])
-        d = design.get(lbl)
-        if d:
-            row["buckling util (ours, design)"] = round(d.get("util", 0.0), 3)
+        if gov in rb:
+            row["RSTAB"] = "PASS" if rb[gov] <= 1.0 else "FAIL"
+            row["buckling Δ%"] = _pct(ob.get(gov, 0.0), rb[gov])
         rows.append(row)
     return rows
 
@@ -494,67 +485,151 @@ def set_buckling_comparison(model: RackModel, cases: List[CaseResult],
 def beam_deflection_comparison(model: RackModel, cases: List[CaseResult],
                                rfem_defl: Optional[Dict] = None,
                                co_for=None) -> List[dict]:
-    """Transverse deflection of the load beams: this app (SLS) per beam member,
-    with the span/limit and utilisation, and RSTAB where a member-deformation
-    table was supplied (read_rfem_deflections).  One row per beam member, worst
-    SLS deflection across the compared combinations."""
+    """Transverse (chord-relative) deflection of the load beams: this app per
+    beam member with the span, L/limit and utilisation, and RSTAB where a
+    member-deformation table was supplied (read_rfem_deflections).
+
+    When RSTAB deformations are supplied they are compared on the SAME
+    combinations RSTAB exported (RSTAB often exports member deformations for
+    the ULS combinations only); otherwise the SLS combinations drive the
+    serviceability utilisation.  One row per beam member, worst over the
+    compared combinations."""
     co_for = co_for or _default_co
     ratio = model.checks.beam_defl_limit_ratio
-    sls = [c for c in cases if c.kind == "SLS" and c.converged]
+    lim_lbl = "limit L/{:.0f} [mm]".format(ratio)
+
+    def is_beam(mid):
+        m = model.members.get(mid)
+        if m is None or m.mtype != "beam":
+            return None
+        ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
+        run = ((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2) ** 0.5
+        if abs(nj.z - ni.z) > run:
+            return None                       # vertical-ish -> sway, not defl
+        return m
+
+    # 1) SLS serviceability deflection + utilisation (this app's design check)
+    sls: Dict[int, dict] = {}
+    for case in cases:
+        if not case.converged or case.kind != "SLS":
+            continue
+        for mid, mr in case.members.items():
+            m = is_beam(mid)
+            if m is None:
+                continue
+            d = mr.defl_absmax
+            if mid not in sls or d > sls[mid]["_d"]:
+                lim = mr.length / ratio
+                sls[mid] = {"_d": d, "sls combo": co_for(case),
+                            "defl ours (SLS) [mm]": round(d, 2),
+                            lim_lbl: round(lim, 2),
+                            "util ours (SLS)": round(d / lim, 3)
+                            if lim else None}
+
+    # 2) RSTAB comparison on whatever combos RSTAB exported deformations for
+    #    (often the ULS combos), matched to our deflection on the SAME combos
+    cmp_: Dict[int, dict] = {}
+    if rfem_defl:
+        want = set(rfem_defl)
+        for case in cases:
+            if not case.converged or co_for(case) not in want:
+                continue
+            for mid, mr in case.members.items():
+                if is_beam(mid) is None:
+                    continue
+                d = mr.defl_absmax
+                if mid not in cmp_ or d > cmp_[mid]["_d"]:
+                    cmp_[mid] = {"_d": d, "RSTAB basis": case.kind,
+                                 "defl ours (cmp) [mm]": round(d, 2)}
+        for mid, r in cmp_.items():
+            theirs = max((abs(rfem_defl[co].get(mid, 0.0)) for co in want
+                          if mid in rfem_defl[co]), default=None)
+            if theirs is not None:
+                r["defl RSTAB [mm]"] = round(theirs, 2)
+                r["Δ%"] = _pct(r["defl ours (cmp) [mm]"], theirs)
 
     rows: List[dict] = []
-    seen = {}
-    for case in sls:
-        co = co_for(case)
-        for mid, mr in case.members.items():
-            m = model.members.get(mid)
-            if m is None or m.mtype != "beam":
-                continue
-            ni, nj = model.nodes[m.node_i], model.nodes[m.node_j]
-            run = ((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2) ** 0.5
-            if abs(nj.z - ni.z) > run:
-                continue                      # vertical-ish -> sway, not defl
-            d = mr.defl_absmax
-            cur = seen.get(mid)
-            if cur is None or d > cur["_d"]:
-                seen[mid] = {"_d": d, "combination": co, "member": mid,
-                             "set": m.member_set, "section": m.section,
-                             "span [mm]": round(mr.length, 0),
-                             "defl ours [mm]": round(d, 2),
-                             "limit L/{:.0f} [mm]".format(ratio):
-                                 round(mr.length / ratio, 2)}
-    for mid, r in seen.items():
-        theirs = None
-        if rfem_defl:
-            for co, md in rfem_defl.items():
-                if mid in md:
-                    theirs = max(theirs or 0.0, abs(md[mid]))
-        if theirs is not None:
-            r["defl RSTAB [mm]"] = round(theirs, 2)
-            r["Δ%"] = _pct(r["defl ours [mm]"], theirs)
-        lim = r[[k for k in r if k.startswith("limit")][0]]
-        r["util ours"] = round(r["defl ours [mm]"] / lim, 3) if lim else None
-        r.pop("_d", None)
-        rows.append(r)
-    rows.sort(key=lambda r: -(r.get("util ours") or 0))
+    for mid in sorted(set(sls) | set(cmp_)):
+        m = model.members[mid]
+        row = {"member": mid, "set": m.member_set, "section": m.section,
+               "span [mm]": round(model.member_length(m), 0)}
+        for src in (sls.get(mid), cmp_.get(mid)):
+            if src:
+                row.update({k: v for k, v in src.items() if k != "_d"})
+        rows.append(row)
+    rows.sort(key=lambda r: -(r.get("util ours (SLS)")
+                              or r.get("Δ%") or 0))
     return rows
 
 
+def read_rfem_stations(path: str
+                       ) -> Dict[str, Dict[int, List[Tuple[float, float,
+                                                            float]]]]:
+    """Per-STATION concurrent internal forces from the RSTAB 4.1 member
+    results: {combo: {member: [(N, My_ours, Mz_ours), ...]}} in base units
+    [N, N*mm], already mapped to this app's local axes (RSTAB My -> our Mz).
+    Needed for a like-for-like buckling/stress check: the utilisation must use
+    each station's SIMULTANEOUS (N, My, Mz), never a mix of separate maxima."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    out: Dict[str, Dict[int, List[Tuple[float, float, float]]]] = {}
+    for sheet in wb.sheetnames:
+        s = sheet.strip()
+        if "4.1 Members" not in s or not s.startswith("CO"):
+            continue
+        co = s.split(" ")[0]
+        fscale, mscale = KN, KNCM
+        md: Dict[int, List[Tuple[float, float, float]]] = {}
+        cur = None
+        for i, r in enumerate(wb[sheet].iter_rows(values_only=True)):
+            if i < 2:
+                for cell in r:
+                    t = "" if cell is None else str(cell).lower()
+                    if "force" in t:
+                        u = _bracket_unit(cell)
+                        if u in _FORCE_FACTORS:
+                            fscale = _FORCE_FACTORS[u]
+                    if "moment" in t:
+                        u = _bracket_unit(cell)
+                        if u in _MOMENT_FACTORS:
+                            mscale = _MOMENT_FACTORS[u]
+                continue
+            head = "" if r[0] is None else str(r[0]).strip()
+            if head.isdigit():
+                cur = int(head)
+            if cur is None or r[3] is None:
+                continue
+            try:                              # our My = RSTAB Mz, our Mz = RSTAB My
+                N = float(r[3]) * fscale
+                my_ours = float(r[8]) * mscale
+                mz_ours = float(r[7]) * mscale
+            except (TypeError, ValueError):
+                continue
+            md.setdefault(cur, []).append((N, my_ours, mz_ours))
+        out[co] = md
+    return out
+
+
 def read_rfem_deflections(path: str) -> Dict[str, Dict[int, float]]:
-    """Best-effort reader for RSTAB member LOCAL DEFORMATION result sheets
-    ('COn - 4.x Members - Local Deformations' or '... Global Deformations').
-    Returns {combo: {member: max |transverse displacement| [mm]}}.  RSTAB
-    lengths export in mm, so values are used as-is.  Empty if no such sheet
-    is present (the 4.1 internal-forces export alone has no deflections)."""
+    """Chord-relative transverse beam deflection from the RSTAB member LOCAL
+    deformation sheets ('COn - 4.7 Members - Local Deformations').
+
+    RSTAB lists ABSOLUTE local displacements ux, uy, uz [mm] at several
+    stations per member (rows are often duplicated and out of order for the
+    min/max envelope).  This app's deflection check is relative to the member
+    CHORD, so per member we take the true end stations (min-x, max-x) and
+    subtract the straight line between their displacements from every station,
+    returning {combo: {member: max chord-relative |transverse| [mm]}}.  Empty
+    if no 4.7 sheet is present (the 4.1 internal-forces export has none)."""
     import openpyxl
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     out: Dict[str, Dict[int, float]] = {}
     for sheet in wb.sheetnames:
         s = sheet.strip()
-        if "Deformation" not in s or not s.startswith("CO"):
+        if "Local Defor" not in s or not s.startswith("CO"):
             continue
         co = s.split(" ")[0]
-        md: Dict[int, float] = {}
+        pts: Dict[int, List[Tuple[float, float, float]]] = {}
         cur = None
         for i, r in enumerate(wb[sheet].iter_rows(values_only=True)):
             if i < 2:
@@ -564,16 +639,32 @@ def read_rfem_deflections(path: str) -> Dict[str, Dict[int, float]]:
                 cur = int(head)
             if cur is None:
                 continue
-            # displacement columns vary; take the max |value| of the numeric
-            # displacement cells (columns 4..7 are u_x,u_y,u_z,|u| in RSTAB)
-            vals = []
-            for c in r[3:8]:
-                try:
-                    vals.append(abs(float(c)))
-                except (TypeError, ValueError):
-                    pass
-            if vals:
-                md[cur] = max(md.get(cur, 0.0), max(vals))
+            try:                              # x, uy, uz (cols 2, 5, 6)
+                pts.setdefault(cur, []).append(
+                    (float(r[2]), float(r[5]), float(r[6])))
+            except (TypeError, ValueError):
+                continue
+        md: Dict[int, float] = {}
+        for mid, stns in pts.items():
+            xs = [p[0] for p in stns]
+            x0, x1 = min(xs), max(xs)
+            if x1 - x0 < 1.0:
+                continue
+
+            def end(xt):
+                v = [(p[1], p[2]) for p in stns if abs(p[0] - xt) < 1.0]
+                n = len(v) or 1
+                return sum(a for a, _ in v) / n, sum(b for _, b in v) / n
+            uy0, uz0 = end(x0)
+            uy1, uz1 = end(x1)
+            span = x1 - x0
+            best = 0.0
+            for x, uy, uz in stns:
+                t = (x - x0) / span
+                dy = uy - (uy0 + (uy1 - uy0) * t)
+                dz = uz - (uz0 + (uz1 - uz0) * t)
+                best = max(best, (dy * dy + dz * dz) ** 0.5)
+            md[mid] = best
         if md:
             out[co] = md
     return out
