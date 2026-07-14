@@ -200,28 +200,44 @@ def _rstab_results_compare(model, res, cdir, conf):
                "uploaded); RSTAB's own steel-design ratio lives in its "
                "RF-/STEEL add-on.")
     checks = res.get("checks") if isinstance(res, dict) else None
-    rfem_stations = None
-    try:
-        rfem_stations = rc.read_rfem_stations(ref_path)
-    except Exception:
+    import inspect
+    stale = "rfem_stations" not in inspect.signature(
+        rc.set_buckling_comparison).parameters
+    if stale:
+        st.error("⚠ The app is running an **older cached `rfem_compare` "
+                 "module** — the concurrent buckling fix (build 2026-07-12i) "
+                 "isn't loaded, so this table would over-predict and show a "
+                 "false FAIL. **Stop and restart** the Streamlit server "
+                 "(Ctrl+C, then `streamlit run app_streamlit.py`) — a browser "
+                 "rerun does not reload changed Python modules. If `rack15512` "
+                 "is pip-installed, run `pip install -e .` first, then "
+                 "restart.")
+    else:
         rfem_stations = None
-    try:
-        buck = rc.set_buckling_comparison(model, cases, rfem, co_for=co_for,
-                                          checks=checks,
-                                          rfem_stations=rfem_stations)
-        if buck:
-            n_fail = sum(1 for r in buck if r.get("ours") == "FAIL"
-                         or r.get("RSTAB") == "FAIL")
-            if n_fail:
-                st.warning(f"{n_fail} upright set(s) exceed utilisation 1.0 — "
-                           "see the FAIL rows.")
+        if hasattr(rc, "read_rfem_stations"):
+            try:
+                rfem_stations = rc.read_rfem_stations(ref_path)
+            except Exception:
+                rfem_stations = None
+        try:
+            buck = rc.set_buckling_comparison(
+                model, cases, rfem, co_for=co_for, checks=checks,
+                rfem_stations=rfem_stations)
+            if buck:
+                n_fail = sum(1 for r in buck if r.get("ours") == "FAIL"
+                             or r.get("RSTAB") == "FAIL")
+                if n_fail:
+                    st.warning(f"{n_fail} upright set(s) exceed utilisation "
+                               "1.0 — see the FAIL rows.")
+                else:
+                    st.success("All uprights PASS buckling & stress on both "
+                               "sides.")
+                st.dataframe(buck, width="stretch", hide_index=True)
             else:
-                st.success("All uprights PASS buckling & stress on both sides.")
-            st.dataframe(buck, width="stretch", hide_index=True)
-        else:
-            st.info("No upright sets of members found for this configuration.")
-    except Exception as exc:
-        st.warning(f"Buckling comparison unavailable: {exc}")
+                st.info("No upright sets of members found for this "
+                        "configuration.")
+        except Exception as exc:
+            st.warning(f"Buckling comparison unavailable: {exc}")
 
     # ---- load-beam deflection (SLS) app vs RSTAB ----------------------
     st.markdown("**Load-beam deflection (SLS) — app vs RSTAB**")
