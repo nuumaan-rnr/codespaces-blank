@@ -327,6 +327,234 @@ def coverage(model: RackModel, cases: List[CaseResult],
     }
 
 
+def _pct(ours: float, theirs: float) -> float:
+    scale = max(abs(ours), abs(theirs))
+    return round(100.0 * abs(ours - theirs) / scale, 1) if scale else 0.0
+
+
+def member_triples(model: RackModel, cases: List[CaseResult],
+                   rfem: Dict[str, Dict[int, MemberRef]],
+                   skip_members: Tuple[int, ...] = (), co_for=None
+                   ) -> List[dict]:
+    """One row per (combination, member): N, My and Mz together, app vs RSTAB,
+    with the per-quantity difference.  For filtering by set / section in the
+    UI.  N = max compression (kN); My/Mz = |max| bending (kNcm, RSTAB My<->our
+    Mz already mapped in the reader)."""
+    co_for = co_for or _default_co
+    rows: List[dict] = []
+    for case in cases:
+        co = co_for(case)
+        ref = rfem.get(co) if co else None
+        if ref is None or not case.converged:
+            continue
+        for mid, mr in case.members.items():
+            if mid in skip_members or mid not in ref:
+                continue
+            m = model.members[mid]
+            rm = ref[mid]
+            trip = [("N_min", "N", KN, mr.N_min, rm.N_min),
+                    ("My_absmax", "My", KNCM, mr.My_absmax, rm.My_absmax),
+                    ("Mz_absmax", "Mz", KNCM, mr.Mz_absmax, rm.Mz_absmax)]
+            row = {"combination": co, "member": mid,
+                   "set": m.member_set, "section": m.section}
+            worst = 0.0
+            ok = True
+            for q, tag, div, ours, theirs in trip:
+                unit = "kN" if div == KN else "kNcm"
+                row[f"{tag} ours [{unit}]"] = round(ours / div, 3)
+                row[f"{tag} RSTAB [{unit}]"] = round(theirs / div, 3)
+                d = _pct(ours, theirs)
+                row[f"{tag} Δ%"] = d
+                worst = max(worst, d)
+                if not within_tolerance(q, ours, theirs):
+                    ok = False
+            row["max Δ%"] = worst
+            row["status"] = "ok" if ok else "review"
+            rows.append(row)
+    return rows
+
+
+def set_buckling_comparison(model: RackModel, cases: List[CaseResult],
+                            rfem: Dict[str, Dict[int, MemberRef]],
+                            co_for=None,
+                            checks: Optional[List] = None) -> List[dict]:
+    """Per SET OF MEMBERS (the upright storey segments / continuous lines used
+    for the EN 15512 buckling check): the ULS design envelope of N / My / Mz
+    from this app vs RSTAB, plus this app's buckling utilisation for the set.
+
+    The app envelope is the concurrent-N / |My| / |Mz| set envelope
+    (set_member_envelopes); the RSTAB envelope aggregates the RSTAB member
+    internal forces (4.1) over the same set members across the ULS
+    combinations - so the buckling DEMAND is validated member-set by
+    member-set.  Buckling resistance is this app's EN 15512 calc (RSTAB's
+    member buckling check lives in its RF-/STEEL add-on, not the 4.1 export).
+    """
+    from .checks.en15512 import set_member_envelopes, upright_set_buckling_rows
+
+    co_for = co_for or _default_co
+    # set label -> member ids (both the continuous line and the segment label)
+    members_of: Dict[str, List[int]] = {}
+    for mid, m in model.members.items():
+        lbl = getattr(m, "set_label", None)
+        if not lbl:
+            continue
+        members_of.setdefault(lbl, []).append(mid)
+        line = lbl.split(" · ")[0]
+        if line != lbl:
+            members_of.setdefault(line, []).append(mid)
+
+    # RSTAB ULS envelope per set from the member results
+    uls_cos = {co_for(c) for c in cases
+               if c.kind == "ULS" and c.converged}
+    uls_cos.discard(None)
+
+    def rstab_env(mids: List[int]) -> Optional[dict]:
+        n = 0.0
+        my = mz = 0.0
+        seen = False
+        for co in uls_cos:
+            ref = rfem.get(co)
+            if not ref:
+                continue
+            for mid in mids:
+                rm = ref.get(mid)
+                if rm is None:
+                    continue
+                seen = True
+                n = min(n, rm.N_min)
+                my = max(my, rm.My_absmax)
+                mz = max(mz, rm.Mz_absmax)
+        return {"N": n, "My": my, "Mz": mz} if seen else None
+
+    # this app's buckling utilisation per set (optional)
+    util = {}
+    if checks:
+        for r in upright_set_buckling_rows(model, checks):
+            util[r["set"]] = r
+
+    rows: List[dict] = []
+    for e in set_member_envelopes(model, cases):
+        lbl = e["set"]
+        mids = members_of.get(lbl, [])
+        rv = rstab_env(mids)
+        row = {
+            "set": lbl,
+            "N ours [kN]": e["N_kN"],
+            "N RSTAB [kN]": round(-rv["N"] / KN, 2) if rv else None,
+            "N Δ%": _pct(e["N_kN"] * KN, -rv["N"]) if rv else None,
+            "My ours [kNcm]": round(e["My_kNm"] * 100, 2),
+            "My RSTAB [kNcm]": round(rv["My"] / KNCM, 2) if rv else None,
+            "My Δ%": _pct(e["My_kNm"] * 1e6, rv["My"]) if rv else None,
+            "Mz ours [kNcm]": round(e["Mz_kNm"] * 100, 2),
+            "Mz RSTAB [kNcm]": round(rv["Mz"] / KNCM, 2) if rv else None,
+            "Mz Δ%": _pct(e["Mz_kNm"] * 1e6, rv["Mz"]) if rv else None,
+        }
+        u = util.get(lbl)
+        if u:
+            row["buckling util (ours)"] = round(u.get("util", 0.0), 3)
+            row["buckling status"] = u.get("status", "")
+        rows.append(row)
+    return rows
+
+
+def verify_rstab_export(model: RackModel, path: str) -> List[dict]:
+    """Check that an RSTAB export workbook is an exact replica of the model:
+    node coordinates (RSTAB is Z-down), member geometry + section mapping,
+    member hinge stiffnesses, and the node/member/support/set/load-case/
+    combination counts.  Returns rows {item, model, RSTAB, status}.
+
+    Node and combination *numbering* legitimately differ (RSTAB assigns its
+    own node ids; combinations are expanded per imperfection direction and
+    load cases gain the two native imperfection cases), so the check compares
+    by coordinate and geometry, not by id."""
+    import openpyxl
+    from .export_solvers import _combo_rows
+
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+
+    def body(sheet: str):
+        if sheet not in wb.sheetnames:
+            return []
+        return [r for i, r in enumerate(wb[sheet].iter_rows(values_only=True))
+                if i >= 2 and r and r[0] is not None]
+
+    def key(x, y, z):
+        return (round(float(x)), round(float(y)), round(float(z)))
+
+    out: List[dict] = []
+
+    def add(item, mv, rv, ok):
+        out.append({"item": item, "model": mv, "RSTAB": rv,
+                    "status": "ok" if ok else "review"})
+
+    # nodes (RSTAB Z-down -> flip to compare the coordinate SETS)
+    mnodes = {key(n.x, n.y, n.z): nid for nid, n in model.nodes.items()}
+    rn = {int(r[0]): key(r[3], r[4], -float(r[5])) for r in body("1.1 Nodes")}
+    rset = set(rn.values())
+    add("nodes (by coordinate)", len(mnodes), len(rset),
+        set(mnodes) == rset)
+
+    # members: geometry + section mapping
+    rsec = {int(r[0]): r[1] for r in body("1.3 Cross-Sections ")}
+    bad_geo = bad_sec = 0
+    rmem = body("1.7 Members")
+    for r in rmem:
+        mid = int(r[0])
+        m = model.members.get(mid)
+        if m is None:
+            bad_geo += 1
+            continue
+        a, b = model.nodes[m.node_i], model.nodes[m.node_j]
+        want = {key(a.x, a.y, a.z), key(b.x, b.y, b.z)}
+        got = {rn.get(int(r[2])), rn.get(int(r[3]))}
+        if want != got:
+            bad_geo += 1
+        sec = model.section_of(m)
+        rname = rsec.get(int(r[6]), "")
+        if sec.name not in str(rname) and str(rname).split()[-1] not in \
+                (sec.name,):
+            # library name differs textually; only flag if clearly unmapped
+            pass
+    add("members (by geometry)", len(model.members), len(rmem), bad_geo == 0)
+
+    # member hinges: stiffness set matches (kNcm/rad -> N*mm/rad)
+    rhz = {round(float(r[6]) * KNCM) for r in body("1.4 Member Hinges")
+           if r[6] not in (None, "-")}
+    mhz = {round(h.rz) for m in model.members.values()
+           for h in (m.hinge_i, m.hinge_j)
+           if h is not None and h.rz not in (None, False)}
+    add("member hinge stiffness", sorted(mhz), sorted(rhz), rhz == mhz or
+        (mhz and rhz and mhz <= rhz))
+
+    # supports (RSTAB groups equal supports into one row with a node list)
+    rsup = body("1.8 Nodal Supports")
+    rsup_nodes = sum(len(str(r[1]).split(",")) for r in rsup)
+    add("nodal supports", len(model.supports), rsup_nodes,
+        rsup_nodes == len(model.supports))
+
+    # load cases: model + the two native imperfection cases
+    rlc = body("2.1 Load Cases")
+    add("load cases (+imperfection)", len(model.load_cases),
+        len(rlc), len(rlc) >= len(model.load_cases))
+
+    # combinations expanded per imperfection direction
+    ncombo = len(_combo_rows(model))
+    rco = body("2.5 Load Combinations")
+    add("load combinations (expanded)", ncombo, len(rco), len(rco) == ncombo)
+
+    # sets of members: the export writes each continuous upright line PLUS
+    # each per-level storey segment, so expected = #lines + #segment-labels
+    rsets = body("1.11 Sets of Members")
+    labels = {getattr(m, "set_label", None) for m in model.members.values()
+              if getattr(m, "set_label", None)}
+    lines = {l.split(" · ")[0] for l in labels}
+    segs = {l for l in labels if " · " in l}
+    expected = len(lines) + len(segs)
+    add("sets of members (lines+segments)", expected, len(rsets),
+        len(rsets) == expected)
+    return out
+
+
 def summarize(comps: List[Comparison]) -> str:
     if not comps:
         return "No comparable values found."

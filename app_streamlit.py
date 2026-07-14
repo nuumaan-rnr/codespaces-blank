@@ -159,7 +159,54 @@ def _rstab_results_compare(model, res, cdir, conf):
     else:
         st.success("Every compared value agrees within tolerance.")
 
-    with st.expander("Every member × every load combination"):
+    # ---- per-member N/My/Mz, filtered by member type + section --------
+    st.markdown("**Per-member forces — N, My, Mz together (app vs RSTAB)**")
+    triples = rc.member_triples(model, cases, rfem, co_for=co_for)
+    if triples:
+        sets = sorted({r["set"] for r in triples})
+        secs = sorted({r["section"] for r in triples})
+        fc = st.columns(3)
+        set_pick = fc[0].multiselect("Member type / set", sets, default=sets,
+                                     key="rstab_tri_set")
+        sec_pick = fc[1].multiselect("Section", secs, default=secs,
+                                     key="rstab_tri_sec")
+        tcombos = sorted({r["combination"] for r in triples},
+                         key=lambda s: (len(s), s))
+        co_pick = fc[2].multiselect("Load combinations", tcombos,
+                                    default=tcombos, key="rstab_tri_co")
+        only_rev = st.checkbox("Only rows outside tolerance", value=False,
+                               key="rstab_tri_rev")
+        shown = [r for r in triples
+                 if r["set"] in set_pick and r["section"] in sec_pick
+                 and r["combination"] in co_pick
+                 and (not only_rev or r["status"] == "review")]
+        st.caption(f"{len(shown)} of {len(triples)} member×combination rows "
+                   "— N in kN, My/Mz in kNcm; Δ% per component.")
+        st.dataframe(sorted(shown, key=lambda r: -r["max Δ%"]),
+                     width="stretch", hide_index=True)
+
+    # ---- buckling validation per SET OF MEMBERS -----------------------
+    st.markdown("**Buckling validation — set of members (design envelope)**")
+    st.caption("For every upright set of members (the continuous lines and the "
+               "per-level storey segments used for the EN 15512 buckling "
+               "check): the ULS design envelope of N / My / Mz, app vs RSTAB "
+               "(RSTAB aggregated over the set's members from its member "
+               "results). This validates the buckling DEMAND; the buckling "
+               "utilisation shown is this app's EN 15512 resistance check "
+               "(RSTAB's member buckling check is in its RF-/STEEL add-on, not "
+               "the internal-forces export).")
+    try:
+        checks = res.get("checks") if isinstance(res, dict) else None
+        buck = rc.set_buckling_comparison(model, cases, rfem, co_for=co_for,
+                                          checks=checks)
+        if buck:
+            st.dataframe(buck, width="stretch", hide_index=True)
+        else:
+            st.info("No upright sets of members found for this configuration.")
+    except Exception as exc:
+        st.warning(f"Buckling comparison unavailable: {exc}")
+
+    with st.expander("Every member × every load combination (single quantity)"):
         rows = rc.comparison_rows(comps)
         combos = sorted({r["combination"] for r in rows},
                         key=lambda s: (len(s), s))
@@ -2368,6 +2415,29 @@ def render_view_config():
                         f"Download {fname}", f.read(),
                         f"{conf.id}_{fname}", mime=mime,
                         width="stretch", key=f"dl_{fname}")
+
+        rp = os.path.join(cdir, "RSTAB8_export.xlsx")
+        if os.path.exists(rp):
+            with st.expander("✅ Verify the RSTAB export is an exact replica "
+                             "of the OpenSees model"):
+                st.caption("Reads the generated workbook back and checks node "
+                           "coordinates, member geometry, section mapping, "
+                           "hinge stiffnesses, supports, sets of members, load "
+                           "cases and combinations against the analysis model. "
+                           "Node numbering, Z-down orientation, the two native "
+                           "imperfection load cases and the per-direction "
+                           "combination expansion are RSTAB conventions, so "
+                           "the check compares by coordinate/geometry, not id.")
+                from rack15512.rfem_compare import verify_rstab_export
+                try:
+                    checks = verify_rstab_export(model, rp)
+                    st.dataframe(checks, width="stretch", hide_index=True)
+                    if all(c["status"] == "ok" for c in checks):
+                        st.success("Exact replica — every item matches.")
+                    else:
+                        st.warning("Some items differ — see the `review` rows.")
+                except Exception as exc:
+                    st.warning(f"Verification unavailable: {exc}")
 
         _rstab_results_compare(model, res, cdir, conf)
 

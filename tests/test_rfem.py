@@ -163,6 +163,16 @@ def test_rfem_governing_by_section_and_rows(model, tmp_path):
     assert "Governing per section" in wb.sheetnames
     assert "All members x combos" in wb.sheetnames
 
+    # per-member N/My/Mz triples: one row per (member, combo), 3 quantities
+    from rack15512.rfem_compare import member_triples
+    trips = member_triples(model, [case], {co: ref[co]}, skip_members=SPLIT)
+    assert trips
+    r0 = trips[0]
+    assert {"member", "set", "section", "status", "max Δ%"} <= set(r0)
+    assert any(k.startswith("N ours") for k in r0)
+    assert any(k.startswith("My ours") for k in r0)
+    assert any(k.startswith("Mz ours") for k in r0)
+
 
 @needs_data
 def test_export_co_map_matches_workbook(model, tmp_path):
@@ -191,6 +201,34 @@ def test_export_co_map_matches_workbook(model, tmp_path):
                           kind=row["kind"], order=2,
                           imp_direction=row["imp"] or "", converged=True)
         assert resolve(case) == co
+
+
+def test_verify_rstab_export_replica(tmp_path):
+    """The RSTAB export of a model verifies as an exact replica: node
+    coordinates, member geometry, hinges, supports, sets and combinations all
+    match (node ids / Z-down / imperfection LCs / combo expansion aside)."""
+    from rack15512.builder import RackConfig, build_rack, LevelSpec
+    from rack15512.export_solvers import to_rstab8_xlsx
+    from rack15512.rfem_compare import verify_rstab_export
+
+    m = build_rack(RackConfig(module="single", n_bays=2,
+                              levels=[LevelSpec(gap=2000.0),
+                                      LevelSpec(gap=2000.0)],
+                              frame_height=4400.0))
+    p = str(tmp_path / "exp.xlsx")
+    to_rstab8_xlsx(m, p)
+    checks = verify_rstab_export(m, p)
+    by = {c["item"]: c for c in checks}
+    assert by["nodes (by coordinate)"]["status"] == "ok"
+    assert by["members (by geometry)"]["status"] == "ok"
+    assert by["nodal supports"]["status"] == "ok"
+    assert by["load combinations (expanded)"]["status"] == "ok"
+    # a genuinely different model must NOT verify against this export
+    m2 = build_rack(RackConfig(module="single", n_bays=3,
+                               levels=[LevelSpec(gap=2000.0)],
+                               frame_height=2200.0))
+    bad = {c["item"]: c for c in verify_rstab_export(m2, p)}
+    assert bad["nodes (by coordinate)"]["status"] == "review"
 
 
 def test_within_tolerance_absorbs_small_axial_tail():
