@@ -23,6 +23,22 @@ KN = 1.0e3
 N_THRESHOLD = 0.5 * KN
 M_THRESHOLD = 10.0 * KNCM
 
+# factor from an RSTAB result-column unit to the app's base units (N, N*mm).
+# RSTAB writes the unit in the group header ('Forces [kN]', 'Moments [kNcm]');
+# the default per-installation differs (kNm is RSTAB factory, kNcm is the
+# company cm profile), so the unit is DETECTED per sheet, not assumed.
+_FORCE_FACTORS = {"n": 1.0, "kn": 1.0e3, "mn": 1.0e6}
+_MOMENT_FACTORS = {"nmm": 1.0, "ncm": 10.0, "nm": 1.0e3, "knmm": 1.0e3,
+                   "kncm": 1.0e4, "knm": 1.0e6, "mnm": 1.0e9}
+
+
+def _bracket_unit(text) -> Optional[str]:
+    """The token inside [...] of a header cell, normalised ('kN m' -> 'knm')."""
+    import re
+    m = re.search(r"\[([^\]]+)\]", "" if text is None else str(text))
+    return m.group(1).strip().lower().replace(" ", "").replace(".", "") \
+        if m else None
+
 
 @dataclass
 class MemberRef:
@@ -36,7 +52,12 @@ class MemberRef:
 
 
 def read_rfem_results(path: str) -> Dict[str, Dict[int, MemberRef]]:
-    """Per combination id ('CO1', ...): member -> extremes."""
+    """Per combination id ('CO1', ...): member -> extremes.
+
+    Force and moment units are read from each sheet's group header, so a
+    workbook exported in RSTAB factory units (moments in kNm) and one in the
+    company cm profile (kNcm) both import correctly.
+    """
     import openpyxl
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     out: Dict[str, Dict[int, MemberRef]] = {}
@@ -47,16 +68,29 @@ def read_rfem_results(path: str) -> Dict[str, Dict[int, MemberRef]]:
         co = s.split(" ")[0]
         members: Dict[int, MemberRef] = {}
         current: Optional[MemberRef] = None
-        for r in wb[sheet].iter_rows(min_row=3, values_only=True):
+        fscale, mscale = KN, KNCM          # backward-compatible defaults
+        for i, r in enumerate(wb[sheet].iter_rows(values_only=True)):
+            if i < 2:                       # header rows: detect the units
+                for cell in r:
+                    t = "" if cell is None else str(cell).lower()
+                    if "force" in t:
+                        u = _bracket_unit(cell)
+                        if u in _FORCE_FACTORS:
+                            fscale = _FORCE_FACTORS[u]
+                    if "moment" in t:
+                        u = _bracket_unit(cell)
+                        if u in _MOMENT_FACTORS:
+                            mscale = _MOMENT_FACTORS[u]
+                continue
             head = "" if r[0] is None else str(r[0]).strip()
             if head.isdigit():
                 current = members.setdefault(int(head), MemberRef())
             if current is None or r[3] is None:
                 continue
             try:
-                N = float(r[3]) * KN
-                My_rfem = float(r[7]) * KNCM
-                Mz_rfem = float(r[8]) * KNCM
+                N = float(r[3]) * fscale
+                My_rfem = float(r[7]) * mscale
+                Mz_rfem = float(r[8]) * mscale
             except (TypeError, ValueError):
                 continue
             current.N_min = min(current.N_min, N)

@@ -191,6 +191,37 @@ def test_export_co_map_matches_workbook(model, tmp_path):
         assert resolve(case) == co
 
 
+def test_read_rfem_results_detects_moment_unit(tmp_path):
+    """A results workbook in RSTAB factory units (moments kNm) and one in the
+    company cm profile (moments kNcm) must both import to the same base N*mm -
+    the unit is read from the group header, not assumed (a 100x scale bug
+    otherwise: kNm read as kNcm)."""
+    import openpyxl
+
+    def make(path, moment_unit):
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        ws = wb.create_sheet("CO1 - 4.1 Members - Internal Fo"[:31])
+        ws.append(["Member", "Node", "Location", "Forces [kN]", None, None,
+                   f"Moments [{moment_unit}]", None, None, None])
+        ws.append(["No.", "No.", "x [mm]", "N", "Vy", "Vz", "MT", "My", "Mz",
+                   "Cross-Section"])
+        ws.append([1, 100, 0, -10.0, 0, 0, 0, 5.0, 2.0, "UP"])
+        wb.save(path)
+
+    pm, pc = str(tmp_path / "knm.xlsx"), str(tmp_path / "kncm.xlsx")
+    make(pm, "kNm")
+    make(pc, "kNcm")
+    rm = read_rfem_results(pm)["CO1"][1]
+    rc = read_rfem_results(pc)["CO1"][1]
+
+    assert rm.N_min == pytest.approx(-10.0e3)          # kN -> N (both files)
+    # My (sheet) -> our Mz: 5 kNm = 5e6 N*mm, 5 kNcm = 5e4 N*mm
+    assert rm.Mz_absmax == pytest.approx(5.0e6)
+    assert rc.Mz_absmax == pytest.approx(5.0e4)
+    assert rm.Mz_absmax == pytest.approx(100.0 * rc.Mz_absmax)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
 
