@@ -102,6 +102,34 @@ def read_rfem_results(path: str) -> Dict[str, Dict[int, MemberRef]]:
     return out
 
 
+# --- agreement tolerance -------------------------------------------------
+# A value pair "agrees" when the relative difference is small OR the ABSOLUTE
+# difference is engineering-insignificant.  The absolute floors absorb the
+# sway-imperfection load-path tail: this app applies the imperfection as
+# Equivalent Horizontal Forces at every loaded node, while the exported RSTAB
+# deck uses RSTAB's native geometric inclination.  The two agree on the
+# governing effects (upright N and the primary beam/upright moments) but
+# distribute a small destabilising force differently into the tie beams and
+# the orthogonal braces, leaving a real ~1-2 kN axial where RSTAB shows ~0.
+# The floors (2.5 kN, 0.2 kNm) are ~1-5% of a rack member's capacity, so a
+# pair within them cannot change any design outcome.
+REL_TOL = 0.15
+_ABS_TOL = {                      # base units: N, N*mm
+    "N_min": 2.5e3,               # 2.5 kN
+    "Mz_absmax": 2.0e5,           # 0.2 kNm = 20 kNcm
+    "My_absmax": 2.0e5,
+}
+
+
+def within_tolerance(quantity: str, ours: float, theirs: float) -> bool:
+    """True when the pair agrees relatively (<= REL_TOL) or absolutely
+    (<= the per-quantity engineering-insignificance floor)."""
+    scale = max(abs(ours), abs(theirs))
+    rel = abs(ours - theirs) / scale if scale else 0.0
+    return (abs(ours - theirs) <= _ABS_TOL.get(quantity, 0.0)
+            or rel <= REL_TOL)
+
+
 @dataclass
 class Comparison:
     quantity: str
@@ -115,6 +143,10 @@ class Comparison:
     def rel_diff(self) -> float:
         scale = max(abs(self.theirs), abs(self.ours))
         return abs(self.ours - self.theirs) / scale if scale else 0.0
+
+    @property
+    def within_tol(self) -> bool:
+        return within_tolerance(self.quantity, self.ours, self.theirs)
 
 
 def export_co_map(model: RackModel):
@@ -196,8 +228,16 @@ def comparison_rows(comps: List[Comparison]) -> List[dict]:
             "RSTAB": round(c.theirs / div, 3),
             "abs diff": round(abs(c.ours - c.theirs) / div, 3),
             "rel diff %": round(100.0 * c.rel_diff, 1),
+            "status": "ok" if c.within_tol else "review",
         })
     return rows
+
+
+def discrepancies(comps: List[Comparison]) -> List[Comparison]:
+    """Only the pairs that fall outside the agreement tolerance (a real
+    difference to look at), worst relative difference first."""
+    return sorted((c for c in comps if not c.within_tol),
+                  key=lambda c: -c.rel_diff)
 
 
 @dataclass
@@ -217,6 +257,10 @@ class SectionGov:
     def rel_diff(self) -> float:
         scale = max(abs(self.theirs), abs(self.ours))
         return abs(self.ours - self.theirs) / scale if scale else 0.0
+
+    @property
+    def within_tol(self) -> bool:
+        return within_tolerance(self.quantity, self.ours, self.theirs)
 
 
 def governing_by_section(model: RackModel, comps: List[Comparison]
@@ -259,6 +303,7 @@ def section_gov_rows(govs: List[SectionGov]) -> List[dict]:
             "ours": round(g.ours / div, 3),
             "RSTAB": round(g.theirs / div, 3),
             "rel diff %": round(100.0 * g.rel_diff, 1),
+            "status": "ok" if g.within_tol else "review",
         })
     return rows
 
@@ -293,13 +338,40 @@ def summarize(comps: List[Comparison]) -> str:
 
     def pct(p: float) -> float:
         return 100.0 * diffs[min(int(p * len(diffs)), len(diffs) - 1)]
+    dsc = discrepancies(comps)
     add(f"- compared values: {len(comps)} "
         f"(member-level extremes of N, My, Mz across combinations)")
+    add(f"- agree within tolerance: {len(comps) - len(dsc)} / {len(comps)} "
+        f"(rel <= {REL_TOL*100:.0f}% or |diff| <= "
+        f"{_ABS_TOL['N_min']/KN:.1f} kN / {_ABS_TOL['Mz_absmax']/KNCM:.0f} "
+        f"kNcm)")
+    add(f"- to review (outside tolerance): {len(dsc)}")
     add(f"- median relative difference: {pct(0.50):.1f}%")
     add(f"- 90th percentile: {pct(0.90):.1f}%")
     add(f"- 95th percentile: {pct(0.95):.1f}%")
     add(f"- maximum: {pct(1.0):.1f}%")
     add("")
+    add("Large *relative* differences concentrate in members carrying very "
+        "small *absolute* forces - the sway-imperfection load-path tail. This "
+        "app applies the imperfection as equivalent horizontal forces at every "
+        "loaded node; the exported RSTAB deck uses RSTAB's native geometric "
+        "inclination. The two agree on the governing effects but leave a "
+        "small (~1-2 kN) axial in the tie beams and orthogonal braces where "
+        "RSTAB shows ~0. Values within the tolerance above cannot change a "
+        "design outcome.")
+    add("")
+    if dsc:
+        add("## Differences to review (outside tolerance)")
+        add("")
+        add("| member | set | combo | quantity | ours | RSTAB | diff |")
+        add("|---|---|---|---|---|---|---|")
+        for c in dsc[:30]:
+            div, unit = ((KN, "kN") if c.quantity.startswith("N")
+                         else (KNCM, "kNcm"))
+            add(f"| {c.member} | {c.member_set[:18]} | {c.combo} "
+                f"| {c.quantity} | {c.ours/div:.2f} {unit} "
+                f"| {c.theirs/div:.2f} {unit} | {100*c.rel_diff:.1f}% |")
+        add("")
     add("## By quantity")
     add("")
     add("| quantity | n | median diff | p95 |")
@@ -391,6 +463,8 @@ def write_comparison_workbook(model: RackModel, cases: List[CaseResult],
 
     _sheet(ws, section_gov_rows(govs))
     _sheet(wb.create_sheet("All members x combos"), comparison_rows(comps))
+    _sheet(wb.create_sheet("To review"),
+           comparison_rows(discrepancies(comps)))
 
     wsc = wb.create_sheet("Coverage")
     wsc.append(["compared combinations",

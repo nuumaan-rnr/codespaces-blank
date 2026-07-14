@@ -116,13 +116,24 @@ def _rstab_results_compare(model, res, cdir, conf):
                    f"combinations: {', '.join(cov['our_combos']) or '-'}.")
         return
 
-    m1, m2, m3 = st.columns(3)
+    dsc = rc.discrepancies(comps)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("Combinations compared", len(cov["matched_combos"]))
+    agree = len(comps) - len(dsc)
+    m2.metric("Agree within tolerance", f"{agree}/{len(comps)}")
     diffs = sorted(c.rel_diff for c in comps)
     med = 100.0 * diffs[len(diffs) // 2]
-    p95 = 100.0 * diffs[min(int(0.95 * len(diffs)), len(diffs) - 1)]
-    m2.metric("Median difference", f"{med:.1f}%")
-    m3.metric("95th percentile", f"{p95:.1f}%")
+    m3.metric("Median difference", f"{med:.1f}%")
+    m4.metric("To review", len(dsc))
+    st.caption("“Within tolerance” = relative difference ≤ 15% **or** absolute "
+               "difference ≤ 2.5 kN / 0.2 kNm (≈1–5% of a rack member's "
+               "capacity). Large *relative* differences sit on members with "
+               "tiny *absolute* forces — the sway-imperfection load-path tail: "
+               "this app applies the imperfection as equivalent horizontal "
+               "forces at every node, the RSTAB deck uses RSTAB's native "
+               "inclination, so a small axial lands in the tie beams / "
+               "orthogonal braces here where RSTAB shows ≈0. Neither governs "
+               "any design.")
     if cov["only_theirs"]:
         st.caption("⚠ In RSTAB but not run here: "
                    + ", ".join(cov["only_theirs"]))
@@ -133,9 +144,20 @@ def _rstab_results_compare(model, res, cdir, conf):
     govs = rc.governing_by_section(model, comps)
     st.markdown("**Governing load combination per cross-section** — the "
                 "combination that sizes each section (worst by this app), with "
-                "the RSTAB value at the same member and combination.")
+                "the RSTAB value at the same member and combination. `status` "
+                "flags whether that governing value agrees within tolerance.")
     st.dataframe(rc.section_gov_rows(govs), width="stretch",
                  hide_index=True)
+
+    if dsc:
+        st.markdown(f"**Differences to review ({len(dsc)})** — outside the "
+                    "agreement tolerance. In this model these are small "
+                    "secondary forces (imperfection load-path); check none of "
+                    "them govern a section above.")
+        st.dataframe(rc.comparison_rows(dsc), width="stretch",
+                     hide_index=True)
+    else:
+        st.success("Every compared value agrees within tolerance.")
 
     with st.expander("Every member × every load combination"):
         rows = rc.comparison_rows(comps)

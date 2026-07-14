@@ -146,9 +146,11 @@ def test_rfem_governing_by_section_and_rows(model, tmp_path):
     rows = comparison_rows(comps)
     assert len(rows) == len(comps)
     assert set(rows[0]) >= {"combination", "member", "ours", "RSTAB",
-                            "rel diff %"}
+                            "rel diff %", "status"}
+    assert all(r["status"] in ("ok", "review") for r in rows)
     srows = section_gov_rows(govs)
     assert len(srows) == len(govs)
+    assert all("status" in r for r in srows)
 
     cov = coverage(model, [case], ref)
     assert co in cov["matched_combos"]
@@ -189,6 +191,25 @@ def test_export_co_map_matches_workbook(model, tmp_path):
                           kind=row["kind"], order=2,
                           imp_direction=row["imp"] or "", converged=True)
         assert resolve(case) == co
+
+
+def test_within_tolerance_absorbs_small_axial_tail():
+    """A tiny axial that RSTAB reports as ~0 but the app reports as ~1-2 kN
+    (the imperfection load-path tail) agrees within absolute tolerance, so it
+    is NOT flagged as a 100% discrepancy; a real large-force mismatch is."""
+    from rack15512.rfem_compare import (Comparison, discrepancies,
+                                        within_tolerance)
+    KN = 1.0e3
+    # 2.1 kN vs 0: 100% relative, but |diff| = 2.1 kN < 2.5 kN floor -> agrees
+    tail = Comparison("N_min", 304, "bracing", "CO12", -2.105 * KN, 0.0)
+    assert tail.rel_diff == pytest.approx(1.0)
+    assert tail.within_tol
+    # a genuine axial mismatch (90 vs 60 kN) is outside tolerance
+    real = Comparison("N_min", 106, "uprights", "CO9", -90.0 * KN, -60.0 * KN)
+    assert not real.within_tol
+    assert within_tolerance("N_min", -90.0e3, -88.0e3)      # 2 kN diff
+    dsc = discrepancies([tail, real])
+    assert dsc == [real]
 
 
 def test_read_rfem_results_detects_moment_unit(tmp_path):
