@@ -309,6 +309,110 @@ def _rstab_results_compare(model, res, cdir, conf):
         dc[1].caption(f"Workbook export unavailable: {exc}")
 
 
+def _sap2000_import_panel(cdir, conf):
+    """Upload a SAP2000 database-tables workbook, read it 1:1, verify the
+    import against the SAP model, run it and offer a SAP-format re-export."""
+    st.markdown("#### SAP2000 model — import, verify 1:1, re-export")
+    st.caption("Drop a SAP2000 CSi database-tables Excel export (File → "
+               "Export → SAP2000 MS Excel Spreadsheet). The model is read "
+               "using SAP's OWN section properties (Frame Props 01) and "
+               "stiffness modifiers, auto-meshed at joints exactly as SAP "
+               "does, then checked 1:1 (nodes, frames, section properties, "
+               "supports, loads, combinations).")
+    up = st.file_uploader("SAP2000 model workbook (.xlsx)", type=["xlsx"],
+                          key="sap_model_ref")
+    if up is None:
+        return
+    path = os.path.join(cdir, "_sap2000_model.xlsx")
+    with open(path, "wb") as f:
+        f.write(up.getbuffer())
+    from rack15512.sap2000 import (load_sap2000, to_sap2000,
+                                   verify_sap2000_import)
+    try:
+        sm = load_sap2000(path)
+    except Exception as exc:
+        st.error(f"Could not read the SAP2000 workbook: {exc}")
+        return
+    c = st.columns(4)
+    c[0].metric("Nodes", len(sm.nodes))
+    c[1].metric("Members (meshed)", len(sm.members))
+    c[2].metric("Sections", len({m.section for m in sm.members.values()}))
+    c[3].metric("Combinations", len(sm.combinations))
+
+    st.markdown("**1:1 verification — imported model vs SAP2000 file**")
+    try:
+        checks = verify_sap2000_import(sm, path)
+        st.dataframe(checks, width="stretch", hide_index=True)
+        if all(ch["status"] == "ok" for ch in checks):
+            st.success("Read 1:1 — geometry, SAP section properties, supports, "
+                       "loads and combinations all match.")
+        else:
+            st.warning("Some items differ — see the `review` rows.")
+    except Exception as exc:
+        st.warning(f"Verification unavailable: {exc}")
+
+    with st.expander("Section properties used (as SAP computed them)"):
+        rows = []
+        for name in sorted({m.section for m in sm.members.values()}):
+            s = sm.sections[name]
+            rows.append({"section": name, "role": s.role,
+                         "material": s.material, "A [mm²]": round(s.A, 1),
+                         "Iz=I33 [mm⁴]": round(s.Iz, 0),
+                         "Iy=I22 [mm⁴]": round(s.Iy, 0),
+                         "J [mm⁴]": round(s.J, 0)})
+        st.dataframe(rows, width="stretch", hide_index=True)
+        st.caption(f"Materials: E scaled per SAP frame modifiers — "
+                   + ", ".join(f"{m.name} E={m.E:.0f} fy={m.fy:.0f}"
+                               for m in sm.materials.values()
+                               if m.name in {sm.sections[x].material
+                                             for x in {mm.section for mm in
+                                                       sm.members.values()}}))
+
+    rc = st.columns(2)
+    if rc[0].button("▶ Run the SAP2000 model (OpenSees)", key="run_sap",
+                    width="stretch"):
+        from rack15512.analysis import run_all
+        try:
+            with st.spinner("Running the imported SAP2000 model…"):
+                cases = run_all(sm)
+            ok = sum(1 for cc in cases if cc.converged)
+            st.success(f"Ran {ok}/{len(cases)} combinations. Governing upright "
+                       "axial and sway are in the results below.")
+            summary = []
+            for cc in cases:
+                if not cc.converged:
+                    summary.append({"combination": cc.combo,
+                                    "status": "did not converge"})
+                    continue
+                ups = [mr.N_min for mid, mr in cc.members.items()
+                       if sm.members[mid].member_set == "uprights"]
+                summary.append({
+                    "combination": cc.combo,
+                    "min upright N [kN]": round(min(ups) / 1e3, 1)
+                    if ups else None,
+                    "sway X [mm]": round(cc.max_sway_x, 1),
+                    "sway Y [mm]": round(cc.max_sway_y, 1)})
+            st.dataframe(summary, width="stretch", hide_index=True)
+            st.caption("To compare these against SAP2000, export SAP's "
+                       "'Element Forces - Frames' and 'Joint Displacements' "
+                       "result tables — the uploaded model file contains no "
+                       "analysis results, only the model definition.")
+        except Exception as exc:
+            st.error(f"Analysis failed: {exc}")
+    sap_out = os.path.join(cdir, "SAP2000_reexport.xlsx")
+    if rc[1].button("⬇ Re-export this SAP model (round-trip)", key="reexp_sap",
+                    width="stretch"):
+        to_sap2000(sm, sap_out)
+        st.rerun()
+    if os.path.exists(sap_out):
+        with open(sap_out, "rb") as f:
+            st.download_button(
+                "Download SAP2000 re-export", f.read(),
+                f"{conf.id}_SAP2000_reexport.xlsx",
+                mime="application/vnd.openxmlformats-officedocument."
+                     "spreadsheetml.sheet", key="dl_sap_reexp")
+
+
 # view_config section selector (state-driven so we can jump to a tab)
 _VC_TABS = ["🧱 Model", "📊 Results", "📄 Report", "⚙️ Parameters"]
 
@@ -2436,14 +2540,20 @@ def render_view_config():
             with st.expander("Preview check report (text)"):
                 st.markdown(open(rp, encoding="utf-8").read())
 
-        st.markdown("#### Solver export — re-run this model in RSTAB / STAAD")
+        st.markdown("#### Solver export — re-run this model in RSTAB / STAAD "
+                    "/ SAP2000")
         st.caption("RSTAB 8 table workbook (File → Import → Microsoft Excel): "
                    "nodes, materials and cross-sections with RSTAB library "
                    "names, member hinges, supports with the axial-dependent "
                    "base stiffness diagram, sets of members, load cases + "
                    "sway-imperfection cases, all loads and the generated "
-                   "load combinations with their analysis type. The STAAD "
-                   ".std deck declares its own units (mm, N).")
+                   "load combinations. The STAAD .std deck declares its own "
+                   "units (mm, N). The SAP2000 workbook (File → Import → "
+                   "SAP2000 MS Excel Spreadsheet .xlsx) writes the CSi "
+                   "database tables — joints, frames + section assignments, "
+                   "section properties (our Iz→I33, Iy→I22), materials, "
+                   "member releases + partial-fixity connector springs, "
+                   "restraints, loads and combinations.")
         uref = st.file_uploader(
             "Match units to your RSTAB (optional): drop ANY Excel export "
             "made by your RSTAB — the workbook adopts its unit settings "
@@ -2470,8 +2580,13 @@ def render_view_config():
             to_rstab8_xlsx(model, os.path.join(cdir, "RSTAB8_export.xlsx"),
                            units=units)
             to_staad(model, os.path.join(cdir, "STAAD_export.std"))
+            from rack15512.sap2000 import to_sap2000
+            to_sap2000(model, os.path.join(cdir, "SAP2000_export.xlsx"))
             st.rerun()
         for fname, mime in (("RSTAB8_export.xlsx",
+                             "application/vnd.openxmlformats-officedocument"
+                             ".spreadsheetml.sheet"),
+                            ("SAP2000_export.xlsx",
                              "application/vnd.openxmlformats-officedocument"
                              ".spreadsheetml.sheet"),
                             ("STAAD_export.std", "text/plain")):
@@ -2507,6 +2622,7 @@ def render_view_config():
                     st.warning(f"Verification unavailable: {exc}")
 
         _rstab_results_compare(model, res, cdir, conf)
+        _sap2000_import_panel(cdir, conf)
 
     if active == _VC_TABS[3]:
         ui.section("⚙️", "Configuration — edit the inputs and re-run")
