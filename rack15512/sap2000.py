@@ -485,6 +485,25 @@ _UNIT = {"len": "mm", "force": "N", "I": "mm4", "A": "mm2", "S": "mm3",
          "E": "N/mm2", "spr_t": "N/mm", "spr_r": "N-mm/rad",
          "w": "N/mm3", "line": "N/mm"}
 
+# SAP identifies each imported table by the row-1 'TABLE:  <title>' text, NOT
+# the (31-char-limited) sheet name.  Where the full SAP table name differs from
+# the sheet name it must be written in full or SAP silently SKIPS the table
+# (leaving e.g. no base springs / no member releases -> unstable structure).
+_TABLE_TITLE = {
+    "Jt Spring Assigns 1 - Uncoupled":
+        "Joint Spring Assignments 1 - Uncoupled",
+    "Frame Releases 1 - General": "Frame Release Assignments 1 - General",
+    "Frame Releases 2 - Part Fixity":
+        "Frame Release Assignments 2 - Partial Fixity",
+    "Frame Local Axes 1 - Typical":
+        "Frame Local Axes Assignments 1 - Typical",
+    "Frame Props 01 - General": "Frame Section Properties 01 - General",
+    "MatProp 01 - General": "Material Properties 01 - General",
+    "MatProp 02 - Basic Mech Props":
+        "Material Properties 02 - Basic Mechanical Properties",
+    "MatProp 03a - Steel Data": "Material Properties 03a - Steel Data",
+}
+
 
 def _is_axis_swapped(model: RackModel, m) -> bool:
     """True when the member's vecxz swaps the two transverse axes relative to
@@ -516,9 +535,12 @@ def to_sap2000(model: RackModel, path: str,
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
-    def sheet(title, header, units, rows):
-        ws = wb.create_sheet(title[:31])
-        ws.append([f"TABLE:  {title}"] + [None] * (len(header) - 1))
+    def sheet(name, header, units, rows):
+        # sheet name is limited to 31 chars; the row-1 TABLE title must be the
+        # FULL SAP table name so the importer recognises the table
+        ws = wb.create_sheet(name[:31])
+        full = _TABLE_TITLE.get(name, name)
+        ws.append([f"TABLE:  {full}"] + [None] * (len(header) - 1))
         ws.append(header)
         ws.append(units)
         for r in rows:
@@ -664,7 +686,7 @@ def to_sap2000(model: RackModel, path: str,
 
         if any(isinstance(getattr(s, a), float)
                for a in ("ux", "uy", "uz", "rx", "ry", "rz")):
-            jspr.append([str(s.node), "GLOBAL", sv(s.ux), sv(s.uy), sv(s.uz),
+            jspr.append([str(s.node), "Local", sv(s.ux), sv(s.uy), sv(s.uz),
                          sv(s.rx), sv(s.ry), sv(s.rz)])
     sheet("Joint Restraint Assignments",
           ["Joint", "U1", "U2", "U3", "R1", "R2", "R3"],
