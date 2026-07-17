@@ -431,13 +431,32 @@ def _sap2000_import_panel(cdir, conf):
                 else:
                     st.warning("No frames matched — check the combo/case "
                                "names line up with the SAP output cases.")
+            # joint displacements (deflection / sway)
+            from rack15512.sap2000 import (read_sap_joint_displacements,
+                                           compare_sap_displacements)
+            try:
+                sap_disp = read_sap_joint_displacements(path)
+            except Exception:
+                sap_disp = {}
+            if sap_disp:
+                dcmp = compare_sap_displacements(sm, cases, sap_disp)
+                if dcmp:
+                    drev = [r for r in dcmp if r["status"] == "review"]
+                    st.markdown("**Joint displacements — app vs SAP** "
+                                "(global U1/U2/U3 [mm]; U3 = vertical "
+                                "deflection, U1/U2 = sway)")
+                    st.caption(f"{len(dcmp)} nodes compared, "
+                               f"{len(dcmp)-len(drev)} within tolerance. "
+                               "Node numbering is shared (SAP joint ids).")
+                    st.dataframe(sorted(dcmp, key=lambda r: -r["max Δ%"]),
+                                 width="stretch", hide_index=True)
             # base reactions
             try:
                 br = read_sap_base_reactions(path)
                 if "DEAD" in br:
                     ours = sum(abs(ml.qz) * sm.member_length(sm.members[
                         ml.member]) for ml in sm.load_cases["DEAD"].member_loads)
-                    st.caption(f"DEAD base reaction ΣFЗ: ours "
+                    st.caption(f"DEAD base reaction ΣFZ: ours "
                                f"{ours/1e3:.1f} kN vs SAP "
                                f"{br['DEAD']['FZ']/1e3:.1f} kN.")
             except Exception:

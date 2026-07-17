@@ -486,6 +486,23 @@ _UNIT = {"len": "mm", "force": "N", "I": "mm4", "A": "mm2", "S": "mm3",
          "w": "N/mm3", "line": "N/mm"}
 
 
+def _is_axis_swapped(model: RackModel, m) -> bool:
+    """True when the member's vecxz swaps the two transverse axes relative to
+    this app's default (a rack-upright 90 deg rotation), so the SAP export must
+    carry a 90 deg local-axis angle to reproduce the orientation on re-import."""
+    v = getattr(m, "vecxz", None)
+    if v is None:
+        return False
+    import math
+    a = model.nodes[m.node_i]
+    b = model.nodes[m.node_j]
+    dz = abs(b.z - a.z)
+    L = math.dist((a.x, a.y, a.z), (b.x, b.y, b.z)) or 1.0
+    if dz / L > 0.999:                          # vertical: default vecxz=(0,1,0)
+        return abs(v[0]) > abs(v[1])            # swapped -> ~(1,0,0)
+    return abs(v[2]) > 0.5                       # non-vertical swap -> z-ish
+
+
 def to_sap2000(model: RackModel, path: str) -> str:
     """Write the model as a SAP2000 database-tables workbook (N, mm) that
     re-imports into SAP2000 (File -> Import -> SAP2000 MS Excel Spreadsheet
@@ -557,6 +574,10 @@ def to_sap2000(model: RackModel, path: str) -> str:
             == "uprights" else "Frame"
         fa.append([str(mid), stype, "N.A.", m.section, m.section, "Default"])
         fmod.append([str(mid), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+        # preserve orientation: a member whose vecxz swaps the transverse axes
+        # (rack-upright rotation) exports as a 90 deg SAP local-axis angle
+        if _is_axis_swapped(model, m):
+            la.append([str(mid), 90, "No"])
     sheet("Connectivity - Frame",
           ["Frame", "JointI", "JointJ", "IsCurved", "Length"],
           ["Text", "Text", "Text", "Yes/No", "mm"], cf)
@@ -567,6 +588,9 @@ def to_sap2000(model: RackModel, path: str) -> str:
           ["Frame", "AMod", "AS2Mod", "AS3Mod", "JMod", "I22Mod", "I33Mod",
            "MassMod", "WeightMod", "EAModifier", "EIModifier"],
           ["Text"] + ["Unitless"] * 10, fmod)
+    if la:                                     # only members with a rotation
+        sheet("Frame Local Axes 1 - Typical", ["Frame", "Angle",
+              "AdvanceAxes"], ["Text", "Degrees", "Yes/No"], la)
 
     # releases (rz -> M3, ry -> M2, rx -> T); spring -> partial fixity
     rel1, rel2 = [], []
@@ -769,6 +793,80 @@ def compare_sap_forces(model: RackModel, cases, sap: Dict[str, Dict[int, dict]],
                 row[f"{tag} Δ%"] = d
                 worst = max(worst, d)
                 if not within_tolerance(qmap[tag], ours, theirs):
+                    ok = False
+            row["max Δ%"] = worst
+            row["status"] = "ok" if ok else "review"
+            rows.append(row)
+    rows.sort(key=lambda r: -r["max Δ%"])
+    return rows
+
+
+def read_sap_joint_displacements(path) -> Dict[str, Dict[int, tuple]]:
+    """SAP2000 'Joint Displacements' -> {OutputCase: {joint: (U1, U2, U3)}} in
+    mm (global X, Y, Z).  MODAL / mode-shape cases are skipped."""
+    wbs = _load(path)
+    rows = _sheet_rows(wbs, "Joint Displacements")
+    if not rows:
+        return {}
+    hdr = [("" if c is None else str(c).strip()) for c in rows[1]]
+    ix = {h: i for i, h in enumerate(hdr)}
+    ji, ci = ix.get("Joint"), ix.get("OutputCase")
+    u1, u2, u3 = ix.get("U1"), ix.get("U2"), ix.get("U3")
+    out: Dict[str, Dict[int, tuple]] = {}
+    for r in rows[3:]:
+        if r is None or r[ji] in (None, "") or r[ci] in (None, ""):
+            continue
+        case = str(r[ci])
+        if case.upper() == "MODAL":
+            continue
+        try:
+            j = int(float(r[ji]))
+            d = (float(r[u1]), float(r[u2]), float(r[u3]))
+        except (TypeError, ValueError):
+            continue
+        out.setdefault(case, {})[j] = d
+    return out
+
+
+def compare_sap_displacements(model: RackModel, cases,
+                              sap: Dict[str, Dict[int, tuple]],
+                              case_map: Optional[Dict[str, str]] = None,
+                              floor: float = 0.1) -> List[dict]:
+    """Compare this app's joint displacements with SAP's 'Joint Displacements'
+    per node (global U1/U2/U3 [mm]).  case_map maps an app combo to the SAP
+    OutputCase (default identical).  Only nodes whose displacement magnitude
+    exceeds `floor` mm on either side are reported (sub-floor noise dropped).
+    One row per (case, node)."""
+    from .rfem_compare import _pct, within_tolerance
+    case_map = case_map or {}
+    rows: List[dict] = []
+    for case in cases:
+        if not getattr(case, "converged", False):
+            continue
+        sc = case_map.get(case.combo, case.combo)
+        ref = sap.get(sc)
+        if not ref:
+            continue
+        for nid, d in case.displacements.items():
+            s = ref.get(nid)
+            if s is None:
+                continue
+            ours = (d[0], d[1], d[2])
+            if max(max(abs(v) for v in ours),
+                   max(abs(v) for v in s)) < floor:
+                continue
+            row = {"case": sc, "node": nid}
+            worst, ok = 0.0, True
+            for tag, o, t in (("U1(X)", ours[0], s[0]),
+                              ("U2(Y)", ours[1], s[1]),
+                              ("U3(Z)", ours[2], s[2])):
+                row[f"{tag} ours [mm]"] = round(o, 3)
+                row[f"{tag} SAP [mm]"] = round(t, 3)
+                dd = _pct(o, t)
+                row[f"{tag} Δ%"] = dd
+                worst = max(worst, dd)
+                # absolute floor of 0.5 mm for the tolerance verdict
+                if abs(o - t) > 0.5 and dd > 15.0:
                     ok = False
             row["max Δ%"] = worst
             row["status"] = "ok" if ok else "review"

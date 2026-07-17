@@ -785,6 +785,11 @@ def to_rstab8_xlsx(model: RackModel, path: str,
         if _is_vertical(model, m) and getattr(m, "set_label", None) and \
                 model.nodes[m.node_i].y in rot180_y:
             beta = 180
+        # honour an explicit member orientation (e.g. a SAP2000-imported
+        # upright whose vecxz swaps the transverse axes) as a 90 deg rotation
+        v = getattr(m, "vecxz", None)
+        if v is not None and _is_vertical(model, m) and abs(v[0]) > abs(v[1]):
+            beta = (beta + 90) % 360
         ws.append([m.id,
                    "Truss (only N)" if m.mtype == "truss" else "Beam",
                    nmap[m.node_i], nmap[m.node_j], "Angle", beta,

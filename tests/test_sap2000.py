@@ -229,6 +229,65 @@ def test_sap_element_forces_compare(tmp_path):
     assert r1["status"] == "ok"
 
 
+def test_sap_joint_displacements_compare(tmp_path):
+    """Read 'Joint Displacements' and compare per node; a matching value is
+    within tolerance, a large mismatch is flagged."""
+    from rack15512.results import CaseResult
+    from rack15512.sap2000 import (compare_sap_displacements, load_sap2000,
+                                   read_sap_joint_displacements)
+
+    mp = str(tmp_path / "m.xlsx")
+    _write_sap(mp)
+    m = load_sap2000(mp)
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet("Joint Displacements")
+    ws.append(["TABLE:  Joint Displacements"])
+    ws.append(["Joint", "OutputCase", "CaseType", "StepType", "StepNum",
+               "StepLabel", "U1", "U2", "U3", "R1", "R2", "R3"])
+    ws.append(["Text", "Text", "Text", "Text", "Unitless", "Text", "mm", "mm",
+               "mm", "Radians", "Radians", "Radians"])
+    ws.append(["3", "DEAD", "LinStatic", "", "", "", 1.0, 0, -5.0, 0, 0, 0])
+    dp = str(tmp_path / "disp.xlsx")
+    wb.save(dp)
+
+    disp = read_sap_joint_displacements(dp)
+    assert disp["DEAD"][3] == (1.0, 0.0, -5.0)
+
+    case = CaseResult(name="DEAD", combo="DEAD", kind="SLS", order=1,
+                      converged=True)
+    case.displacements[3] = (1.0, 0.0, -5.0, 0.0, 0.0, 0.0)   # matches
+    case.displacements[4] = (9.0, 0.0, 0.0, 0.0, 0.0, 0.0)    # no SAP row
+    rows = compare_sap_displacements(m, [case], disp)
+    r3 = next(r for r in rows if r["node"] == 3)
+    assert r3["U3(Z) ours [mm]"] == -5.0 and r3["U3(Z) SAP [mm]"] == -5.0
+    assert r3["status"] == "ok"
+
+
+def test_sap_export_preserves_local_axis(tmp_path):
+    """A member whose vecxz swaps the transverse axes (upright rotation) is
+    written to the SAP export as a 90 deg local-axis angle, so re-import
+    reproduces the orientation."""
+    from rack15512.sap2000 import load_sap2000, to_sap2000
+
+    mp = str(tmp_path / "m.xlsx")
+    _write_sap(mp)
+    m = load_sap2000(mp)
+    # give the upright a swapped orientation
+    up = next(mm for mm in m.members.values() if mm.member_set == "uprights")
+    up.vecxz = (1.0, 0.0, 0.0)
+
+    out = str(tmp_path / "exp.xlsx")
+    to_sap2000(m, out)
+    wb = openpyxl.load_workbook(out, read_only=True)
+    assert "Frame Local Axes 1 - Typical" in wb.sheetnames
+    m2 = load_sap2000([out])
+    swapped = [mm for mm in m2.members.values()
+               if getattr(mm, "vecxz", None) is not None]
+    assert swapped                      # orientation survived the round-trip
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
