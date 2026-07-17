@@ -524,10 +524,18 @@ def to_sap2000(model: RackModel, path: str,
         for r in rows:
             ws.append(r)
 
+    # Program Control - replicate SAP's own 14-column table verbatim so the
+    # importer recognises the version (a short table is read as "Version 0"
+    # and the import is aborted).
     sheet("Program Control",
-          ["ProgramName", "Version", "CurrUnits", "SteelCode"],
-          ["Text", "Text", "Text", "Text"],
-          [["SAP2000", "26.0.0", "N, mm, C", "AISC 360-10"]])
+          ["ProgramName", "Version", "ProgLevel", "LicenseNum", "LicenseOS",
+           "LicenseSC", "LicenseHT", "CurrUnits", "SteelCode", "ConcCode",
+           "AlumCode", "ColdCode", "ConcSCode", "RegenHinge"],
+          ["Text", "Text", "Text", "Text", "Yes/No", "Yes/No", "Yes/No",
+           "Text", "Text", "Text", "Text", "Text", "Text", "Yes/No"],
+          [["SAP2000", "26.0.0", "Ultimate", "", "Yes", "Yes", "No",
+            "N, mm, C", "AISC 360-10", "ACI 318-14", "AA 2015", "AISI-ASD96",
+            "Eurocode 2-2004", "Yes"]])
 
     # joints
     jr = [[str(nid), "GLOBAL", "Cartesian", n.x, n.y, n.z, "No",
