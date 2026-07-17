@@ -503,7 +503,8 @@ def _is_axis_swapped(model: RackModel, m) -> bool:
     return abs(v[2]) > 0.5                       # non-vertical swap -> z-ish
 
 
-def to_sap2000(model: RackModel, path: str) -> str:
+def to_sap2000(model: RackModel, path: str,
+               with_imperfections: bool = True) -> str:
     """Write the model as a SAP2000 database-tables workbook (N, mm) that
     re-imports into SAP2000 (File -> Import -> SAP2000 MS Excel Spreadsheet
     .xlsx).  Node coordinates, frame connectivity + section assignments,
@@ -557,22 +558,31 @@ def to_sap2000(model: RackModel, path: str) -> str:
     # section properties (Iz -> I33, Iy -> I22)
     pr = []
     for s in model.sections.values():
-        pr.append([s.name, s.material, "Box/Tube", s.depth_h or 0,
-                   s.width_b or 0, s.A, s.J, s.Iz, s.Iy, s.Welz, s.Wely])
+        as2 = as3 = ""                        # shear areas if the app has them
+        for a in ("Az", "shear_z", "Avz"):
+            if getattr(s, a, None):
+                as2 = getattr(s, a)
+        for a in ("Ay", "shear_y", "Avy"):
+            if getattr(s, a, None):
+                as3 = getattr(s, a)
+        # SAP 'General' section -> SAP uses these exact A / I33 / I22 / J (the
+        # app's EN 15512 properties) instead of recomputing from a nominal shape
+        pr.append([s.name, s.material, "General", s.depth_h or 0,
+                   s.width_b or 0, s.A, s.J, s.Iz, s.Iy, as2 or s.A,
+                   as3 or s.A, s.Welz, s.Wely])
     sheet("Frame Props 01 - General",
           ["SectionName", "Material", "Shape", "t3", "t2", "Area",
-           "TorsConst", "I33", "I22", "S33", "S22"],
+           "TorsConst", "I33", "I22", "AS2", "AS3", "S33", "S22"],
           ["Text", "Text", "Text", "mm", "mm", "mm2", "mm4", "mm4", "mm4",
-           "mm3", "mm3"], pr)
+           "mm2", "mm2", "mm3", "mm3"], pr)
 
     # frames + assignments
     cf, fa, fmod, la = [], [], [], []
     for mid, m in sorted(model.members.items()):
         cf.append([str(mid), str(m.node_i), str(m.node_j), "No",
                    round(model.member_length(m), 3)])
-        stype = "Section Designer" if model.sections[m.section].role \
-            == "uprights" else "Frame"
-        fa.append([str(mid), stype, "N.A.", m.section, m.section, "Default"])
+        fa.append([str(mid), "General", "N.A.", m.section, m.section,
+                   "Default"])
         fmod.append([str(mid), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
         # preserve orientation: a member whose vecxz swaps the transverse axes
         # (rack-upright rotation) exports as a 90 deg SAP local-axis angle
@@ -633,20 +643,79 @@ def to_sap2000(model: RackModel, path: str) -> str:
            "N-mm/rad", "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad",
            "N-mm/rad"], rel2)
 
-    # restraints
+    # restraints (fixed DOFs) + Jt Spring Assigns (semi-rigid base springs)
     def _yn(d):
         return "Yes" if d is True else "No"
-    rr = [[str(s.node), _yn(s.ux), _yn(s.uy), _yn(s.uz),
-           _yn(s.rx), _yn(s.ry), _yn(s.rz)] for s in model.supports]
+    rr, jspr = [], []
+    for s in model.supports:
+        rr.append([str(s.node), _yn(s.ux), _yn(s.uy), _yn(s.uz),
+                   _yn(s.rx), _yn(s.ry), _yn(s.rz)])
+
+        def sv(d):
+            return d if isinstance(d, float) and d > 0 else 0
+
+        if any(isinstance(getattr(s, a), float)
+               for a in ("ux", "uy", "uz", "rx", "ry", "rz")):
+            jspr.append([str(s.node), "GLOBAL", sv(s.ux), sv(s.uy), sv(s.uz),
+                         sv(s.rx), sv(s.ry), sv(s.rz)])
     sheet("Joint Restraint Assignments",
           ["Joint", "U1", "U2", "U3", "R1", "R2", "R3"],
           ["Text"] + ["Yes/No"] * 6, rr)
+    if jspr:
+        sheet("Jt Spring Assigns 1 - Uncoupled",
+              ["Joint", "CoordSys", "U1", "U2", "U3", "R1", "R2", "R3"],
+              ["Text", "Text", "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad",
+               "N-mm/rad"], jspr)
 
-    # load patterns / cases
+    # ---- sway imperfection as EHF notional load patterns -------------------
+    # this app applies the EN 15512 sway as equivalent horizontal forces
+    # phi * V at every downward load; SAP models it the same way (explicit
+    # notional joint loads).  Expand each imperfection-carrying combination
+    # per direction (as this app runs it) into a dedicated IMP pattern.
+    from .combos import assemble
+    from .model import DIRECTION_VECTORS
+    imp = model.imperfection
+    phi = 0.0
+    if with_imperfections and hasattr(imp, "value"):
+        try:
+            phi = imp.value()
+        except Exception:
+            phi = 0.0
+    imp_patterns: Dict[str, List[list]] = {}   # pattern name -> joint-load rows
+    expanded: List[Tuple[str, Dict[str, float], Optional[str]]] = []
+    for c in model.combinations:
+        dirs = [None]
+        if with_imperfections and phi and getattr(c, "imperfection", False):
+            dirs = (getattr(c, "imp_directions", None)
+                    or getattr(imp, "directions", ["+x"]))
+        for d in dirs:
+            pat = None
+            if d:
+                pat = f"IMP_{c.name}_{d}".replace("@", "_").replace(" ", "_")
+                dx, dy = DIRECTION_VECTORS[d]
+                loads = assemble(model, c)
+                acc: Dict[int, float] = {}
+                for node, f in loads.nodal.items():
+                    if f[2] < 0.0:
+                        acc[node] = acc.get(node, 0.0) + phi * abs(f[2])
+                for mid, q in loads.member.items():
+                    if q[2] < 0.0:
+                        mm = model.members[mid]
+                        h = phi * abs(q[2]) * model.member_length(mm) / 2.0
+                        acc[mm.node_i] = acc.get(mm.node_i, 0.0) + h
+                        acc[mm.node_j] = acc.get(mm.node_j, 0.0) + h
+                imp_patterns[pat] = [
+                    [str(n), pat, "GLOBAL", round(dx * v, 4), round(dy * v, 4),
+                     0, 0, 0, 0] for n, v in acc.items() if abs(v) > 1e-9]
+            expanded.append((c.name if not d else f"{c.name}_{d}".replace(
+                "@", "_"), dict(c.factors), pat))
+
+    # load patterns / cases (gravity + the imperfection patterns)
     lp, lcd = [], []
-    for name, lc in model.load_cases.items():
-        swm = 1 if str(name).upper().startswith("DEAD") else 0
-        dtype = "Dead" if swm else "Live"
+    for name in list(model.load_cases) + list(imp_patterns):
+        swm = 1 if str(name).lower() == "dead" and False else 0
+        dtype = "Other" if name in imp_patterns else (
+            "Dead" if str(name).lower().startswith("dead") else "Live")
         lp.append([name, dtype, swm, ""])
         lcd.append([name, "LinStatic", "Zero", "Yes"])
     sheet("Load Pattern Definitions",
@@ -656,7 +725,7 @@ def to_sap2000(model: RackModel, path: str) -> str:
           ["Case", "Type", "InitialCond", "RunCase"],
           ["Text", "Text", "Text", "Yes/No"], lcd)
 
-    # loads
+    # loads (gravity load cases + the imperfection joint loads)
     jf, fd = [], []
     for name, lc in model.load_cases.items():
         for nl in lc.nodal_loads:
@@ -667,6 +736,8 @@ def to_sap2000(model: RackModel, path: str) -> str:
                 continue
             fd.append([str(ml.member), name, "GLOBAL", "Force", "Gravity",
                        "RelDist", 0, 1, abs(ml.qz), abs(ml.qz)])
+    for rows_ in imp_patterns.values():
+        jf.extend(rows_)
     sheet("Joint Loads - Force",
           ["Joint", "LoadPat", "CoordSys", "F1", "F2", "F3", "M1", "M2",
            "M3"], ["Text", "Text", "Text", "N", "N", "N", "N-mm", "N-mm",
@@ -677,14 +748,17 @@ def to_sap2000(model: RackModel, path: str) -> str:
           ["Text", "Text", "Text", "Text", "Text", "Text", "Unitless",
            "Unitless", "N/mm", "N/mm"], fd)
 
-    # combinations
+    # combinations (expanded per imperfection direction, each adding its IMP
+    # pattern at factor 1 - the EHF magnitude already carries the phi*gravity)
     cd = []
-    for c in model.combinations:
+    for cname, factors, pat in expanded:
         first = True
-        for case, sf in c.factors.items():
-            cd.append([c.name, "Linear Add" if first else "", "No",
+        for case, sf in factors.items():
+            cd.append([cname, "Linear Add" if first else "", "No",
                        "Linear Static", case, sf])
             first = False
+        if pat:
+            cd.append([cname, "", "No", "Linear Static", pat, 1.0])
     sheet("Combination Definitions",
           ["ComboName", "ComboType", "AutoDesign", "CaseType", "CaseName",
            "ScaleFactor"],

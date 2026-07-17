@@ -265,6 +265,38 @@ def test_sap_joint_displacements_compare(tmp_path):
     assert r3["status"] == "ok"
 
 
+def test_sap_export_base_springs_and_imperfection(tmp_path):
+    """A model with a semi-rigid base spring and an EHF sway imperfection
+    exports Jt Spring Assigns and per-direction IMP notional load patterns,
+    and the base spring survives a round-trip."""
+    from rack15512.builder import RackConfig, build_rack, LevelSpec
+    from rack15512.model import Imperfection
+    from rack15512.sap2000 import load_sap2000, to_sap2000
+
+    m = build_rack(RackConfig(module="single", n_bays=2,
+                              levels=[LevelSpec(gap=2000.0)],
+                              frame_height=2200.0))
+    # semi-rigid down-aisle base + a sway imperfection with explicit directions
+    for s in m.supports:
+        s.ry = 5.0e7
+    m.imperfection = Imperfection(phi=1.0 / 300.0, method="EHF",
+                                  directions=["+x", "-x"])
+    for c in m.combinations:
+        c.imperfection = True
+
+    out = str(tmp_path / "exp.xlsx")
+    to_sap2000(m, out)
+    wb = openpyxl.load_workbook(out, read_only=True)
+    assert "Jt Spring Assigns 1 - Uncoupled" in wb.sheetnames
+    pats = [r[0] for i, r in
+            enumerate(wb["Load Pattern Definitions"].iter_rows(values_only=True))
+            if i >= 3 and r[0]]
+    assert any(str(p).startswith("IMP_") for p in pats)   # imperfection loads
+
+    m2 = load_sap2000([out])
+    assert m2.supports[0].ry == 5.0e7                     # base spring survives
+
+
 def test_sap_export_preserves_local_axis(tmp_path):
     """A member whose vecxz swaps the transverse axes (upright rotation) is
     written to the SAP export as a 90 deg local-axis angle, so re-import

@@ -23,3 +23,7 @@ charts_util_100pitch/
 charts_util_100pitch_fy410/
 charts_099_noPL/
 charts_099_beam150/
+
+# generated solver-export deliverables
+*_SAP2000_export.xlsx
+ProjectA_SAP2000_export.xlsx
