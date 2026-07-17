@@ -179,8 +179,30 @@ def load_sap2000(path: str) -> RackModel:
     # ---- members -----------------------------------------------------------
     _, conn = _table(wb, "Connectivity - Frame")
     _, assign = _table(wb, "Frame Section Assignments")
+    _, laxes = _table(wb, "Frame Local Axes 1 - Typical")
+    angle_of = {str(r["Frame"]): _f(r.get("Angle"), 0.0) for r in laxes}
     sec_of = {str(r["Frame"]): (r.get("AnalSect") or r.get("DesignSect"))
               for r in assign}
+
+    def _vecxz(ni: int, nj: int, angle: float):
+        """SAP local-axis angle -> this app's vecxz.  A 90/270 deg angle (mod
+        180) swaps the two transverse axes (SAP's I33/I22 then act in the
+        opposite planes to this app's default), so the section's Iz/Iy land in
+        the correct global planes.  Only the +-90 deg swap is handled (the
+        common rack upright rotation); other angles keep the default axes."""
+        import math
+        a = model.nodes[ni]
+        b = model.nodes[nj]
+        dx, dy, dz = b.x - a.x, b.y - a.y, b.z - a.z
+        L = math.sqrt(dx * dx + dy * dy + dz * dz) or 1.0
+        swap = abs(((angle or 0.0) % 180.0) - 90.0) < 45.0
+        if not swap:
+            return None                       # default orientation
+        if abs(dz / L) > 0.999:               # vertical member: swap y<->z
+            return (1.0, 0.0, 0.0)
+        # horizontal/inclined member rotated 90 deg: local z becomes vertical
+        return (0.0, 0.0, 1.0)
+
     for r in conn:
         fid = int(float(r["Frame"]))
         sec = sec_of.get(str(r["Frame"]))
@@ -189,12 +211,14 @@ def load_sap2000(path: str) -> RackModel:
         role = model.sections[sec].role
         mtype = "truss" if role == "bracing" else "beam"
         hi, hj = releases.get(str(r["Frame"]), (None, None))
-        model.add_member(fid, int(float(r["JointI"])), int(float(r["JointJ"])),
-                         sec, mtype=mtype,
+        ni, nj = int(float(r["JointI"])), int(float(r["JointJ"]))
+        model.add_member(fid, ni, nj, sec, mtype=mtype,
                          hinge_i=hi if mtype == "beam" else None,
                          hinge_j=hj if mtype == "beam" else None,
                          mesh=2 if mtype == "beam" else 1,
-                         member_set=role or sec)
+                         member_set=role or sec,
+                         vecxz=_vecxz(ni, nj, angle_of.get(str(r["Frame"]),
+                                                           0.0)))
 
     # ---- supports (restraints + uncoupled springs) ------------------------
     _, restr = _table(wb, "Joint Restraint Assignments")
@@ -305,9 +329,11 @@ def load_sap2000(path: str) -> RackModel:
         if not fac:
             continue
         kind = "SLS" if str(name).upper().startswith("SLS") else "ULS"
+        # SAP combinations are a Linear Add of linear-static cases, so run them
+        # geometrically LINEAR to match SAP's LinStatic output (a P-Delta case
+        # is a separate SAP load case, not the combination).
         model.combinations.append(Combination(
-            name, kind, fac, imperfection=False,
-            order=2 if kind == "ULS" else 1))
+            name, kind, fac, imperfection=False, order=1))
 
     return model
 
