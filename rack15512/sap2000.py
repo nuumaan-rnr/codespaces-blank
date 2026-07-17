@@ -34,27 +34,36 @@ from .model import (Combination, CrossSection, Hinge, LoadCase, MemberLoad,
 
 # --------------------------------------------------------------- sheet helpers
 def _load(path):
+    """Open one workbook or several (a SAP export is often split across files);
+    returns a list of workbooks so a table can be found in whichever holds it."""
     import openpyxl
-    return openpyxl.load_workbook(path, data_only=True, read_only=True)
+    paths = [path] if isinstance(path, (str, bytes)) else list(path)
+    return [openpyxl.load_workbook(p, data_only=True, read_only=True)
+            for p in paths]
 
 
-def _table(wb, name: str) -> Tuple[List[str], List[dict]]:
-    """Return (header, [row-dict]) for a SAP table sheet.  Row 1 is the
-    'TABLE: ...' title, row 2 the column names, row 3 the units, data from
-    row 4."""
-    for sheet in wb.sheetnames:
-        if sheet.strip() == name or sheet.strip().startswith(name):
-            rows = list(wb[sheet].iter_rows(values_only=True))
-            if len(rows) < 2:
-                return [], []
-            hdr = [("" if c is None else str(c).strip()) for c in rows[1]]
-            out = []
-            for r in rows[3:]:
-                if r is None or r[0] in (None, ""):
-                    continue
-                out.append({hdr[i]: r[i] for i in range(min(len(hdr), len(r)))})
-            return hdr, out
-    return [], []
+def _sheet_rows(wbs, name: str):
+    for wb in wbs:
+        for sheet in wb.sheetnames:
+            if sheet.strip() == name or sheet.strip().startswith(name):
+                return list(wb[sheet].iter_rows(values_only=True))
+    return None
+
+
+def _table(wbs, name: str) -> Tuple[List[str], List[dict]]:
+    """Return (header, [row-dict]) for a SAP table sheet, searching every open
+    workbook.  Row 1 is the 'TABLE: ...' title, row 2 the column names, row 3
+    the units, data from row 4."""
+    rows = _sheet_rows(wbs, name)
+    if not rows or len(rows) < 2:
+        return [], []
+    hdr = [("" if c is None else str(c).strip()) for c in rows[1]]
+    out = []
+    for r in rows[3:]:
+        if r is None or r[0] in (None, ""):
+            continue
+        out.append({hdr[i]: r[i] for i in range(min(len(hdr), len(r)))})
+    return hdr, out
 
 
 def _f(v, d=None):
@@ -210,6 +219,15 @@ def load_sap2000(path: str) -> RackModel:
             ry=_dof(_yes(r.get("R2")), _f(sp.get("R2"))),
             rz=_dof(_yes(r.get("R3")), _f(sp.get("R3")))))
 
+    # ---- auto-mesh at joints BEFORE loads, so self-weight and distributed
+    #      loads land on every sub-member (SAP splits each frame at joints on
+    #      its span; without this the split-off segments carry no load) -------
+    model.frame_origin = {mid: mid for mid in model.members}
+    _automesh_at_joints(model)
+    subs_of: Dict[int, List[int]] = {}          # SAP frame -> sub-member ids
+    for mid, fr in model.frame_origin.items():
+        subs_of.setdefault(fr, []).append(mid)
+
     # ---- load patterns / cases --------------------------------------------
     _, pats = _table(wb, "Load Pattern Definitions")
     selfwt = {r["LoadPat"]: _f(r.get("SelfWtMult"), 0.0) for r in pats}
@@ -219,7 +237,7 @@ def load_sap2000(path: str) -> RackModel:
             else "variable"
         cases[name] = LoadCase(name, kind)
 
-    # self-weight member UDLs
+    # self-weight member UDLs on every (meshed) member
     for name, mult in selfwt.items():
         if not mult:
             continue
@@ -229,27 +247,26 @@ def load_sap2000(path: str) -> RackModel:
             w = sec.A * g * mult                 # N/mm
             cases[name].member_loads.append(MemberLoad(m.id, qz=-w))
 
-    # distributed frame loads (gravity)
+    # distributed frame loads (gravity) -> apply to every sub-member of the frame
     _, dist = _table(wb, "Frame Loads - Distributed")
     for r in dist:
         pat = r.get("LoadPat")
         if pat not in cases:
             cases[pat] = LoadCase(pat, "variable")
         fid = int(float(r["Frame"]))
-        if fid not in model.members:
-            continue
         w = _f(r.get("FOverLA"), 0.0)
         d = str(r.get("Dir", "Gravity")).lower()
-        ml = MemberLoad(fid)
-        if "grav" in d or d in ("z", "-z", "3"):
-            ml.qz = -abs(w)
-        elif d in ("x", "1"):
-            ml.qx = w
-        elif d in ("y", "2"):
-            ml.qy = w
-        else:
-            ml.qz = -abs(w)
-        cases[pat].member_loads.append(ml)
+        for sub in subs_of.get(fid, [fid] if fid in model.members else []):
+            ml = MemberLoad(sub)
+            if "grav" in d or d in ("z", "-z", "3"):
+                ml.qz = -abs(w)
+            elif d in ("x", "1"):
+                ml.qx = w
+            elif d in ("y", "2"):
+                ml.qy = w
+            else:
+                ml.qz = -abs(w)
+            cases[pat].member_loads.append(ml)
 
     # joint force loads (notional / sway)
     _, jl = _table(wb, "Joint Loads - Force")
@@ -292,7 +309,6 @@ def load_sap2000(path: str) -> RackModel:
             name, kind, fac, imperfection=False,
             order=2 if kind == "ULS" else 1))
 
-    _automesh_at_joints(model)
     return model
 
 
@@ -331,6 +347,7 @@ def _automesh_at_joints(model: RackModel, tol: float = 2.0) -> int:
         interior.sort()
         chain = [m.node_i] + [nid for _, nid in interior] + [m.node_j]
         hi, hj = m.hinge_i, m.hinge_j
+        origin = getattr(model, "frame_origin", {}).get(mid, mid)
         # first sub-member keeps the original id + its start hinge
         model.members[mid].node_j = chain[1]
         model.members[mid].hinge_j = hj if len(chain) == 2 else None
@@ -343,6 +360,8 @@ def _automesh_at_joints(model: RackModel, tol: float = 2.0) -> int:
                              hinge_j=hj if k == len(chain) - 2 else None,
                              mesh=m.mesh, member_set=m.member_set,
                              vecxz=m.vecxz)
+            if hasattr(model, "frame_origin"):
+                model.frame_origin[new] = origin
     return added
 
 
@@ -623,3 +642,110 @@ def to_sap2000(model: RackModel, path: str) -> str:
 
     wb.save(path)
     return path
+
+
+# ---------------------------------------------------------------- results
+def read_sap_element_forces(path) -> Dict[str, Dict[int, dict]]:
+    """SAP2000 'Element Forces - Frames' results -> per OutputCase, per SAP
+    FRAME: the envelope over all stations {N_min, N_max, My_absmax,
+    Mz_absmax} in base units [N, N*mm], mapped to this app's axes (SAP M3 major
+    -> our Mz, M2 minor -> our My).  MODAL / mode-shape cases are skipped."""
+    wbs = _load(path)
+    rows = _sheet_rows(wbs, "Element Forces - Frames")
+    if not rows:
+        return {}
+    hdr = [("" if c is None else str(c).strip()) for c in rows[1]]
+    ix = {h: i for i, h in enumerate(hdr)}
+    fN, fV, fM2, fM3 = ix.get("P"), ix.get("V2"), ix.get("M2"), ix.get("M3")
+    fc, ff = ix.get("OutputCase"), ix.get("Frame")
+    out: Dict[str, Dict[int, dict]] = {}
+    for r in rows[3:]:
+        if r is None or r[ff] in (None, "") or r[fc] in (None, ""):
+            continue
+        case = str(r[fc])
+        if case.upper() == "MODAL":
+            continue
+        try:
+            frame = int(float(r[ff]))
+            N = float(r[fN])
+            my = float(r[fM2])              # SAP M2 -> our My
+            mz = float(r[fM3])              # SAP M3 -> our Mz
+        except (TypeError, ValueError):
+            continue
+        d = out.setdefault(case, {}).setdefault(
+            frame, {"N_min": 0.0, "N_max": 0.0, "My": 0.0, "Mz": 0.0})
+        d["N_min"] = min(d["N_min"], N)
+        d["N_max"] = max(d["N_max"], N)
+        d["My"] = max(d["My"], abs(my))
+        d["Mz"] = max(d["Mz"], abs(mz))
+    return out
+
+
+def read_sap_base_reactions(path) -> Dict[str, dict]:
+    """SAP2000 'Base Reactions' -> {OutputCase: {FX, FY, FZ} [N]} (first/only
+    step per case; modal steps collapsed to the case name)."""
+    wbs = _load(path)
+    _, rows = _table(wbs, "Base Reactions")
+    out: Dict[str, dict] = {}
+    for r in rows:
+        case = r.get("OutputCase")
+        if not case or str(case).upper() == "MODAL" or case in out:
+            continue
+        out[case] = {"FX": _f(r.get("GlobalFX"), 0.0),
+                     "FY": _f(r.get("GlobalFY"), 0.0),
+                     "FZ": _f(r.get("GlobalFZ"), 0.0)}
+    return out
+
+
+def compare_sap_forces(model: RackModel, cases, sap: Dict[str, Dict[int, dict]],
+                       case_map: Optional[Dict[str, str]] = None) -> List[dict]:
+    """Compare this app's member forces with SAP's 'Element Forces - Frames'
+    per SAP FRAME (the app auto-meshes each frame into sub-members, so both
+    sides are enveloped back to the original frame).  case_map maps an app
+    combo/case name to the SAP OutputCase name (default: identical names).
+    Returns one row per (case, frame) with N / My / Mz, app vs SAP, and the
+    per-component difference + tolerance status."""
+    from .rfem_compare import _pct, within_tolerance
+    origin = getattr(model, "frame_origin", {mid: mid for mid in model.members})
+    case_map = case_map or {}
+    KN, KNCM = 1.0e3, 1.0e4
+    rows: List[dict] = []
+    for case in cases:
+        if not getattr(case, "converged", False):
+            continue
+        sap_case = case_map.get(case.combo, case.combo)
+        ref = sap.get(sap_case)
+        if ref is None:
+            continue
+        # envelope our sub-member station forces back to the SAP frame
+        frame_env: Dict[int, dict] = {}
+        for mid, mr in case.members.items():
+            fr = origin.get(mid, mid)
+            e = frame_env.setdefault(fr, {"N": 0.0, "My": 0.0, "Mz": 0.0,
+                                          "sec": model.members[mid].section})
+            e["N"] = min(e["N"], mr.N_min)
+            e["My"] = max(e["My"], mr.My_absmax)
+            e["Mz"] = max(e["Mz"], mr.Mz_absmax)
+        for fr, e in frame_env.items():
+            s = ref.get(fr)
+            if s is None:
+                continue
+            trip = [("N", e["N"], s["N_min"], KN, "kN"),
+                    ("My", e["My"], s["My"], KNCM, "kNcm"),
+                    ("Mz", e["Mz"], s["Mz"], KNCM, "kNcm")]
+            row = {"case": sap_case, "frame": fr, "section": e["sec"]}
+            worst, ok = 0.0, True
+            qmap = {"N": "N_min", "My": "My_absmax", "Mz": "Mz_absmax"}
+            for tag, ours, theirs, div, unit in trip:
+                row[f"{tag} ours [{unit}]"] = round(ours / div, 3)
+                row[f"{tag} SAP [{unit}]"] = round(theirs / div, 3)
+                d = _pct(ours, theirs)
+                row[f"{tag} Δ%"] = d
+                worst = max(worst, d)
+                if not within_tolerance(qmap[tag], ours, theirs):
+                    ok = False
+            row["max Δ%"] = worst
+            row["status"] = "ok" if ok else "review"
+            rows.append(row)
+    rows.sort(key=lambda r: -r["max Δ%"])
+    return rows

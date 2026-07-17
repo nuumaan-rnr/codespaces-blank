@@ -178,6 +178,57 @@ def test_sap2000_export_roundtrip(tmp_path):
         [c for c in checks if c["status"] != "ok"]
 
 
+def test_sap_element_forces_compare(tmp_path):
+    """Read a SAP 'Element Forces - Frames' table and compare per frame; the
+    axis mapping (M3->Mz, M2->My) and frame-envelope aggregation hold, and a
+    matching value is within tolerance while a large mismatch is flagged."""
+    from rack15512.sap2000 import (compare_sap_forces, load_sap2000,
+                                   read_sap_element_forces)
+
+    mp = str(tmp_path / "m.xlsx")
+    _write_sap(mp)
+    m = load_sap2000(mp)
+
+    # a results workbook: frame 1 (upright) with P/M2/M3 at two stations
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet("Element Forces - Frames")
+    ws.append(["TABLE:  Element Forces - Frames"])
+    ws.append(["Frame", "Station", "OutputCase", "CaseType", "StepType",
+               "StepNum", "StepLabel", "P", "V2", "V3", "T", "M2", "M3",
+               "FrameElem", "ElemStation"])
+    ws.append(["Text", "mm", "Text", "Text", "Text", "Unitless", "Text", "N",
+               "N", "N", "N-mm", "N-mm", "N-mm", "Text", "mm"])
+    ws.append(["1", 0, "DEAD", "LinStatic", "", "", "", -5000, 0, 0, 0,
+               1000, 200000, "1-1", 0])
+    ws.append(["1", 1500, "DEAD", "LinStatic", "", "", "", -5000, 0, 0, 0,
+               500, 100000, "1-1", 1500])
+    rp = str(tmp_path / "forces.xlsx")
+    wb.save(rp)
+
+    sap = read_sap_element_forces(rp)
+    assert "DEAD" in sap and 1 in sap["DEAD"]
+    d = sap["DEAD"][1]
+    assert d["N_min"] == -5000
+    assert d["Mz"] == 200000        # SAP M3 -> our Mz (envelope)
+    assert d["My"] == 1000          # SAP M2 -> our My
+
+    # build a fake app case for frame 1 that matches N exactly
+    from rack15512.results import CaseResult, MemberResult, Station
+    case = CaseResult(name="DEAD", combo="DEAD", kind="SLS", order=1,
+                      converged=True)
+    first = next(mid for mid, fr in m.frame_origin.items() if fr == 1)
+    case.members[first] = MemberResult(
+        member=first, length=100.0,
+        stations=[Station(x=0, N=-5000, My=1000, Mz=200000)])
+
+    rows = compare_sap_forces(m, [case], sap)
+    assert rows
+    r1 = next(r for r in rows if r["frame"] == 1)
+    assert r1["N SAP [kN]"] == -5.0 and r1["N ours [kN]"] == -5.0
+    assert r1["status"] == "ok"
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

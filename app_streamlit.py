@@ -310,28 +310,33 @@ def _rstab_results_compare(model, res, cdir, conf):
 
 
 def _sap2000_import_panel(cdir, conf):
-    """Upload a SAP2000 database-tables workbook, read it 1:1, verify the
-    import against the SAP model, run it and offer a SAP-format re-export."""
-    st.markdown("#### SAP2000 model — import, verify 1:1, re-export")
-    st.caption("Drop a SAP2000 CSi database-tables Excel export (File → "
-               "Export → SAP2000 MS Excel Spreadsheet). The model is read "
-               "using SAP's OWN section properties (Frame Props 01) and "
-               "stiffness modifiers, auto-meshed at joints exactly as SAP "
-               "does, then checked 1:1 (nodes, frames, section properties, "
-               "supports, loads, combinations).")
-    up = st.file_uploader("SAP2000 model workbook (.xlsx)", type=["xlsx"],
-                          key="sap_model_ref")
-    if up is None:
+    """Upload SAP2000 database-tables workbook(s) — model and (optionally)
+    results — read 1:1, verify, run, compare member forces, re-export."""
+    st.markdown("#### SAP2000 model — import, verify 1:1, compare, re-export")
+    st.caption("Drop the SAP2000 CSi database-tables Excel export(s) (File → "
+               "Export → SAP2000 MS Excel Spreadsheet). A SAP export is often "
+               "split across several files — upload all of them together. The "
+               "model is read using SAP's OWN section properties (Frame Props "
+               "01) and stiffness modifiers, auto-meshed at joints exactly as "
+               "SAP does, checked 1:1, and — if an 'Element Forces - Frames' "
+               "results table is present — compared member-by-member.")
+    ups = st.file_uploader("SAP2000 workbook(s) (.xlsx)", type=["xlsx"],
+                           accept_multiple_files=True, key="sap_model_ref")
+    if not ups:
         return
-    path = os.path.join(cdir, "_sap2000_model.xlsx")
-    with open(path, "wb") as f:
-        f.write(up.getbuffer())
+    paths = []
+    for i, up in enumerate(ups):
+        p = os.path.join(cdir, f"_sap2000_{i}.xlsx")
+        with open(p, "wb") as f:
+            f.write(up.getbuffer())
+        paths.append(p)
+    path = paths                              # load_sap2000 accepts a list
     from rack15512.sap2000 import (load_sap2000, to_sap2000,
                                    verify_sap2000_import)
     try:
         sm = load_sap2000(path)
     except Exception as exc:
-        st.error(f"Could not read the SAP2000 workbook: {exc}")
+        st.error(f"Could not read the SAP2000 workbook(s): {exc}")
         return
     c = st.columns(4)
     c[0].metric("Nodes", len(sm.nodes))
@@ -368,37 +373,78 @@ def _sap2000_import_panel(cdir, conf):
                                              for x in {mm.section for mm in
                                                        sm.members.values()}}))
 
+    from rack15512.sap2000 import (read_sap_element_forces,
+                                   read_sap_base_reactions, compare_sap_forces)
+    sap_forces = {}
+    try:
+        sap_forces = read_sap_element_forces(path)
+    except Exception:
+        sap_forces = {}
+    if sap_forces:
+        st.info("SAP 'Element Forces - Frames' results found — output cases: "
+                + ", ".join(sap_forces) + ". Run below to compare.")
+
     rc = st.columns(2)
-    if rc[0].button("▶ Run the SAP2000 model (OpenSees)", key="run_sap",
+    if rc[0].button("▶ Run & compare vs SAP2000 (OpenSees)", key="run_sap",
                     width="stretch"):
         from rack15512.analysis import run_all
+        from rack15512.combos import assemble
+        from rack15512.engine.opensees import OpenSeesEngine
+        from rack15512.model import Combination
         try:
             with st.spinner("Running the imported SAP2000 model…"):
-                cases = run_all(sm)
+                cases = list(run_all(sm))
+                # DEAD is a load case (self-weight), not a combination -
+                # compare it directly when SAP exported a DEAD result
+                if "DEAD" in sap_forces and "DEAD" in sm.load_cases:
+                    dc = Combination("DEAD", "SLS", {"DEAD": 1.0},
+                                     imperfection=False, order=1)
+                    cases.append(OpenSeesEngine().run_case(
+                        sm, assemble(sm, dc), name="DEAD", combo="DEAD",
+                        kind="SLS", order=1))
             ok = sum(1 for cc in cases if cc.converged)
-            st.success(f"Ran {ok}/{len(cases)} combinations. Governing upright "
-                       "axial and sway are in the results below.")
-            summary = []
-            for cc in cases:
-                if not cc.converged:
-                    summary.append({"combination": cc.combo,
-                                    "status": "did not converge"})
-                    continue
-                ups = [mr.N_min for mid, mr in cc.members.items()
-                       if sm.members[mid].member_set == "uprights"]
-                summary.append({
-                    "combination": cc.combo,
-                    "min upright N [kN]": round(min(ups) / 1e3, 1)
-                    if ups else None,
-                    "sway X [mm]": round(cc.max_sway_x, 1),
-                    "sway Y [mm]": round(cc.max_sway_y, 1)})
-            st.dataframe(summary, width="stretch", hide_index=True)
-            st.caption("To compare these against SAP2000, export SAP's "
-                       "'Element Forces - Frames' and 'Joint Displacements' "
-                       "result tables — the uploaded model file contains no "
-                       "analysis results, only the model definition.")
+            st.success(f"Ran {ok}/{len(cases)} cases.")
+            if sap_forces:
+                comp = compare_sap_forces(sm, cases, sap_forces)
+                if comp:
+                    rev = [r for r in comp if r["status"] == "review"]
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Frames compared", len(comp))
+                    m2.metric("Within tolerance", f"{len(comp)-len(rev)}"
+                              f"/{len(comp)}")
+                    m3.metric("To review", len(rev))
+                    st.caption("Member forces per SAP frame (this app "
+                               "auto-meshes each frame; both sides are "
+                               "enveloped back to the SAP frame). SAP M3→our "
+                               "Mz, M2→our My. Only load cases whose loads are "
+                               "fully defined in the upload are comparable "
+                               "(DEAD self-weight always; live/seismic need "
+                               "their load definitions).")
+                    st.dataframe(sorted(comp, key=lambda r: -r["max Δ%"]),
+                                 width="stretch", hide_index=True)
+                    only = [c for c in sap_forces
+                            if c not in {r["case"] for r in comp}]
+                    if only:
+                        st.caption("SAP cases not reproduced here (loads not "
+                                   "in the upload, or seismic/modal): "
+                                   + ", ".join(only))
+                else:
+                    st.warning("No frames matched — check the combo/case "
+                               "names line up with the SAP output cases.")
+            # base reactions
+            try:
+                br = read_sap_base_reactions(path)
+                if "DEAD" in br:
+                    ours = sum(abs(ml.qz) * sm.member_length(sm.members[
+                        ml.member]) for ml in sm.load_cases["DEAD"].member_loads)
+                    st.caption(f"DEAD base reaction ΣFЗ: ours "
+                               f"{ours/1e3:.1f} kN vs SAP "
+                               f"{br['DEAD']['FZ']/1e3:.1f} kN.")
+            except Exception:
+                pass
         except Exception as exc:
             st.error(f"Analysis failed: {exc}")
+            st.exception(exc)
     sap_out = os.path.join(cdir, "SAP2000_reexport.xlsx")
     if rc[1].button("⬇ Re-export this SAP model (round-trip)", key="reexp_sap",
                     width="stretch"):
