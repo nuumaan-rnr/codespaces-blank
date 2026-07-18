@@ -535,6 +535,38 @@ class RackConfig:
     built_up_h0: float = 100.0              # chord centroid spacing [mm]
     built_up_panel: float = 500.0           # batten / lacing panel spacing [mm]
 
+    # ---- structural mezzanine (system_type "mezzanine") --------------------
+    # column grid: mz_bays_x x mz_bays_y bays of mz_bay_x x mz_bay_y [mm];
+    # mz_n_floors floors at mz_floor_height storey height.  Framing layers:
+    # columns / primary beams (along mz_primary_dir, connected to the columns
+    # per mz_primary_conn) / pin-ended secondary beams at mz_secondary_spacing
+    # / optional pin-ended joists at mz_joist_spacing.  Flooring dead
+    # (mz_floor_type + mz_floor_dead_extra) and live load [kN/m2] are applied
+    # as tributary UDLs on the topmost layer.  Stability: vertical X-bracing
+    # in the outer bays (mz_bracing) or moment frames when bracing is off.
+    mz_bays_x: int = 3
+    mz_bay_x: float = 5000.0
+    mz_bays_y: int = 2
+    mz_bay_y: float = 4000.0
+    mz_n_floors: int = 1
+    mz_floor_height: float = 3000.0
+    mz_column_section: Optional[str] = None
+    mz_primary_section: Optional[str] = None
+    mz_secondary_section: Optional[str] = None
+    mz_joist_section: Optional[str] = None        # None -> no joist layer
+    mz_primary_dir: str = "X"                     # "X" | "Y"
+    mz_secondary_spacing: float = 1250.0          # [mm]
+    mz_joist_spacing: float = 600.0               # [mm]
+    mz_floor_type: str = "Chequered plate 3 mm"   # see mezzanine.FLOOR_TYPES
+    mz_floor_dead_extra: float = 0.0              # [kN/m2] services etc.
+    mz_live_load: float = 5.0                     # [kN/m2] per floor
+    mz_primary_conn: str = "moment"               # moment | pinned | semi
+    mz_conn_k: Optional[float] = None             # semi-rigid k [N*mm/rad]
+    mz_base_fixed: bool = False                   # False -> pinned bases
+    mz_bracing: bool = True
+    mz_brace_section: Optional[str] = None
+    mz_braced_bays: int = 1                       # braced bays per corner
+
 
 def bracing_elevations(cfg: RackConfig, frame_height: float) -> List[float]:
     """Elevations of the bracing points: start, start+pitch, ... up to the
@@ -607,7 +639,13 @@ def _apply_role_fy(m: RackModel, cfg: "RackConfig") -> None:
 
 
 def build_rack(cfg: RackConfig) -> RackModel:
-    if getattr(cfg, "system_type", "selective") != "selective":
+    stype = getattr(cfg, "system_type", "selective")
+    if stype == "mezzanine":
+        from .mezzanine import build_mezzanine
+        m = build_mezzanine(cfg)
+        _apply_role_fy(m, cfg)
+        return m
+    if stype != "selective":
         from .drive_in import build_drive_in
         m = build_drive_in(cfg)
         _apply_role_fy(m, cfg)

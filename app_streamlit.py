@@ -628,13 +628,125 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
     if _pending_up is not None and _pending_up in up_names:
         st.session_state["cfg_upright"] = _pending_up
 
+    _FAM = ["Selective pallet racking",
+            "Drive-in / Drive-through / Radio shuttle",
+            "Structural mezzanine"]
+    _st0 = g("system_type", "selective")
     di_fam = st.radio(
-        "Rack family",
-        ["Selective pallet racking", "Drive-in / Drive-through / Radio shuttle"],
-        index=0 if g("system_type", "selective") == "selective" else 1,
+        "Rack family", _FAM,
+        index=2 if _st0 == "mezzanine" else (0 if _st0 == "selective" else 1),
         horizontal=True)
     is_di = di_fam.startswith("Drive")
+    is_mz = di_fam.startswith("Structural")
     di_kw: dict = {}
+    mz_kw: dict = {}
+
+    if is_mz:
+        from rack15512.mezzanine import FLOOR_TYPES
+        with st.container(border=True):
+            ui.section("🏢", "Structural mezzanine — grid, floors & framing")
+            st.caption("Column grid with primary → secondary → (optional) "
+                       "joist framing and a flooring deck. The generic rack "
+                       "sections further down (bays, levels, frame bracing, "
+                       "pallet loads) are **ignored** for a mezzanine — only "
+                       "materials, load factors, imperfections and analysis "
+                       "settings apply.")
+            c = st.columns(4)
+            mzbx = c[0].number_input("Bays X", 1, 20,
+                                     int(gn("mz_bays_x", 3, 1, 20)))
+            mzlx = c[1].number_input("Bay size X [mm]", 1000.0, 12000.0,
+                                     gn("mz_bay_x", 5000.0, 1000.0, 12000.0),
+                                     50.0)
+            mzby = c[2].number_input("Bays Y", 1, 20,
+                                     int(gn("mz_bays_y", 2, 1, 20)))
+            mzly = c[3].number_input("Bay size Y [mm]", 1000.0, 12000.0,
+                                     gn("mz_bay_y", 4000.0, 1000.0, 12000.0),
+                                     50.0)
+            c = st.columns(4)
+            mznf = c[0].number_input("Floors", 1, 6,
+                                     int(gn("mz_n_floors", 1, 1, 6)))
+            mzfh = c[1].number_input("Storey height [mm]", 1500.0, 8000.0,
+                                     gn("mz_floor_height", 3000.0, 1500.0,
+                                        8000.0), 50.0)
+            _dirs = ["X", "Y"]
+            mzdir = c[2].selectbox("Primary beams run along", _dirs,
+                                   index=_idx(_dirs, g("mz_primary_dir",
+                                                       "X")))
+            mzsp = c[3].number_input("Secondary spacing [mm]", 300.0, 3000.0,
+                                     gn("mz_secondary_spacing", 1250.0,
+                                        300.0, 3000.0), 25.0)
+            col_names = list(up_names) + [n for n in beam_names
+                                          if n not in up_names]
+            c = st.columns(4)
+            mzcol = c[0].selectbox("Column section", col_names,
+                                   index=_idx(col_names,
+                                              g("mz_column_section",
+                                                col_names[0])))
+            mzpb = c[1].selectbox("Primary beam", beam_names,
+                                  index=_idx(beam_names,
+                                             g("mz_primary_section",
+                                               beam_names[0])))
+            mzsb = c[2].selectbox("Secondary beam", beam_names,
+                                  index=_idx(beam_names,
+                                             g("mz_secondary_section",
+                                               beam_names[0])))
+            _jopts = ["(none)"] + list(beam_names)
+            mzjo = c[3].selectbox(
+                "Joist beam (optional)", _jopts,
+                index=_idx(_jopts, g("mz_joist_section", None) or "(none)"),
+                help="A third pin-ended layer between the secondaries; the "
+                     "flooring then rests on the joists.")
+            c = st.columns(4)
+            mzjsp = c[0].number_input("Joist spacing [mm]", 200.0, 2000.0,
+                                      gn("mz_joist_spacing", 600.0, 200.0,
+                                         2000.0), 25.0)
+            _fts = list(FLOOR_TYPES)
+            mzft = c[1].selectbox("Flooring type", _fts,
+                                  index=_idx(_fts, g("mz_floor_type",
+                                                     _fts[0])),
+                                  help="Sets the deck dead weight per m².")
+            mzfd = c[2].number_input("Extra dead [kN/m²]", 0.0, 10.0,
+                                     gn("mz_floor_dead_extra", 0.0, 0.0,
+                                        10.0), 0.05,
+                                     help="Services, screed, finishes …")
+            mzll = c[3].number_input("Live load [kN/m²]", 0.5, 20.0,
+                                     gn("mz_live_load", 5.0, 0.5, 20.0),
+                                     0.25)
+            c = st.columns(4)
+            _conns = ["moment", "pinned", "semi"]
+            mzconn = c[0].selectbox(
+                "Primary-to-column connection", _conns,
+                index=_idx(_conns, g("mz_primary_conn", "moment")),
+                help="With bracing OFF the frame must be a moment frame — "
+                     "pinned/semi is then overridden to moment.")
+            mzk = c[1].number_input(
+                "Semi-rigid k [kNm/rad]", 0.0, 1.0e6,
+                gn("mz_conn_k", 0.0, 0.0, 1.0e9) / 1.0e6, 10.0,
+                help="Only used when the connection is 'semi'.") * 1.0e6
+            mzbase = c[2].checkbox("Fixed column bases",
+                                   value=bool(g("mz_base_fixed", False)))
+            mzbrace = c[3].checkbox("Vertical bracing",
+                                    value=bool(g("mz_bracing", True)))
+            c = st.columns(4)
+            mzbrsec = c[0].selectbox("Brace section", br_names,
+                                     index=_idx(br_names,
+                                                g("mz_brace_section",
+                                                  br_names[0])))
+            mzbrn = c[1].number_input("Braced bays per corner", 1, 5,
+                                      int(gn("mz_braced_bays", 1, 1, 5)))
+            mz_kw = dict(
+                mz_bays_x=int(mzbx), mz_bay_x=mzlx, mz_bays_y=int(mzby),
+                mz_bay_y=mzly, mz_n_floors=int(mznf), mz_floor_height=mzfh,
+                mz_primary_dir=mzdir, mz_secondary_spacing=mzsp,
+                mz_column_section=mzcol, mz_primary_section=mzpb,
+                mz_secondary_section=mzsb,
+                mz_joist_section=None if mzjo == "(none)" else mzjo,
+                mz_joist_spacing=mzjsp, mz_floor_type=mzft,
+                mz_floor_dead_extra=mzfd, mz_live_load=mzll,
+                mz_primary_conn=mzconn,
+                mz_conn_k=mzk if mzk > 0 else None,
+                mz_base_fixed=bool(mzbase), mz_bracing=bool(mzbrace),
+                mz_brace_section=mzbrsec, mz_braced_bays=int(mzbrn))
 
     with st.container(border=True):
         ui.section("📐", "Geometry")
@@ -1568,7 +1680,9 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             sp_list = None          # selective spine bays use the module pattern
 
     cfg = RackConfig(
-        system_type="drive_in" if is_di else "selective", **di_kw,
+        system_type=("mezzanine" if is_mz
+                     else "drive_in" if is_di else "selective"),
+        **di_kw, **mz_kw,
         name=name, module=module, n_bays=int(n_bays), bay_width=bay_width,
         depth=depth, b2b_gap=b2b_gap, levels=levels, frame_height=frame_h,
         bracing_first_side=first_side, bracing_type=btype,
@@ -1807,6 +1921,7 @@ def render_new_project():
 
 SYSTEM_TYPES = ["Selective Pallet Racking",
                 "Drive-In / Drive-Through / Radio Shuttle",
+                "Structural Mezzanine",
                 "EN 15512 manual check"]
 
 
@@ -2004,7 +2119,9 @@ def render_project():
             _manual_check_panel(proj, sysm)
             continue
         seed = (RackConfig(system_type="drive_in")
-                if systype.startswith("Drive-In") else None)
+                if systype.startswith("Drive-In")
+                else RackConfig(system_type="mezzanine")
+                if systype.startswith("Structural") else None)
 
         if st.button("➕ New configuration", key=f"newcfg_{sysm.id}"):
             goto("configure", project_id=proj.id, system_id=sysm.id,
