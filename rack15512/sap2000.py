@@ -676,10 +676,17 @@ def to_sap2000(model: RackModel, path: str,
         "Material": mat.name, "UnitWeight": 7.698e-5, "UnitMass": 7.849e-9,
         "E1": mat.E, "G12": mat.G, "U12": mat.nu, "A1": 1.17e-5}
         for mat in model.materials.values()])
+    # steel data: the stress-strain-curve fields are only used by nonlinear
+    # hinge/fiber material models; fill them with SAP's own conventions
+    # (Eff = 1.1x, IS-steel curve constants, Von Mises) so the import is
+    # warning-free instead of "blank; default value is used" x7 per material
     emit("MatProp 03a - Steel Data", [{
         "Material": mat.name, "Fy": mat.fy,
-        "Fu": max(mat.fy * 1.5, mat.fy + 100.0),
-        "SSCurveOpt": "Simple", "SSHysType": "Kinematic"}
+        "Fu": (fu := max(mat.fy * 1.5, mat.fy + 100.0)),
+        "EffFy": 1.1 * mat.fy, "EffFu": 1.1 * fu,
+        "SSCurveOpt": "Simple", "SSHysType": "Kinematic",
+        "SHard": 0.01875, "SMax": 0.125, "SRup": 0.23,
+        "FinalSlope": -0.1, "CoupModType": "Von Mises"}
         for mat in model.materials.values()])
 
     # section properties (Iz -> I33, Iy -> I22).  'General' shape -> SAP uses
