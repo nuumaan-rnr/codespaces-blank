@@ -506,6 +506,108 @@ _TABLE_TITLE = {
         "Case - Static 1 - Load Assignments",
 }
 
+# Exact SAP2000 table schemas (header row + units row), taken verbatim from a
+# real SAP2000 database Excel export.  The exporter writes every table on this
+# schema and places each value by COLUMN NAME, so a value never lands in the
+# wrong column regardless of whether SAP reads by name or position.
+_SCHEMA = {
+    "Program Control": (
+        ["ProgramName", "Version", "ProgLevel", "LicenseNum", "LicenseOS",
+         "LicenseSC", "LicenseHT", "CurrUnits", "SteelCode", "ConcCode",
+         "AlumCode", "ColdCode", "ConcSCode", "RegenHinge"],
+        ["Text", "Text", "Text", "Text", "Yes/No", "Yes/No", "Yes/No", "Text",
+         "Text", "Text", "Text", "Text", "Text", "Yes/No"]),
+    "Joint Coordinates": (
+        ["Joint", "CoordSys", "CoordType", "XorR", "Y", "Z", "SpecialJt",
+         "GlobalX", "GlobalY", "GlobalZ", "GUID"],
+        ["Text", "Text", "Text", "mm", "mm", "mm", "Yes/No", "mm", "mm", "mm",
+         "Text"]),
+    "MatProp 01 - General": (
+        ["Material", "Type", "Grade", "SymType", "TempDepend", "Color",
+         "GUID", "Notes"],
+        ["Text", "Text", "Text", "Text", "Yes/No", "Text", "Text", "Text"]),
+    "MatProp 02 - Basic Mech Props": (
+        ["Material", "UnitWeight", "UnitMass", "E1", "G12", "U12", "A1"],
+        ["Text", "N/mm3", "N-s2/mm4", "N/mm2", "N/mm2", "Unitless", "1/C"]),
+    "MatProp 03a - Steel Data": (
+        ["Material", "Fy", "Fu", "EffFy", "EffFu", "SSCurveOpt", "SSHysType",
+         "SHard", "SMax", "SRup", "FinalSlope", "CoupModType"],
+        ["Text", "N/mm2", "N/mm2", "N/mm2", "N/mm2", "Text", "Text",
+         "Unitless", "Unitless", "Unitless", "Unitless", "Text"]),
+    "Frame Props 01 - General": (
+        ["SectionName", "Material", "Shape", "t3", "t2", "tf", "tw",
+         "FilletRadius", "Area", "TorsConst", "I33", "I22", "I23", "AS2",
+         "AS3", "S33Top", "S33Bot", "S22Left", "S22Right", "Z33", "Z22",
+         "R33", "R22", "CGOffset3", "CGOffset2", "EccV2", "EccV3", "Cw",
+         "IncludeSCAn", "ConcCol", "ConcBeam", "Color", "TotalWt", "TotalMass",
+         "FromFile", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod",
+         "MMod", "WMod", "GUID", "Notes"],
+        ["Text", "Text", "Text", "mm", "mm", "mm", "mm", "mm", "mm2", "mm4",
+         "mm4", "mm4", "mm4", "mm2", "mm2", "mm3", "mm3", "mm3", "mm3", "mm3",
+         "mm3", "mm", "mm", "mm", "mm", "mm", "mm", "mm6", "Yes/No", "Yes/No",
+         "Yes/No", "Text", "N", "N-s2/mm", "Yes/No", "Unitless", "Unitless",
+         "Unitless", "Unitless", "Unitless", "Unitless", "Unitless",
+         "Unitless", "Text", "Text"]),
+    "Connectivity - Frame": (
+        ["Frame", "JointI", "JointJ", "IsCurved", "Length", "CentroidX",
+         "CentroidY", "CentroidZ", "GUID"],
+        ["Text", "Text", "Text", "Yes/No", "mm", "mm", "mm", "mm", "Text"]),
+    "Frame Section Assignments": (
+        ["Frame", "SectionType", "AutoSelect", "AnalSect", "DesignSect",
+         "MatProp"],
+        ["Text", "Text", "Text", "Text", "Text", "Text"]),
+    "Frame Property Modifiers": (
+        ["Frame", "AMod", "AS2Mod", "AS3Mod", "JMod", "I22Mod", "I33Mod",
+         "MassMod", "WeightMod", "EAModifier", "EIModifier"],
+        ["Text"] + ["Unitless"] * 10),
+    "Frame Releases 1 - General": (
+        ["Frame", "PI", "V2I", "V3I", "TI", "M2I", "M3I", "PJ", "V2J", "V3J",
+         "TJ", "M2J", "M3J", "PartialFix"],
+        ["Text"] + ["Yes/No"] * 13),
+    "Frame Releases 2 - Part Fixity": (
+        ["Frame", "PI", "V2I", "V3I", "TI", "M2I", "M3I", "PJ", "V2J", "V3J",
+         "TJ", "M2J", "M3J"],
+        ["Text", "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad", "N-mm/rad",
+         "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad", "N-mm/rad"]),
+    "Frame Local Axes 1 - Typical": (
+        ["Frame", "Angle", "AdvanceAxes"], ["Text", "Degrees", "Yes/No"]),
+    "Joint Restraint Assignments": (
+        ["Joint", "U1", "U2", "U3", "R1", "R2", "R3"],
+        ["Text"] + ["Yes/No"] * 6),
+    "Jt Spring Assigns 1 - Uncoupled": (
+        ["Joint", "CoordSys", "U1", "U2", "U3", "R1", "R2", "R3"],
+        ["Text", "Text", "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad",
+         "N-mm/rad"]),
+    "Load Pattern Definitions": (
+        ["LoadPat", "DesignType", "SelfWtMult", "AutoLoad", "GUID", "Notes"],
+        ["Text", "Text", "Unitless", "Text", "Text", "Text"]),
+    "Load Case Definitions": (
+        ["Case", "Type", "InitialCond", "ModalCase", "BaseCase", "MassSource",
+         "DesTypeOpt", "DesignType", "DesActOpt", "DesignAct", "AutoType",
+         "RunCase", "CaseStatus", "GUID", "Notes"],
+        ["Text", "Text", "Text", "Text", "Text", "Text", "Text", "Text",
+         "Text", "Text", "Text", "Yes/No", "Text", "Text", "Text"]),
+    "Case - Static 1 - Load Assigns": (
+        ["Case", "LoadType", "LoadName", "LoadSF"],
+        ["Text", "Text", "Text", "Unitless"]),
+    "Joint Loads - Force": (
+        ["Joint", "LoadPat", "CoordSys", "F1", "F2", "F3", "M1", "M2", "M3",
+         "GUID"],
+        ["Text", "Text", "Text", "N", "N", "N", "N-mm", "N-mm", "N-mm",
+         "Text"]),
+    "Frame Loads - Distributed": (
+        ["Frame", "LoadPat", "CoordSys", "Type", "Dir", "DistType", "RelDistA",
+         "RelDistB", "AbsDistA", "AbsDistB", "FOverLA", "FOverLB", "GUID"],
+        ["Text", "Text", "Text", "Text", "Text", "Text", "Unitless",
+         "Unitless", "mm", "mm", "N/mm", "N/mm", "Text"]),
+    "Combination Definitions": (
+        ["ComboName", "ComboType", "AutoDesign", "CaseType", "CaseName",
+         "ScaleFactor", "SteelDesign", "ConcDesign", "AlumDesign",
+         "ColdDesign", "GUID", "Notes"],
+        ["Text", "Text", "Yes/No", "Text", "Text", "Unitless", "Text", "Text",
+         "Text", "Text", "Text", "Text"]),
+}
+
 
 def _is_axis_swapped(model: RackModel, m) -> bool:
     """True when the member's vecxz swaps the two transverse axes relative to
@@ -537,102 +639,88 @@ def to_sap2000(model: RackModel, path: str,
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
-    def sheet(name, header, units, rows):
-        # sheet name is limited to 31 chars; the row-1 TABLE title must be the
-        # FULL SAP table name so the importer recognises the table
+    def emit(name, row_dicts):
+        # every table uses SAP's exact schema; values are placed by column
+        # name, blanks for anything the app does not carry.  Sheet name is
+        # <=31 chars; row-1 TABLE title is the full SAP name.
+        header, units = _SCHEMA[name]
         ws = wb.create_sheet(name[:31])
         full = _TABLE_TITLE.get(name, name)
         ws.append([f"TABLE:  {full}"] + [None] * (len(header) - 1))
-        ws.append(header)
-        ws.append(units)
-        for r in rows:
-            ws.append(r)
+        ws.append(list(header))
+        ws.append(list(units))
+        for d in row_dicts:
+            ws.append([d.get(h, "") for h in header])
 
-    # Program Control - replicate SAP's own 14-column table verbatim so the
-    # importer recognises the version (a short table is read as "Version 0"
-    # and the import is aborted).
-    sheet("Program Control",
-          ["ProgramName", "Version", "ProgLevel", "LicenseNum", "LicenseOS",
-           "LicenseSC", "LicenseHT", "CurrUnits", "SteelCode", "ConcCode",
-           "AlumCode", "ColdCode", "ConcSCode", "RegenHinge"],
-          ["Text", "Text", "Text", "Text", "Yes/No", "Yes/No", "Yes/No",
-           "Text", "Text", "Text", "Text", "Text", "Text", "Yes/No"],
-          [["SAP2000", "26.0.0", "Ultimate", "", "Yes", "Yes", "No",
-            "N, mm, C", "AISC 360-10", "ACI 318-14", "AA 2015", "AISI-ASD96",
-            "Eurocode 2-2004", "Yes"]])
+    emit("Program Control", [{
+        "ProgramName": "SAP2000", "Version": "26.0.0", "ProgLevel": "Ultimate",
+        "LicenseOS": "Yes", "LicenseSC": "Yes", "LicenseHT": "No",
+        "CurrUnits": "N, mm, C", "SteelCode": "AISC 360-10",
+        "ConcCode": "ACI 318-14", "AlumCode": "AA 2015",
+        "ColdCode": "AISI-ASD96", "ConcSCode": "Eurocode 2-2004",
+        "RegenHinge": "Yes"}])
 
     # joints
-    jr = [[str(nid), "GLOBAL", "Cartesian", n.x, n.y, n.z, "No",
-           n.x, n.y, n.z] for nid, n in sorted(model.nodes.items())]
-    sheet("Joint Coordinates",
-          ["Joint", "CoordSys", "CoordType", "XorR", "Y", "Z", "SpecialJt",
-           "GlobalX", "GlobalY", "GlobalZ"],
-          ["Text", "Text", "Text", "mm", "mm", "mm", "Yes/No", "mm", "mm",
-           "mm"], jr)
+    emit("Joint Coordinates", [{
+        "Joint": str(nid), "CoordSys": "GLOBAL", "CoordType": "Cartesian",
+        "XorR": n.x, "Y": n.y, "Z": n.z, "SpecialJt": "No",
+        "GlobalX": n.x, "GlobalY": n.y, "GlobalZ": n.z}
+        for nid, n in sorted(model.nodes.items())])
 
     # materials
-    mg, mm2, m3a = [], [], []
-    for mat in model.materials.values():
-        mg.append([mat.name, "Steel", mat.name, "Isotropic", "No"])
-        mm2.append([mat.name, 7.698e-5, 7.849e-9, mat.E, mat.G, mat.nu,
-                    1.17e-5])
-        m3a.append([mat.name, mat.fy, max(mat.fy * 1.5, mat.fy + 100.0)])
-    sheet("MatProp 01 - General",
-          ["Material", "Type", "Grade", "SymType", "TempDepend"],
-          ["Text", "Text", "Text", "Text", "Yes/No"], mg)
-    sheet("MatProp 02 - Basic Mech Props",
-          ["Material", "UnitWeight", "UnitMass", "E1", "G12", "U12", "A1"],
-          ["Text", "N/mm3", "N-s2/mm4", "N/mm2", "N/mm2", "Unitless", "1/C"],
-          mm2)
-    sheet("MatProp 03a - Steel Data", ["Material", "Fy", "Fu"],
-          ["Text", "N/mm2", "N/mm2"], m3a)
+    emit("MatProp 01 - General", [{
+        "Material": mat.name, "Type": "Steel", "Grade": mat.name,
+        "SymType": "Isotropic", "TempDepend": "No"}
+        for mat in model.materials.values()])
+    emit("MatProp 02 - Basic Mech Props", [{
+        "Material": mat.name, "UnitWeight": 7.698e-5, "UnitMass": 7.849e-9,
+        "E1": mat.E, "G12": mat.G, "U12": mat.nu, "A1": 1.17e-5}
+        for mat in model.materials.values()])
+    emit("MatProp 03a - Steel Data", [{
+        "Material": mat.name, "Fy": mat.fy,
+        "Fu": max(mat.fy * 1.5, mat.fy + 100.0),
+        "SSCurveOpt": "Simple", "SSHysType": "Kinematic"}
+        for mat in model.materials.values()])
 
-    # section properties (Iz -> I33, Iy -> I22)
-    pr = []
-    for s in model.sections.values():
-        as2 = as3 = ""                        # shear areas if the app has them
-        for a in ("Az", "shear_z", "Avz"):
-            if getattr(s, a, None):
-                as2 = getattr(s, a)
-        for a in ("Ay", "shear_y", "Avy"):
-            if getattr(s, a, None):
-                as3 = getattr(s, a)
-        # SAP 'General' section -> SAP uses these exact A / I33 / I22 / J (the
-        # app's EN 15512 properties) instead of recomputing from a nominal shape
-        pr.append([s.name, s.material, "General", s.depth_h or 0,
-                   s.width_b or 0, s.A, s.J, s.Iz, s.Iy, as2 or s.A,
-                   as3 or s.A, s.Welz, s.Wely])
-    sheet("Frame Props 01 - General",
-          ["SectionName", "Material", "Shape", "t3", "t2", "Area",
-           "TorsConst", "I33", "I22", "AS2", "AS3", "S33", "S22"],
-          ["Text", "Text", "Text", "mm", "mm", "mm2", "mm4", "mm4", "mm4",
-           "mm2", "mm2", "mm3", "mm3"], pr)
+    # section properties (Iz -> I33, Iy -> I22).  'General' shape -> SAP uses
+    # these exact A / I33 / I22 / J instead of recomputing from a nominal shape
+    def _shear(s, *names):
+        for a in names:
+            v = getattr(s, a, None)
+            if v:
+                return v
+        return None
+    emit("Frame Props 01 - General", [{
+        "SectionName": s.name, "Material": s.material, "Shape": "General",
+        "t3": s.depth_h or 0, "t2": s.width_b or 0,
+        "Area": s.A, "TorsConst": s.J, "I33": s.Iz, "I22": s.Iy, "I23": 0,
+        "AS2": _shear(s, "Az", "shear_z", "Avz") or s.A,
+        "AS3": _shear(s, "Ay", "shear_y", "Avy") or s.A,
+        "S33Top": s.Welz, "S33Bot": s.Welz, "S22Left": s.Wely,
+        "S22Right": s.Wely, "IncludeSCAn": "No", "ConcCol": "No",
+        "ConcBeam": "No", "FromFile": "No", "AMod": 1, "A2Mod": 1, "A3Mod": 1,
+        "JMod": 1, "I2Mod": 1, "I3Mod": 1, "MMod": 1, "WMod": 1}
+        for s in model.sections.values()])
 
-    # frames + assignments
+    # frames + assignments + local-axis rotation
     cf, fa, fmod, la = [], [], [], []
     for mid, m in sorted(model.members.items()):
-        cf.append([str(mid), str(m.node_i), str(m.node_j), "No",
-                   round(model.member_length(m), 3)])
-        fa.append([str(mid), "General", "N.A.", m.section, m.section,
-                   "Default"])
-        fmod.append([str(mid), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
-        # preserve orientation: a member whose vecxz swaps the transverse axes
-        # (rack-upright rotation) exports as a 90 deg SAP local-axis angle
+        cf.append({"Frame": str(mid), "JointI": str(m.node_i),
+                   "JointJ": str(m.node_j), "IsCurved": "No",
+                   "Length": round(model.member_length(m), 3)})
+        fa.append({"Frame": str(mid), "SectionType": "General",
+                   "AutoSelect": "N.A.", "AnalSect": m.section,
+                   "DesignSect": m.section, "MatProp": "Default"})
+        fmod.append({"Frame": str(mid), "AMod": 1, "AS2Mod": 1, "AS3Mod": 1,
+                     "JMod": 1, "I22Mod": 1, "I33Mod": 1, "MassMod": 1,
+                     "WeightMod": 1, "EAModifier": 1, "EIModifier": 1})
         if _is_axis_swapped(model, m):
-            la.append([str(mid), 90, "No"])
-    sheet("Connectivity - Frame",
-          ["Frame", "JointI", "JointJ", "IsCurved", "Length"],
-          ["Text", "Text", "Text", "Yes/No", "mm"], cf)
-    sheet("Frame Section Assignments",
-          ["Frame", "SectionType", "AutoSelect", "AnalSect", "DesignSect",
-           "MatProp"], ["Text", "Text", "Text", "Text", "Text", "Text"], fa)
-    sheet("Frame Property Modifiers",
-          ["Frame", "AMod", "AS2Mod", "AS3Mod", "JMod", "I22Mod", "I33Mod",
-           "MassMod", "WeightMod", "EAModifier", "EIModifier"],
-          ["Text"] + ["Unitless"] * 10, fmod)
-    if la:                                     # only members with a rotation
-        sheet("Frame Local Axes 1 - Typical", ["Frame", "Angle",
-              "AdvanceAxes"], ["Text", "Degrees", "Yes/No"], la)
+            la.append({"Frame": str(mid), "Angle": 90, "AdvanceAxes": "No"})
+    emit("Connectivity - Frame", cf)
+    emit("Frame Section Assignments", fa)
+    emit("Frame Property Modifiers", fmod)
+    if la:
+        emit("Frame Local Axes 1 - Typical", la)
 
     # releases (rz -> M3, ry -> M2, rx -> T); spring -> partial fixity
     rel1, rel2 = [], []
@@ -644,60 +732,53 @@ def to_sap2000(model: RackModel, path: str,
         if not hi and not hj and m.mtype != "truss":
             continue
         if m.mtype == "truss":                 # pin both ends (axial only)
-            rel1.append([str(mid), "No", "No", "No", "No", "Yes", "Yes",
-                         "No", "No", "No", "No", "Yes", "Yes", "No"])
+            rel1.append({"Frame": str(mid), "PI": "No", "V2I": "No",
+                         "V3I": "No", "TI": "No", "M2I": "Yes", "M3I": "Yes",
+                         "PJ": "No", "V2J": "No", "V3J": "No", "TJ": "No",
+                         "M2J": "Yes", "M3J": "Yes", "PartialFix": "No"})
             continue
-        row = [str(mid),
-               "No", "No", "No", _flag(getattr(hi, "rx", None)),
-               _flag(getattr(hi, "ry", None)), _flag(getattr(hi, "rz", None)),
-               "No", "No", "No", _flag(getattr(hj, "rx", None)),
-               _flag(getattr(hj, "ry", None)), _flag(getattr(hj, "rz", None))]
-        pf = any(isinstance(getattr(h, a, None), float)
-                 and getattr(h, a) > 0
+        pf = any(isinstance(getattr(h, a, None), float) and getattr(h, a) > 0
                  for h in (hi, hj) for a in ("rx", "ry", "rz"))
-        row.append("Yes" if pf else "No")
-        rel1.append(row)
+        rel1.append({
+            "Frame": str(mid), "PI": "No", "V2I": "No", "V3I": "No",
+            "TI": _flag(getattr(hi, "rx", None)),
+            "M2I": _flag(getattr(hi, "ry", None)),
+            "M3I": _flag(getattr(hi, "rz", None)),
+            "PJ": "No", "V2J": "No", "V3J": "No",
+            "TJ": _flag(getattr(hj, "rx", None)),
+            "M2J": _flag(getattr(hj, "ry", None)),
+            "M3J": _flag(getattr(hj, "rz", None)),
+            "PartialFix": "Yes" if pf else "No"})
         if pf:
             def _spr(h, a):
                 v = getattr(h, a, None) if h else None
-                return v if isinstance(v, float) and v > 0 else None
-            rel2.append([str(mid), None, None, None, _spr(hi, "rx"),
-                         _spr(hi, "ry"), _spr(hi, "rz"), None, None, None,
-                         _spr(hj, "rx"), _spr(hj, "ry"), _spr(hj, "rz")])
-    sheet("Frame Releases 1 - General",
-          ["Frame", "PI", "V2I", "V3I", "TI", "M2I", "M3I", "PJ", "V2J",
-           "V3J", "TJ", "M2J", "M3J", "PartialFix"],
-          ["Text"] + ["Yes/No"] * 13, rel1)
-    sheet("Frame Releases 2 - Part Fixity",
-          ["Frame", "PI", "V2I", "V3I", "TI", "M2I", "M3I", "PJ", "V2J",
-           "V3J", "TJ", "M2J", "M3J"],
-          ["Text", "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad",
-           "N-mm/rad", "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad",
-           "N-mm/rad"], rel2)
+                return v if isinstance(v, float) and v > 0 else ""
+            rel2.append({
+                "Frame": str(mid), "TI": _spr(hi, "rx"), "M2I": _spr(hi, "ry"),
+                "M3I": _spr(hi, "rz"), "TJ": _spr(hj, "rx"),
+                "M2J": _spr(hj, "ry"), "M3J": _spr(hj, "rz")})
+    emit("Frame Releases 1 - General", rel1)
+    emit("Frame Releases 2 - Part Fixity", rel2)
 
     # restraints (fixed DOFs) + Jt Spring Assigns (semi-rigid base springs)
     def _yn(d):
         return "Yes" if d is True else "No"
     rr, jspr = [], []
     for s in model.supports:
-        rr.append([str(s.node), _yn(s.ux), _yn(s.uy), _yn(s.uz),
-                   _yn(s.rx), _yn(s.ry), _yn(s.rz)])
+        rr.append({"Joint": str(s.node), "U1": _yn(s.ux), "U2": _yn(s.uy),
+                   "U3": _yn(s.uz), "R1": _yn(s.rx), "R2": _yn(s.ry),
+                   "R3": _yn(s.rz)})
 
         def sv(d):
             return d if isinstance(d, float) and d > 0 else 0
-
         if any(isinstance(getattr(s, a), float)
                for a in ("ux", "uy", "uz", "rx", "ry", "rz")):
-            jspr.append([str(s.node), "Local", sv(s.ux), sv(s.uy), sv(s.uz),
-                         sv(s.rx), sv(s.ry), sv(s.rz)])
-    sheet("Joint Restraint Assignments",
-          ["Joint", "U1", "U2", "U3", "R1", "R2", "R3"],
-          ["Text"] + ["Yes/No"] * 6, rr)
+            jspr.append({"Joint": str(s.node), "CoordSys": "Local",
+                         "U1": sv(s.ux), "U2": sv(s.uy), "U3": sv(s.uz),
+                         "R1": sv(s.rx), "R2": sv(s.ry), "R3": sv(s.rz)})
+    emit("Joint Restraint Assignments", rr)
     if jspr:
-        sheet("Jt Spring Assigns 1 - Uncoupled",
-              ["Joint", "CoordSys", "U1", "U2", "U3", "R1", "R2", "R3"],
-              ["Text", "Text", "N/mm", "N/mm", "N/mm", "N-mm/rad", "N-mm/rad",
-               "N-mm/rad"], jspr)
+        emit("Jt Spring Assigns 1 - Uncoupled", jspr)
 
     # ---- sway imperfection as EHF notional load patterns -------------------
     # this app applies the EN 15512 sway as equivalent horizontal forces
@@ -713,7 +794,7 @@ def to_sap2000(model: RackModel, path: str,
             phi = imp.value()
         except Exception:
             phi = 0.0
-    imp_patterns: Dict[str, List[list]] = {}   # pattern name -> joint-load rows
+    imp_patterns: Dict[str, List[dict]] = {}   # pattern name -> joint-load rows
     expanded: List[Tuple[str, Dict[str, float], Optional[str]]] = []
     for c in model.combinations:
         dirs = [None]
@@ -737,63 +818,49 @@ def to_sap2000(model: RackModel, path: str,
                         acc[mm.node_i] = acc.get(mm.node_i, 0.0) + h
                         acc[mm.node_j] = acc.get(mm.node_j, 0.0) + h
                 imp_patterns[pat] = [
-                    [str(n), pat, "GLOBAL", round(dx * v, 4), round(dy * v, 4),
-                     0, 0, 0, 0] for n, v in acc.items() if abs(v) > 1e-9]
+                    {"Joint": str(n), "LoadPat": pat, "CoordSys": "GLOBAL",
+                     "F1": round(dx * v, 4), "F2": round(dy * v, 4)}
+                    for n, v in acc.items() if abs(v) > 1e-9]
             expanded.append((c.name if not d else f"{c.name}_{d}".replace(
                 "@", "_"), dict(c.factors), pat))
 
     # load patterns / cases (gravity + the imperfection patterns)
-    lp, lcd = [], []
-    for name in list(model.load_cases) + list(imp_patterns):
-        swm = 1 if str(name).lower() == "dead" and False else 0
-        dtype = "Other" if name in imp_patterns else (
-            "Dead" if str(name).lower().startswith("dead") else "Live")
-        lp.append([name, dtype, swm, ""])
-        lcd.append([name, "LinStatic", "Zero", "Yes"])
-    sheet("Load Pattern Definitions",
-          ["LoadPat", "DesignType", "SelfWtMult", "AutoLoad"],
-          ["Text", "Text", "Unitless", "Text"], lp)
-    sheet("Load Case Definitions",
-          ["Case", "Type", "InitialCond", "RunCase"],
-          ["Text", "Text", "Text", "Yes/No"], lcd)
+    names = list(model.load_cases) + list(imp_patterns)
+    emit("Load Pattern Definitions", [{
+        "LoadPat": name,
+        "DesignType": "Other" if name in imp_patterns else (
+            "Dead" if str(name).lower().startswith("dead") else "Live"),
+        "SelfWtMult": 0, "AutoLoad": ""} for name in names])
+    emit("Load Case Definitions", [{
+        "Case": name, "Type": "LinStatic", "InitialCond": "Zero",
+        "DesTypeOpt": "Prog Det", "DesActOpt": "Prog Det", "AutoType": "None",
+        "RunCase": "Yes"} for name in names])
     # a LinStatic case only carries load once it is told which pattern to apply
     # (without this table the cases run with zero load -> "loads not assigned")
-    lassign = [[name, "Load pattern", name, 1, "", ""]
-               for name in list(model.load_cases) + list(imp_patterns)]
-    sheet("Case - Static 1 - Load Assigns",
-          ["Case", "LoadType", "LoadName", "LoadSF", "TransAccSF", "RotAccSF"],
-          ["Text", "Text", "Text", "Unitless", "mm/sec2", "rad/sec2"],
-          lassign)
+    emit("Case - Static 1 - Load Assigns", [{
+        "Case": name, "LoadType": "Load pattern", "LoadName": name,
+        "LoadSF": 1} for name in names])
 
-    # loads (gravity load cases + the imperfection joint loads).  The column
-    # layout must match SAP exactly - the Frame-Loads table has AbsDistA/
-    # AbsDistB between RelDistB and FOverLA; omitting them shifts the load
-    # magnitude into the wrong column and SAP applies zero load.
+    # loads (gravity load cases + the imperfection joint loads)
     jf, fd = [], []
     for name, lc in model.load_cases.items():
         for nl in lc.nodal_loads:
-            jf.append([str(nl.node), name, "GLOBAL", nl.fx, nl.fy, nl.fz,
-                       nl.mx, nl.my, nl.mz, ""])
+            jf.append({"Joint": str(nl.node), "LoadPat": name,
+                       "CoordSys": "GLOBAL", "F1": nl.fx, "F2": nl.fy,
+                       "F3": nl.fz, "M1": nl.mx, "M2": nl.my, "M3": nl.mz})
         for ml in lc.member_loads:
             if abs(ml.qz) < 1e-12:
                 continue
             L = model.member_length(model.members[ml.member])
-            fd.append([str(ml.member), name, "GLOBAL", "Force", "Gravity",
-                       "RelDist", 0, 1, 0, round(L, 3),
-                       abs(ml.qz), abs(ml.qz), ""])
+            fd.append({"Frame": str(ml.member), "LoadPat": name,
+                       "CoordSys": "GLOBAL", "Type": "Force", "Dir": "Gravity",
+                       "DistType": "RelDist", "RelDistA": 0, "RelDistB": 1,
+                       "AbsDistA": 0, "AbsDistB": round(L, 3),
+                       "FOverLA": abs(ml.qz), "FOverLB": abs(ml.qz)})
     for rows_ in imp_patterns.values():
-        jf.extend([r + [""] for r in rows_])
-    sheet("Joint Loads - Force",
-          ["Joint", "LoadPat", "CoordSys", "F1", "F2", "F3", "M1", "M2",
-           "M3", "GUID"],
-          ["Text", "Text", "Text", "N", "N", "N", "N-mm", "N-mm", "N-mm",
-           "Text"], jf)
-    sheet("Frame Loads - Distributed",
-          ["Frame", "LoadPat", "CoordSys", "Type", "Dir", "DistType",
-           "RelDistA", "RelDistB", "AbsDistA", "AbsDistB", "FOverLA",
-           "FOverLB", "GUID"],
-          ["Text", "Text", "Text", "Text", "Text", "Text", "Unitless",
-           "Unitless", "mm", "mm", "N/mm", "N/mm", "Text"], fd)
+        jf.extend(rows_)
+    emit("Joint Loads - Force", jf)
+    emit("Frame Loads - Distributed", fd)
 
     # combinations (expanded per imperfection direction, each adding its IMP
     # pattern at factor 1 - the EHF magnitude already carries the phi*gravity)
@@ -801,15 +868,16 @@ def to_sap2000(model: RackModel, path: str,
     for cname, factors, pat in expanded:
         first = True
         for case, sf in factors.items():
-            cd.append([cname, "Linear Add" if first else "", "No",
-                       "Linear Static", case, sf])
+            cd.append({"ComboName": cname,
+                       "ComboType": "Linear Add" if first else "",
+                       "AutoDesign": "No", "CaseType": "Linear Static",
+                       "CaseName": case, "ScaleFactor": sf})
             first = False
         if pat:
-            cd.append([cname, "", "No", "Linear Static", pat, 1.0])
-    sheet("Combination Definitions",
-          ["ComboName", "ComboType", "AutoDesign", "CaseType", "CaseName",
-           "ScaleFactor"],
-          ["Text", "Text", "Yes/No", "Text", "Text", "Unitless"], cd)
+            cd.append({"ComboName": cname, "AutoDesign": "No",
+                       "CaseType": "Linear Static", "CaseName": pat,
+                       "ScaleFactor": 1.0})
+    emit("Combination Definitions", cd)
 
     wb.save(path)
     return path
