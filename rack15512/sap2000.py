@@ -504,6 +504,7 @@ _TABLE_TITLE = {
     "MatProp 03a - Steel Data": "Material Properties 03a - Steel Data",
     "Case - Static 1 - Load Assigns":
         "Case - Static 1 - Load Assignments",
+    "Case - Buckling 2 - Loads": "Case - Buckling 2 - Load Assignments",
 }
 
 # Exact SAP2000 table schemas (header row + units row), taken verbatim from a
@@ -588,6 +589,12 @@ _SCHEMA = {
         ["Text", "Text", "Text", "Text", "Text", "Text", "Text", "Text",
          "Text", "Text", "Text", "Yes/No", "Text", "Text", "Text"]),
     "Case - Static 1 - Load Assigns": (
+        ["Case", "LoadType", "LoadName", "LoadSF"],
+        ["Text", "Text", "Text", "Unitless"]),
+    "Case - Buckling 1 - General": (
+        ["Case", "NumBuckMode", "EigenTol"],
+        ["Text", "Unitless", "Unitless"]),
+    "Case - Buckling 2 - Loads": (
         ["Case", "LoadType", "LoadName", "LoadSF"],
         ["Text", "Text", "Text", "Unitless"]),
     "Joint Loads - Force": (
@@ -883,6 +890,22 @@ def to_sap2000(model: RackModel, path: str,
     emit("Case - Static 1 - Load Assigns", [{
         "Case": name, "LoadType": "Load pattern", "LoadName": name,
         "LoadSF": 1} for name in names])
+
+    # linear BUCKLING case on the first ULS combination's factored gravity
+    # loads: SAP's mode-1 Buckling Factor is then the elastic critical load
+    # factor alpha_cr of that combination (comparable to this app's ALPHA_CR)
+    uls0 = next((c for c in model.combinations if c.kind == "ULS"), None)
+    if uls0 is not None:
+        ws_lcd = wb["Load Case Definitions"[:31]]
+        ws_lcd.append(["BUCKLING", "LinBuckling", "Zero", "", "", "",
+                       "Prog Det", "Other", "Prog Det", "Non-Composite",
+                       "None", "Yes", "Not Run", "", ""])
+        emit("Case - Buckling 1 - General", [{
+            "Case": "BUCKLING", "NumBuckMode": 6, "EigenTol": 1e-9}])
+        emit("Case - Buckling 2 - Loads", [{
+            "Case": "BUCKLING", "LoadType": "Load pattern",
+            "LoadName": case, "LoadSF": sf}
+            for case, sf in uls0.factors.items()])
 
     # loads (gravity load cases + the imperfection joint loads)
     jf, fd = [], []

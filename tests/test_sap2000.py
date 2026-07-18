@@ -295,6 +295,12 @@ def test_sap_export_base_springs_and_imperfection(tmp_path):
 
     m2 = load_sap2000([out])
     assert m2.supports[0].ry == 5.0e7                     # base spring survives
+    # a linear BUCKLING case on the first ULS combo's factored loads
+    wb2 = openpyxl.load_workbook(out, read_only=True)
+    assert "Case - Buckling 1 - General" in wb2.sheetnames
+    rows = list(wb2["Case - Buckling 2 - Loads"].iter_rows(values_only=True))
+    assert rows[0][0] == "TABLE:  Case - Buckling 2 - Load Assignments"
+    assert any(r[0] == "BUCKLING" for r in rows[3:])
 
 
 def test_sap_export_preserves_local_axis(tmp_path):
