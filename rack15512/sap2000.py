@@ -502,6 +502,8 @@ _TABLE_TITLE = {
     "MatProp 02 - Basic Mech Props":
         "Material Properties 02 - Basic Mechanical Properties",
     "MatProp 03a - Steel Data": "Material Properties 03a - Steel Data",
+    "Case - Static 1 - Load Assigns":
+        "Case - Static 1 - Load Assignments",
 }
 
 
@@ -754,29 +756,44 @@ def to_sap2000(model: RackModel, path: str,
     sheet("Load Case Definitions",
           ["Case", "Type", "InitialCond", "RunCase"],
           ["Text", "Text", "Text", "Yes/No"], lcd)
+    # a LinStatic case only carries load once it is told which pattern to apply
+    # (without this table the cases run with zero load -> "loads not assigned")
+    lassign = [[name, "Load pattern", name, 1, "", ""]
+               for name in list(model.load_cases) + list(imp_patterns)]
+    sheet("Case - Static 1 - Load Assigns",
+          ["Case", "LoadType", "LoadName", "LoadSF", "TransAccSF", "RotAccSF"],
+          ["Text", "Text", "Text", "Unitless", "mm/sec2", "rad/sec2"],
+          lassign)
 
-    # loads (gravity load cases + the imperfection joint loads)
+    # loads (gravity load cases + the imperfection joint loads).  The column
+    # layout must match SAP exactly - the Frame-Loads table has AbsDistA/
+    # AbsDistB between RelDistB and FOverLA; omitting them shifts the load
+    # magnitude into the wrong column and SAP applies zero load.
     jf, fd = [], []
     for name, lc in model.load_cases.items():
         for nl in lc.nodal_loads:
             jf.append([str(nl.node), name, "GLOBAL", nl.fx, nl.fy, nl.fz,
-                       nl.mx, nl.my, nl.mz])
+                       nl.mx, nl.my, nl.mz, ""])
         for ml in lc.member_loads:
             if abs(ml.qz) < 1e-12:
                 continue
+            L = model.member_length(model.members[ml.member])
             fd.append([str(ml.member), name, "GLOBAL", "Force", "Gravity",
-                       "RelDist", 0, 1, abs(ml.qz), abs(ml.qz)])
+                       "RelDist", 0, 1, 0, round(L, 3),
+                       abs(ml.qz), abs(ml.qz), ""])
     for rows_ in imp_patterns.values():
-        jf.extend(rows_)
+        jf.extend([r + [""] for r in rows_])
     sheet("Joint Loads - Force",
           ["Joint", "LoadPat", "CoordSys", "F1", "F2", "F3", "M1", "M2",
-           "M3"], ["Text", "Text", "Text", "N", "N", "N", "N-mm", "N-mm",
-                   "N-mm"], jf)
+           "M3", "GUID"],
+          ["Text", "Text", "Text", "N", "N", "N", "N-mm", "N-mm", "N-mm",
+           "Text"], jf)
     sheet("Frame Loads - Distributed",
           ["Frame", "LoadPat", "CoordSys", "Type", "Dir", "DistType",
-           "RelDistA", "RelDistB", "FOverLA", "FOverLB"],
+           "RelDistA", "RelDistB", "AbsDistA", "AbsDistB", "FOverLA",
+           "FOverLB", "GUID"],
           ["Text", "Text", "Text", "Text", "Text", "Text", "Unitless",
-           "Unitless", "N/mm", "N/mm"], fd)
+           "Unitless", "mm", "mm", "N/mm", "N/mm", "Text"], fd)
 
     # combinations (expanded per imperfection direction, each adding its IMP
     # pattern at factor 1 - the EHF magnitude already carries the phi*gravity)
