@@ -683,24 +683,52 @@ def to_sap2000(model: RackModel, path: str,
         for mat in model.materials.values()])
 
     # section properties (Iz -> I33, Iy -> I22).  'General' shape -> SAP uses
-    # these exact A / I33 / I22 / J instead of recomputing from a nominal shape
+    # these exact A / I33 / I22 / J instead of recomputing from a nominal
+    # shape (CSI KB: "for general sections, resultant section properties are
+    # directly entered" in Frame Section Properties 01 - General).  SAP's
+    # General definition carries the COMPLETE property set, so every field it
+    # fills in its own export is filled here: plastic moduli (Z), radii of
+    # gyration (R = sqrt(I/A)), warping constant Cw, display colour and the
+    # per-section totals of weight and mass over the members using it.
     def _shear(s, *names):
         for a in names:
             v = getattr(s, a, None)
             if v:
                 return v
         return None
-    emit("Frame Props 01 - General", [{
-        "SectionName": s.name, "Material": s.material, "Shape": "General",
-        "t3": s.depth_h or 0, "t2": s.width_b or 0,
-        "Area": s.A, "TorsConst": s.J, "I33": s.Iz, "I22": s.Iy, "I23": 0,
-        "AS2": _shear(s, "Az", "shear_z", "Avz") or s.A,
-        "AS3": _shear(s, "Ay", "shear_y", "Avy") or s.A,
-        "S33Top": s.Welz, "S33Bot": s.Welz, "S22Left": s.Wely,
-        "S22Right": s.Wely, "IncludeSCAn": "No", "ConcCol": "No",
-        "ConcBeam": "No", "FromFile": "No", "AMod": 1, "A2Mod": 1, "A3Mod": 1,
-        "JMod": 1, "I2Mod": 1, "I3Mod": 1, "MMod": 1, "WMod": 1}
-        for s in model.sections.values()])
+    length_of = {}                             # section -> total member length
+    for m in model.members.values():
+        length_of[m.section] = (length_of.get(m.section, 0.0)
+                                + model.member_length(m))
+    _COLORS = ["Green", "Red", "Yellow", "Cyan", "Magenta", "Blue"]
+    GAMMA = 7.698e-5                           # steel unit weight [N/mm3]
+    pr = []
+    for i, s in enumerate(model.sections.values()):
+        t3 = s.depth_h or (2.0 * s.Iz / s.Welz if s.Welz else 100.0)
+        t2 = s.width_b or (2.0 * s.Iy / s.Wely if s.Wely else 50.0)
+        wt = s.A * GAMMA * length_of.get(s.name, 0.0)
+        pr.append({
+            "SectionName": s.name, "Material": s.material, "Shape": "General",
+            "t3": t3, "t2": t2, "tf": 0, "tw": 0, "FilletRadius": 0,
+            "Area": s.A, "TorsConst": s.J, "I33": s.Iz, "I22": s.Iy, "I23": 0,
+            "AS2": _shear(s, "Az", "shear_z", "Avz") or s.A,
+            "AS3": _shear(s, "Ay", "shear_y", "Avy") or s.A,
+            "S33Top": s.Welz, "S33Bot": s.Welz, "S22Left": s.Wely,
+            "S22Right": s.Wely,
+            # plastic moduli: tested/effective plastic values are not part of
+            # the EN 15512 data set; Z=Wel (elastic) is entered - analysis
+            # ignores Z and any SAP steel design would then be elastic-safe
+            "Z33": getattr(s, "Wplz", None) or s.Welz,
+            "Z22": getattr(s, "Wply", None) or s.Wely,
+            "R33": (s.Iz / s.A) ** 0.5, "R22": (s.Iy / s.A) ** 0.5,
+            "CGOffset3": 0, "CGOffset2": 0, "EccV2": 0, "EccV3": 0,
+            "Cw": getattr(s, "Iw_gross", None) or 0,
+            "IncludeSCAn": "No", "ConcCol": "No", "ConcBeam": "No",
+            "Color": _COLORS[i % len(_COLORS)],
+            "TotalWt": wt, "TotalMass": wt / 9810.0, "FromFile": "No",
+            "AMod": 1, "A2Mod": 1, "A3Mod": 1, "JMod": 1, "I2Mod": 1,
+            "I3Mod": 1, "MMod": 1, "WMod": 1})
+    emit("Frame Props 01 - General", pr)
 
     # frames + assignments + local-axis rotation
     cf, fa, fmod, la = [], [], [], []
