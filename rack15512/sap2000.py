@@ -670,7 +670,7 @@ def to_sap2000(model: RackModel, path: str,
     # materials
     emit("MatProp 01 - General", [{
         "Material": mat.name, "Type": "Steel", "Grade": mat.name,
-        "SymType": "Isotropic", "TempDepend": "No"}
+        "SymType": "Isotropic", "TempDepend": "No", "Color": "Yellow"}
         for mat in model.materials.values()])
     emit("MatProp 02 - Basic Mech Props", [{
         "Material": mat.name, "UnitWeight": 7.698e-5, "UnitMass": 7.849e-9,
@@ -740,9 +740,13 @@ def to_sap2000(model: RackModel, path: str,
     # frames + assignments + local-axis rotation
     cf, fa, fmod, la = [], [], [], []
     for mid, m in sorted(model.members.items()):
+        _a, _b = model.nodes[m.node_i], model.nodes[m.node_j]
         cf.append({"Frame": str(mid), "JointI": str(m.node_i),
                    "JointJ": str(m.node_j), "IsCurved": "No",
-                   "Length": round(model.member_length(m), 3)})
+                   "Length": round(model.member_length(m), 3),
+                   "CentroidX": round((_a.x + _b.x) / 2, 3),
+                   "CentroidY": round((_a.y + _b.y) / 2, 3),
+                   "CentroidZ": round((_a.z + _b.z) / 2, 3)})
         fa.append({"Frame": str(mid), "SectionType": "General",
                    "AutoSelect": "N.A.", "AnalSect": m.section,
                    "DesignSect": m.section, "MatProp": "Default"})
@@ -854,7 +858,8 @@ def to_sap2000(model: RackModel, path: str,
                         acc[mm.node_j] = acc.get(mm.node_j, 0.0) + h
                 imp_patterns[pat] = [
                     {"Joint": str(n), "LoadPat": pat, "CoordSys": "GLOBAL",
-                     "F1": round(dx * v, 4), "F2": round(dy * v, 4)}
+                     "F1": round(dx * v, 4), "F2": round(dy * v, 4),
+                     "F3": 0, "M1": 0, "M2": 0, "M3": 0}
                     for n, v in acc.items() if abs(v) > 1e-9]
             expanded.append((c.name if not d else f"{c.name}_{d}".replace(
                 "@", "_"), dict(c.factors), pat))
@@ -868,8 +873,11 @@ def to_sap2000(model: RackModel, path: str,
         "SelfWtMult": 0, "AutoLoad": ""} for name in names])
     emit("Load Case Definitions", [{
         "Case": name, "Type": "LinStatic", "InitialCond": "Zero",
-        "DesTypeOpt": "Prog Det", "DesActOpt": "Prog Det", "AutoType": "None",
-        "RunCase": "Yes"} for name in names])
+        "DesTypeOpt": "Prog Det",
+        "DesignType": "Dead" if str(name).lower().startswith("dead")
+        else "Live", "DesActOpt": "Prog Det", "DesignAct": "Non-Composite",
+        "AutoType": "None", "RunCase": "Yes", "CaseStatus": "Not Run"}
+        for name in names])
     # a LinStatic case only carries load once it is told which pattern to apply
     # (without this table the cases run with zero load -> "loads not assigned")
     emit("Case - Static 1 - Load Assigns", [{
@@ -903,10 +911,14 @@ def to_sap2000(model: RackModel, path: str,
     for cname, factors, pat in expanded:
         first = True
         for case, sf in factors.items():
-            cd.append({"ComboName": cname,
-                       "ComboType": "Linear Add" if first else "",
-                       "AutoDesign": "No", "CaseType": "Linear Static",
-                       "CaseName": case, "ScaleFactor": sf})
+            row = {"ComboName": cname,
+                   "ComboType": "Linear Add" if first else "",
+                   "AutoDesign": "No", "CaseType": "Linear Static",
+                   "CaseName": case, "ScaleFactor": sf}
+            if first:
+                row.update({"SteelDesign": "None", "ConcDesign": "None",
+                            "AlumDesign": "None", "ColdDesign": "None"})
+            cd.append(row)
             first = False
         if pat:
             cd.append({"ComboName": cname, "AutoDesign": "No",
