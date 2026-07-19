@@ -125,6 +125,19 @@ def parse_cf_code(name: str):
     return None
 
 
+# 2C back-to-back stitching convention (company standard, rarely welded):
+# stitches every 500 mm along the beam; at each stitch one vertical row of
+# bolts through the touching webs at 50 mm pitch, count set by the beam height
+STITCH_SPACING = 500.0     # [mm] along the member
+STITCH_PITCH = 50.0        # [mm] bolt pitch within the row
+STITCH_EDGE = 25.0         # [mm] end distance top/bottom of the web
+
+
+def stitch_bolt_count(h: float) -> int:
+    """Bolts per stitch row for a beam of web height h (>= 2)."""
+    return max(2, int((h - 2.0 * STITCH_EDGE) // STITCH_PITCH) + 1)
+
+
 def _round_corner_delta(h: float, b: float, c: float, r: float) -> float:
     """EN 1993-1-3 5.1(3): reduction delta = 0.43 * sum(r_j * phi_j/90) /
     sum(b_p) for round corners (4 x 90-deg corners of a lipped channel).
@@ -185,6 +198,24 @@ def coupled_channel(name: str, h: float, b: float, c: float, t: float,
         A, Iz, J = 2 * A, 2 * Iz, 2 * J
         Iy = 2 * (Iy + (n1 * one.A) * d2 ** 2)
         width *= 2
+    if boxed:
+        joint = "boxed toe-to-toe"
+    else:
+        # standard assembly: stitch-bolted through the touching webs every
+        # STITCH_SPACING, one vertical bolt row at STITCH_PITCH - the bolt
+        # count follows the beam height (rarely welded).  Major-axis Iz = 2x
+        # is exact regardless of stitching (equal parallel sections share the
+        # neutral axis); the parallel-axis Iy and minor-axis buckling rely on
+        # the stitches (EN 1993-1-1 6.4 built-up rules where slender).
+        nb = stitch_bolt_count(h)
+        i_min1 = math.sqrt(one.Iy / one.A)      # one channel, minor axis
+        note = (f"stitch-bolted @{STITCH_SPACING:g} mm, {nb} bolts/row "
+                f"@{STITCH_PITCH:g} mm pitch")
+        if STITCH_SPACING > 15.0 * i_min1:
+            note += (f"; spacing > 15 i_min ({15.0 * i_min1:.0f} mm) - "
+                     "treat minor-axis compression as built-up "
+                     "(EN 1993-1-1 6.4)")
+        joint = f"back-to-back, {note}"
     sec = CrossSection(
         name=name, material="steel", A=round(A, 1), Iy=round(Iy, 0),
         Iz=round(Iz, 0), J=round(J, 1),
@@ -194,8 +225,7 @@ def coupled_channel(name: str, h: float, b: float, c: float, t: float,
         description=(f"{'2x' if pairs == 2 else ''}2C "
                      f"{h:g}x{b:g}x{c:g}x{t:g}"
                      f"{'r%g' % r if r else ''} "
-                     f"{'boxed' if boxed else 'back-to-back'}, "
-                     "open-J (stitch-bolted)"))
+                     f"{joint}, open-J (bolted assembly)"))
     return sec
 
 

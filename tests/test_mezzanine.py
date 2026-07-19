@@ -180,3 +180,21 @@ def test_mezzanine_codes_and_panel_layer():
     mr = c.members[strips[0].id]
     assert mr.My_absmax > 10 * max(mr.Mz_absmax, 1.0)
     assert mr.defl_absmax > 0
+
+
+def test_2c_stitch_bolt_convention():
+    """Back-to-back 2C carries the company stitching convention: stitches
+    every 500 mm, a 50 mm-pitch bolt row whose count follows the beam height,
+    open torsion (bolted, rarely welded)."""
+    from rack15512.cf_sections import section_from_code, stitch_bolt_count
+
+    assert stitch_bolt_count(150.0) == 3
+    assert stitch_bolt_count(300.0) == 6
+    assert stitch_bolt_count(80.0) == 2          # never fewer than 2
+    s = section_from_code("2C200x60x20x2.5")
+    assert "back-to-back" in s.description
+    assert "stitch-bolted @500 mm" in s.description
+    assert "bolts/row @50 mm pitch" in s.description
+    # boxed variant carries no stitching note
+    sb = section_from_code("2C200x60x20x2.5B")
+    assert "boxed" in sb.description and "stitch" not in sb.description

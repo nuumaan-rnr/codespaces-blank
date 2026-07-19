@@ -699,9 +699,12 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             st.caption("**Or type section codes** (override the dropdowns): "
                        "`SHS100x100x4` / `RHS120x60x3` columns · "
                        "`1C200x60x20x2.5` (h×b×lip×t, optional `r4` corner "
-                       "radius) · `2C…` two coupled channels back-to-back, "
-                       "`2C…B` boxed · `2x2C…` four channels. Master-library "
-                       "names always win over codes.")
+                       "radius) · `2C…` two channels **back-to-back, "
+                       "stitch-bolted every 500 mm** (bolt row at 50 mm "
+                       "pitch, count per beam height; open torsion — enter a "
+                       "welded box in the master for closed J), `2C…B` boxed "
+                       "· `2x2C…` four channels. Master-library names always "
+                       "win over codes.")
             c = st.columns(4)
             mzcol_c = c[0].text_input("Column code", g("mz_column_section", "")
                                       if str(g("mz_column_section", "")
