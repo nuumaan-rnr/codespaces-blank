@@ -558,6 +558,12 @@ class RackConfig:
     mz_secondary_spacing: float = 1250.0          # [mm]
     mz_joist_spacing: float = 600.0               # [mm]
     mz_floor_type: str = "Chequered plate 3 mm"   # see mezzanine.FLOOR_TYPES
+    # 1C floor PANELS laid flat (minor-axis bending): a section code/name;
+    # panel self-weight (A*gamma / covered width) is added to the floor dead
+    # load and a representative pin-ended panel strip is modelled per floor,
+    # rotated so gravity bending is about the MINOR axis (checked for
+    # stress + deflection like any beam).  None -> no panel layer.
+    mz_panel_section: Optional[str] = None
     mz_floor_dead_extra: float = 0.0              # [kN/m2] services etc.
     mz_live_load: float = 5.0                     # [kN/m2] per floor
     mz_primary_conn: str = "moment"               # moment | pinned | semi

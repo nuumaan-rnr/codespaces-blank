@@ -119,3 +119,64 @@ def test_mezzanine_runs_and_checks():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_cf_section_codes():
+    """1C/2C/2x2C/SHS/RHS codes generate correct composed properties."""
+    from rack15512.cf_sections import section_from_code
+
+    c1 = section_from_code("1C200x60x20x2.0")
+    c2 = section_from_code("2C200x60x20x2.0")
+    c2b = section_from_code("2C200x60x20x2.0B")
+    c4 = section_from_code("2x2C200x60x20x2.0")
+    # coupling doubles/quadruples area and the MAJOR axis exactly
+    assert c2.A == pytest.approx(2 * c1.A)
+    assert c2.Iz == pytest.approx(2 * c1.Iz)
+    assert c4.A == pytest.approx(4 * c1.A)
+    assert c4.Iz == pytest.approx(4 * c1.Iz)
+    # boxed (toe-to-toe) has the webs outboard -> larger Iy than back-to-back
+    assert c2b.Iz == pytest.approx(c2.Iz) and c2b.Iy > c2.Iy
+    # major axis is Iz (gravity bending) for all beam codes
+    for s in (c1, c2, c2b, c4):
+        assert s.Iz > s.Iy
+    # corner radius reduces gross properties (EN 1993-1-3 delta)
+    cr = section_from_code("1C200x60x20x2.0r4")
+    assert cr.A < c1.A and cr.Iz < c1.Iz
+    # SHS: symmetric, closed Bredt torsion (J of the same order as I)
+    shs = section_from_code("SHS100x100x4")
+    assert shs.Iy == pytest.approx(shs.Iz) and shs.J > shs.Iz
+    rhs = section_from_code("RHS120x60x3")
+    assert rhs.Iz > rhs.Iy
+    assert section_from_code("not a code") is None
+
+
+def test_mezzanine_codes_and_panel_layer():
+    """SHS columns + 2C primary + 1C secondary by CODE, and a 1C floor-panel
+    layer: panel dead joins the floor dead load and the representative strip
+    bends about the panel's MINOR axis."""
+    from rack15512.combos import assemble
+    from rack15512.engine.opensees import OpenSeesEngine
+
+    cfg = _cfg(mz_column_section="SHS100x100x4",
+               mz_primary_section="2C200x60x20x2.5",
+               mz_secondary_section="1C150x50x15x2.0",
+               mz_panel_section="1C100x50x15x1.5")
+    m = build_rack(cfg)
+    assert "SHS100x100x4" in m.sections and "2C200x60x20x2.5" in m.sections
+    strips = [mm for mm in m.members.values()
+              if mm.member_set == "floor panels"]
+    assert len(strips) == 1                       # one per floor
+    assert strips[0].vecxz == (0.0, 0.0, 1.0)     # minor-axis rotation
+    # panel self-weight (A*gamma/cover) is part of the dead load on the
+    # secondaries: dead per-mm on a top-layer member exceeds deck-only
+    pan = m.sections["1C100x50x15x1.5"]
+    q_panel = pan.A * 7.698e-5 / pan.depth_h
+    assert q_panel > 0
+    # run SLS: the strip carries MINOR-axis bending (My >> Mz)
+    c = OpenSeesEngine().run_case(m, assemble(m, m.combinations[1]),
+                                  name="SLS1", combo="SLS1", kind="SLS",
+                                  order=1)
+    assert c.converged
+    mr = c.members[strips[0].id]
+    assert mr.My_absmax > 10 * max(mr.Mz_absmax, 1.0)
+    assert mr.defl_absmax > 0

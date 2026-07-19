@@ -696,10 +696,32 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 index=_idx(_jopts, g("mz_joist_section", None) or "(none)"),
                 help="A third pin-ended layer between the secondaries; the "
                      "flooring then rests on the joists.")
+            st.caption("**Or type section codes** (override the dropdowns): "
+                       "`SHS100x100x4` / `RHS120x60x3` columns · "
+                       "`1C200x60x20x2.5` (h×b×lip×t, optional `r4` corner "
+                       "radius) · `2C…` two coupled channels back-to-back, "
+                       "`2C…B` boxed · `2x2C…` four channels. Master-library "
+                       "names always win over codes.")
+            c = st.columns(4)
+            mzcol_c = c[0].text_input("Column code", g("mz_column_section", "")
+                                      if str(g("mz_column_section", "")
+                                             ).upper().startswith(("SHS",
+                                                                   "RHS"))
+                                      else "", key="mz_col_code")
+            mzpb_c = c[1].text_input("Primary code", "", key="mz_pb_code")
+            mzsb_c = c[2].text_input("Secondary code", "", key="mz_sb_code")
+            mzjo_c = c[3].text_input("Joist code", "", key="mz_jo_code")
             c = st.columns(4)
             mzjsp = c[0].number_input("Joist spacing [mm]", 200.0, 2000.0,
                                       gn("mz_joist_spacing", 600.0, 200.0,
                                          2000.0), 25.0)
+            mzpan = c[3].text_input(
+                "Floor panel 1C code (optional)",
+                g("mz_panel_section", "") or "", key="mz_panel_code",
+                help="1C panels laid FLAT (minor-axis bending): their "
+                     "self-weight (A·γ / web width) is added to the floor "
+                     "dead load and a representative panel strip is modelled "
+                     "and checked per floor.")
             _fts = list(FLOOR_TYPES)
             mzft = c[1].selectbox("Flooring type", _fts,
                                   index=_idx(_fts, g("mz_floor_type",
@@ -738,11 +760,14 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 mz_bays_x=int(mzbx), mz_bay_x=mzlx, mz_bays_y=int(mzby),
                 mz_bay_y=mzly, mz_n_floors=int(mznf), mz_floor_height=mzfh,
                 mz_primary_dir=mzdir, mz_secondary_spacing=mzsp,
-                mz_column_section=mzcol, mz_primary_section=mzpb,
-                mz_secondary_section=mzsb,
-                mz_joist_section=None if mzjo == "(none)" else mzjo,
+                mz_column_section=mzcol_c.strip() or mzcol,
+                mz_primary_section=mzpb_c.strip() or mzpb,
+                mz_secondary_section=mzsb_c.strip() or mzsb,
+                mz_joist_section=(mzjo_c.strip() or
+                                  (None if mzjo == "(none)" else mzjo)),
                 mz_joist_spacing=mzjsp, mz_floor_type=mzft,
                 mz_floor_dead_extra=mzfd, mz_live_load=mzll,
+                mz_panel_section=mzpan.strip() or None,
                 mz_primary_conn=mzconn,
                 mz_conn_k=mzk if mzk > 0 else None,
                 mz_base_fixed=bool(mzbase), mz_bracing=bool(mzbrace),

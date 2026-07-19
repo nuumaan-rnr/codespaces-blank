@@ -69,8 +69,16 @@ def build_mezzanine(cfg) -> RackModel:
     m.materials["steel"] = Steel("steel", fy=cfg.steel_fy)
 
     def pick(name: Optional[str], *roles: str):
+        # master entry wins; else a section CODE is generated on the fly:
+        # 1C{h}x{b}x{c}x{t}[r{r}], 2C...[B] (back-to-back / Boxed),
+        # 2x2C..., SHS{h}x{t}, RHS{h}x{b}x{t}  (see cf_sections)
         if name and name in lib.sections:
             return lib.get(name)
+        if name:
+            from .cf_sections import section_from_code
+            gen = section_from_code(name)
+            if gen is not None:
+                return gen
         for role in roles:
             cands = lib.names(role)
             if cands:
@@ -81,9 +89,12 @@ def build_mezzanine(cfg) -> RackModel:
     prim = pick(cfg.mz_primary_section, "beam")
     sec = pick(cfg.mz_secondary_section, "beam")
     joist = pick(cfg.mz_joist_section, "beam") if cfg.mz_joist_section else None
+    panel = (pick(cfg.mz_panel_section, "beam")
+             if getattr(cfg, "mz_panel_section", None) else None)
     brace = pick(cfg.mz_brace_section or cfg.brace_section, "bracing")
     for s in {x.name: x for x in
-              ([col, prim, sec, brace] + ([joist] if joist else []))}.values():
+              ([col, prim, sec, brace] + ([joist] if joist else [])
+               + ([panel] if panel else []))}.values():
         fy = (cfg.master.fy.get(s.name)
               if (cfg.master and not cfg.fy_override) else None)
         if fy:
@@ -166,6 +177,49 @@ def build_mezzanine(cfg) -> RackModel:
     # ---- floor framing ------------------------------------------------------
     sec_pos = _spaced(L_p, float(cfg.mz_secondary_spacing))
     top_layer: List[Tuple[int, float]] = []        # (member id, trib width)
+    panel_strips: List[Tuple[int, float]] = []     # (member id, cover width)
+    # panel cover width: the 1C web lies flat, so one panel covers its web
+    # height; per-area panel dead = A * gamma / cover
+    panel_cover = (panel.depth_h or panel.width_b or 300.0) if panel else 0.0
+    # representative panel strip per floor: between the two middle lines of
+    # the layer the panels rest on, at that pair's midspan (the two carrying
+    # members are split there so the strip connects to real nodes)
+    if panel and joist:
+        _jp = _spaced(L_q, float(cfg.mz_joist_spacing))
+        _qpair = (_jp[len(_jp) // 2 - 1], _jp[len(_jp) // 2]) \
+            if len(_jp) >= 2 else None
+        _ppair = None
+    elif panel:
+        _i0 = max(0, len(sec_pos) // 2 - 1)
+        _ppair = (sec_pos[_i0], sec_pos[_i0 + 1]) \
+            if len(sec_pos) >= 2 else None
+        _qpair = None
+    else:
+        _ppair = _qpair = None
+    iq_mid, ip_mid = n_q // 2, max(0, len(sec_pos) // 2 - 1)
+
+    def _beam(sect, set_name, pts, fixed_axis_val, along_p, z, h_i, h_j,
+              split_at=None):
+        """A beam along p (along_p) or q at the fixed perpendicular ordinate,
+        through the sorted breakpoints pts; optionally split once at
+        split_at, returning that mid node id."""
+        mid_node = None
+        pp = sorted({*pts, *( [split_at] if split_at is not None else [] )})
+        for k in range(len(pp) - 1):
+            a = xy(pp[k], fixed_axis_val) if along_p \
+                else xy(fixed_axis_val, pp[k])
+            b = xy(pp[k + 1], fixed_axis_val) if along_p \
+                else xy(fixed_axis_val, pp[k + 1])
+            mm = add(node_at(a[0], a[1], z), node_at(b[0], b[1], z), sect,
+                     member_set=set_name, mesh=2,
+                     hinge_i=copy_h(h_i) if k == 0 else None,
+                     hinge_j=copy_h(h_j) if k == len(pp) - 2 else None)
+            if split_at is not None and abs(pp[k + 1] - split_at) < 1e-6:
+                mid_node = mm.node_j
+            yield mm
+        if split_at is not None and mid_node is not None:
+            _beam.mid = mid_node
+
     for z in floors:
         # primary beams along p on every q grid line, split at sec_pos
         for iq in range(n_q + 1):
@@ -188,21 +242,22 @@ def build_mezzanine(cfg) -> RackModel:
         sec_trib = {p: 0.5 * ((sec_pos[min(i + 1, len(sec_pos) - 1)]
                                - sec_pos[max(i - 1, 0)]))
                     for i, p in enumerate(sec_pos)}
+        strip_nodes: List[int] = []
         for p in sec_pos:
             for iq in range(n_q):
                 q0, q1 = iq * b_q, (iq + 1) * b_q
                 pts = sorted({q0, q1, *[q for q in joist_pos
                                         if q0 + 1e-6 < q < q1 - 1e-6]})
-                for k in range(len(pts) - 1):
-                    x0, y0 = xy(p, pts[k])
-                    x1, y1 = xy(p, pts[k + 1])
-                    mm = add(node_at(x0, y0, z), node_at(x1, y1, z), sec,
-                             member_set="secondary beams", mesh=2,
-                             hinge_i=copy_h(pin) if k == 0 else None,
-                             hinge_j=copy_h(pin)
-                             if k == len(pts) - 2 else None)
+                split = ((q0 + q1) / 2.0
+                         if (_ppair and p in _ppair and iq == iq_mid
+                             and not joist) else None)
+                _beam.mid = None
+                for mm in _beam(sec, "secondary beams", pts, p, False, z,
+                                pin, pin, split_at=split):
                     if not joist:
                         top_layer.append((mm.id, sec_trib[p]))
+                if split is not None and _beam.mid:
+                    strip_nodes.append(_beam.mid)
         # joists along p between adjacent secondary lines
         if joist:
             j_trib = {q: 0.5 * ((joist_pos[min(i + 1, len(joist_pos) - 1)]
@@ -210,12 +265,25 @@ def build_mezzanine(cfg) -> RackModel:
                       for i, q in enumerate(joist_pos)}
             for q in joist_pos:
                 for i in range(len(sec_pos) - 1):
-                    x0, y0 = xy(sec_pos[i], q)
-                    x1, y1 = xy(sec_pos[i + 1], q)
-                    mm = add(node_at(x0, y0, z), node_at(x1, y1, z), joist,
-                             member_set="joists", mesh=2,
-                             hinge_i=copy_h(pin), hinge_j=copy_h(pin))
-                    top_layer.append((mm.id, j_trib[q]))
+                    split = ((sec_pos[i] + sec_pos[i + 1]) / 2.0
+                             if (_qpair and q in _qpair and i == ip_mid)
+                             else None)
+                    _beam.mid = None
+                    for mm in _beam(joist, "joists",
+                                    [sec_pos[i], sec_pos[i + 1]], q, True, z,
+                                    pin, pin, split_at=split):
+                        top_layer.append((mm.id, j_trib[q]))
+                    if split is not None and _beam.mid:
+                        strip_nodes.append(_beam.mid)
+        # the representative panel strip: pin-ended, ROTATED so gravity
+        # bending is about the section's MINOR axis (local y), exactly how a
+        # 1C panel lies flat across the joists/secondaries
+        if panel and len(strip_nodes) == 2:
+            mm = add(strip_nodes[0], strip_nodes[1], panel,
+                     member_set="floor panels", mesh=2,
+                     hinge_i=copy_h(pin), hinge_j=copy_h(pin),
+                     vecxz=(0.0, 0.0, 1.0))
+            panel_strips.append((mm.id, panel_cover))
 
     # ---- vertical bracing (X-pairs in the outer bays of perimeter lines) ---
     if braced:
@@ -241,8 +309,11 @@ def build_mezzanine(cfg) -> RackModel:
                                                      (iq + 1) * b_q))
 
     # ---- loads --------------------------------------------------------------
-    q_dead = (FLOOR_TYPES.get(cfg.mz_floor_type, 0.0)
+    q_deck = (FLOOR_TYPES.get(cfg.mz_floor_type, 0.0)
               + float(cfg.mz_floor_dead_extra)) * _KNM2      # N/mm^2
+    # 1C panels laid flat: self-weight per covered area = A * gamma / cover
+    q_panel = (panel.A * _GAMMA_STEEL / panel_cover) if panel else 0.0
+    q_dead = q_deck + q_panel
     q_live = float(cfg.mz_live_load) * _KNM2
     dead = LoadCase("dead", "permanent")
     if cfg.include_self_weight:
@@ -256,6 +327,13 @@ def build_mezzanine(cfg) -> RackModel:
             dead.member_loads.append(MemberLoad(mid_, qz=-q_dead * trib))
         if q_live > 0:
             live.member_loads.append(MemberLoad(mid_, qz=-q_live * trib))
+    # the representative panel strip carries one panel width of floor load
+    # (its own steel weight is already in the self-weight loop)
+    for mid_, cover in panel_strips:
+        if q_deck > 0:
+            dead.member_loads.append(MemberLoad(mid_, qz=-q_deck * cover))
+        if q_live > 0:
+            live.member_loads.append(MemberLoad(mid_, qz=-q_live * cover))
     m.load_cases["dead"] = dead
     m.load_cases["live"] = live
 

@@ -83,3 +83,152 @@ def standard_1c_sections(fy: float = 355.0) -> Dict[str, CrossSection]:
         if dims:
             out[nm] = lipped_channel(nm, *dims, fy=fy)
     return out
+
+
+# --------------------------------------------------------------------------
+# Structural-mezzanine section families: 1C with corner radius, coupled 2C /
+# 2x2C beams, SHS/RHS box columns and 1C floor panels (minor axis).
+# --------------------------------------------------------------------------
+
+def parse_cf_code(name: str):
+    """Parse a mezzanine cold-formed section code.  Supported:
+
+      1C{h}x{b}x{c}x{t}[r{r}]      single lipped channel (+corner radius)
+      2C{h}x{b}x{c}x{t}[r{r}][B]   two channels coupled: back-to-back webs
+                                   (default, I-shape) or 'B' = boxed toe-to-toe
+      2x2C{h}x{b}x{c}x{t}[r{r}][B] two 2C assemblies side by side
+      SHS{h}x{t} / SHS{h}x{h}x{t}  square hollow column
+      RHS{h}x{b}x{t}               rectangular hollow column
+
+    Returns (kind, dims dict) or None.  kind in {'1C','2C','2x2C','BOX'}.
+    """
+    s = name.strip().replace(" ", "")
+    m = re.match(r"(?i)^(2x2C|2C|1C|C)([\d.]+)x([\d.]+)x([\d.]+)x([\d.]+)"
+                 r"(?:r([\d.]+))?(B?)$", s)
+    if m:
+        kind = m.group(1).upper()
+        kind = "1C" if kind == "C" else kind
+        return kind, dict(h=float(m.group(2)), b=float(m.group(3)),
+                          c=float(m.group(4)), t=float(m.group(5)),
+                          r=float(m.group(6) or 0.0),
+                          boxed=m.group(7).upper() == "B")
+    m = re.match(r"(?i)^(SHS|RHS)([\d.]+)x([\d.]+)(?:x([\d.]+))?$", s)
+    if m:
+        h = float(m.group(2))
+        if m.group(4) is None:                   # SHS{h}x{t}
+            b, t = h, float(m.group(3))
+        else:
+            b, t = float(m.group(3)), float(m.group(4))
+        if m.group(1).upper() == "SHS":
+            b = h if m.group(4) is None else b
+        return "BOX", dict(h=h, b=b, t=t)
+    return None
+
+
+def _round_corner_delta(h: float, b: float, c: float, r: float) -> float:
+    """EN 1993-1-3 5.1(3): reduction delta = 0.43 * sum(r_j * phi_j/90) /
+    sum(b_p) for round corners (4 x 90-deg corners of a lipped channel).
+    Gross properties are then reduced: A*(1-delta), I*(1-2*delta)."""
+    if r <= 0:
+        return 0.0
+    n_corners = 4 if c > 0 else 2
+    b_p = h + 2 * b + 2 * c
+    return 0.43 * n_corners * r / max(b_p, 1.0)
+
+
+def lipped_channel_r(name: str, h: float, b: float, c: float, t: float,
+                     r: float = 0.0) -> CrossSection:
+    """Single lipped channel with the EN 1993-1-3 round-corner reduction
+    applied to the sharp-corner midline properties."""
+    s = lipped_channel(name, h, b, c, t)
+    d = _round_corner_delta(h, b, c, r)
+    if d > 0:
+        s.A = round(s.A * (1 - d), 1)
+        s.Iy = round(s.Iy * (1 - 2 * d), 0)
+        s.Iz = round(s.Iz * (1 - 2 * d), 0)
+        s.Wely = round(s.Wely * (1 - 2 * d), 0)
+        s.Welz = round(s.Welz * (1 - 2 * d), 0)
+        s.description += f", corners r{r:g} (EN 1993-1-3 delta={d:.3f})"
+    return s
+
+
+def coupled_channel(name: str, h: float, b: float, c: float, t: float,
+                    r: float = 0.0, boxed: bool = False,
+                    pairs: int = 1) -> CrossSection:
+    """2C / 2x2C beam composed from single lipped channels.
+
+    Coupling per pair: back-to-back webs (I-shape, default) or 'boxed'
+    toe-to-toe (lips meeting).  MAJOR axis (Iz, gravity bending with the web
+    vertical) simply sums; the minor axis (Iy) uses the parallel-axis theorem
+    with each channel's centroid offset from the pair centreline.  pairs=2
+    places two assemblies side by side (touching), again by parallel axis.
+    Torsion J is the conservative OPEN sum (stitch-bolted assembly); a
+    continuously welded box may be entered in the master with its closed J.
+    """
+    one = lipped_channel_r("_c", h, b, c, t, r)
+    # channel centroid distance from its web midline (local minor axis)
+    segs_area = h + 2 * b + 2 * c
+    xc = (2 * b * (b / 2.0) + 2 * c * b) / segs_area   # from web, midline
+    if boxed:
+        d1 = b - xc                    # webs outside, lips meet at centre
+        width = 2 * b
+    else:
+        d1 = xc                        # webs meet at centre, flanges out
+        width = 2 * b
+    n1 = 2                             # channels per pair
+    A = n1 * one.A
+    Iz = n1 * one.Iz
+    Iy = n1 * (one.Iy + one.A * d1 ** 2)
+    J = n1 * one.J
+    if pairs == 2:                     # two assemblies side by side
+        d2 = width / 2.0
+        A, Iz, J = 2 * A, 2 * Iz, 2 * J
+        Iy = 2 * (Iy + (n1 * one.A) * d2 ** 2)
+        width *= 2
+    sec = CrossSection(
+        name=name, material="steel", A=round(A, 1), Iy=round(Iy, 0),
+        Iz=round(Iz, 0), J=round(J, 1),
+        Wely=round(Iy / (width / 2.0), 0),
+        Welz=round(Iz / (h / 2.0), 0),
+        role="beam", t=t, width_b=width, depth_h=h,
+        description=(f"{'2x' if pairs == 2 else ''}2C "
+                     f"{h:g}x{b:g}x{c:g}x{t:g}"
+                     f"{'r%g' % r if r else ''} "
+                     f"{'boxed' if boxed else 'back-to-back'}, "
+                     "open-J (stitch-bolted)"))
+    return sec
+
+
+def box_section(name: str, h: float, b: float, t: float) -> CrossSection:
+    """SHS/RHS column from the thin-walled midline model with the closed
+    Bredt torsion constant."""
+    hm, bm = h - t, b - t                        # midline dimensions
+    A = 2.0 * t * (hm + bm)
+    # midline rectangle: two webs (height hm) + two flanges (width bm)
+    Iz = 2.0 * (t * hm ** 3 / 12.0) + 2.0 * (bm * t * (hm / 2.0) ** 2)
+    Iy = 2.0 * (t * bm ** 3 / 12.0) + 2.0 * (hm * t * (bm / 2.0) ** 2)
+    A0 = hm * bm                                 # enclosed midline area
+    J = 4.0 * A0 ** 2 * t / (2.0 * (hm + bm))    # Bredt, uniform t
+    return CrossSection(
+        name=name, material="steel", A=round(A, 1), Iy=round(Iy, 0),
+        Iz=round(Iz, 0), J=round(J, 0),
+        Wely=round(Iy / (b / 2.0), 0), Welz=round(Iz / (h / 2.0), 0),
+        role="column", t=t, width_b=b, depth_h=h,
+        description=f"{'SHS' if abs(h-b) < 1e-9 else 'RHS'} "
+                    f"{h:g}x{b:g}x{t:g} (closed Bredt torsion)")
+
+
+def section_from_code(name: str) -> Optional[CrossSection]:
+    """Resolve any mezzanine section code to a generated CrossSection
+    (None when the code is not recognised)."""
+    p = parse_cf_code(name)
+    if p is None:
+        return None
+    kind, d = p
+    if kind == "BOX":
+        return box_section(name, d["h"], d["b"], d["t"])
+    if kind == "1C":
+        return lipped_channel_r(name, d["h"], d["b"], d["c"], d["t"], d["r"])
+    pairs = 2 if kind == "2X2C" or kind == "2x2C" else 1
+    return coupled_channel(name, d["h"], d["b"], d["c"], d["t"], d["r"],
+                           boxed=d["boxed"], pairs=pairs)
