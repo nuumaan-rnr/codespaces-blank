@@ -819,6 +819,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             stiffener_type, stiffener_shear_k = 1, None
             stiffener_bolt_d, stiffener_bolt_grade = 8.0, "8.8"
             stiffener_bolt_pitch = 600.0
+            stiffener_modelling = "monolithic"
         else:
             module = c[3].radio(
                 "Module", ["single", "back-to-back"],
@@ -891,6 +892,17 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             help="Pitch of the M8 8.8 bolts tying the stiffener to the upright; "
                  "the interface stiffness (and the non-50% axial split) is "
                  "auto-derived (EN 1993-1-8). Closer bolts = more composite.")
+        _mods = ["monolithic", "separate"]
+        stiffener_modelling = st.selectbox(
+            "Stiffener modelling", _mods,
+            index=_idx(_mods, g("stiffener_modelling", "monolithic")),
+            disabled=(stiff_sel == "(none)"),
+            help="monolithic (default, the industry assumption): the "
+                 "reinforced upright segments carry the composite equivalent "
+                 "section (A summed, cross-aisle Iy by parallel axis, "
+                 "closed-torsion credit for type 1) on one member line. "
+                 "separate: the stiffener is its own offset member tied by "
+                 "bolt-shear links (partial composite — conservative).")
         stiffener_bolt_d, stiffener_bolt_grade = 8.0, "8.8"   # always M8 8.8
         stiffener_shear_k = None       # auto-derive from the bolt + pitch
         stiffener_section = None if stiff_sel == "(none)" else stiff_sel
@@ -1728,6 +1740,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
         stiffener_bolt_d=float(stiffener_bolt_d),
         stiffener_bolt_grade=str(stiffener_bolt_grade),
         stiffener_bolt_pitch=float(stiffener_bolt_pitch),
+        stiffener_modelling=str(stiffener_modelling),
         base_stiffness=base_stiff,
         brace_area_factor=brace_factor, bolt_d=float(bolt[1:]),
         bolt_grade=grade, brace_planes=int(brace_planes),

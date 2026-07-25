@@ -144,6 +144,58 @@ class LevelSpec:
     pallet_load: Optional[float] = None
 
 
+def _composite_upright_section(up, st, offset: float, stype: int,
+                               fy_up: float, fy_st: float):
+    """MONOLITHIC equivalent section of upright + stiffener (the industry
+    assumption for a bolted upright reinforcement): one cross-section with
+
+      A = A_up + A_st (same for the effective area),
+      Iy (cross-aisle) by the PARALLEL-AXIS theorem about the combined
+         centroid - the two centroids sit `offset` apart in the cross-aisle
+         direction (the stiffener mounts on the upright face),
+      Iz (down-aisle) = simple sum (no down-aisle centroid shift),
+      Wel from the true extreme-fibre distances of the assembly,
+      W_eff = composite gross modulus x the upright's own Weff/Wel knockdown
+         (the upright's local buckling still governs the effective modulus),
+      type 1 (closing profile): closed-cell torsion credit (Bredt It, small
+         Iw, shear centre ~on the centroid); type 2: upright's FT data kept.
+
+    The design fy of the composite is min(fy_up, fy_st)."""
+    from dataclasses import replace
+    A_up, A_st = up.A, st.A
+    A = A_up + A_st
+    d_up = -A_st * offset / A            # centroid shift from the upright line
+    d_st = offset + d_up
+    Iy = (up.Iy + A_up * d_up ** 2) + (st.Iy + A_st * d_st ** 2)
+    Iz = up.Iz + st.Iz
+    dh_up = up.depth_h or 100.0
+    dh_st = st.depth_h or dh_up
+    c_max = max(abs(d_up) + dh_up / 2.0, abs(d_st) + dh_st / 2.0)
+    b_max = max(up.width_b or 100.0, st.width_b or 0.0)
+    Wely = Iy / max(c_max, 1.0)
+    Welz = Iz / max(b_max / 2.0, 1.0)
+    r_y = (up.Wy_eff / up.Wely) if (up.Wy_eff and up.Wely) else 1.0
+    r_z = (up.Wz_eff / up.Welz) if (up.Wz_eff and up.Welz) else 1.0
+    a_eff = ((up.A_eff or up.A) + (st.A_eff or st.A))
+    sec = replace(
+        up, name=f"{up.name}+{st.name}", A=round(A, 1),
+        Iy=round(Iy, 0), Iz=round(Iz, 0), J=max(up.J + st.J, 1.0),
+        Wely=round(Wely, 0), Welz=round(Welz, 0),
+        A_eff=round(a_eff, 1),
+        Wy_eff=round(Wely * r_y, 0), Wz_eff=round(Welz * r_z, 0),
+        depth_h=round(c_max * 2.0, 1), width_b=b_max,
+        description=(f"monolithic upright+stiffener ({up.name} + {st.name}, "
+                     f"centroid gap {offset:g} mm, parallel-axis Iy; "
+                     f"fy = min({fy_up:g}, {fy_st:g}))"))
+    if stype == 1:                       # closing profile -> closed cell
+        closed = _closed_upright_section(sec.name, up)
+        sec.It_gross = max(closed.It_gross or 0.0, up.J + st.J)
+        sec.J = max(sec.It_gross, sec.J)
+        sec.Iw_gross = closed.Iw_gross
+        sec.y0 = 0.0
+    return sec
+
+
 @dataclass
 class RackConfig:
     name: str = "pallet rack"
@@ -244,6 +296,12 @@ class RackConfig:
     reinforce_height: float = 0.0      # [mm]; reinforce segments with top <= this
     stiffener_offset: float = 30.0     # [mm]; upright<->stiffener centroid gap
     stiffener_type: int = 1            # 1 = closing/inside, 2 = outer face
+    # "monolithic" (default, the industry assumption): the reinforced upright
+    # segments simply carry the composite equivalent section (parallel-axis
+    # Iy, summed A/Iz, closed-torsion credit for type 1) - one member line.
+    # "separate": the stiffener is its own offset member tied by bolt-shear
+    # interface links (partial composite; conservative research model).
+    stiffener_modelling: str = "monolithic"
     # interface (bolt) shear stiffness: auto-derived from the bolt by the
     # EN 1993-1-8 component method when None; a number overrides it [N/mm]
     stiffener_shear_k: Optional[float] = None
@@ -1174,7 +1232,31 @@ def build_rack(cfg: RackConfig) -> RackModel:
     # vertical bolt-shear stiffness (axial transfers by shear flow: partial
     # composite, shear-lag from the free top, never a flat 50%).  The offset
     # captures the CG shift; each member reports its own N, My, Mz.
-    if stiff_name:
+    if stiff_name and cfg.stiffener_modelling != "separate":
+        # MONOLITHIC equivalent section (industry assumption): the reinforced
+        # upright segments carry the composite upright+stiffener section on
+        # the single upright member line - no extra members or links
+        rh = min(cfg.reinforce_height, H)
+        st_sec = m.sections[stiff_name]
+        off = (st_sec.mount_offset if st_sec.mount_offset is not None
+               else cfg.stiffener_offset)
+        fy_up = m.materials[up.material].fy
+        fy_st = m.materials[st_sec.material].fy
+        comp = _composite_upright_section(up, st_sec, off,
+                                          int(cfg.stiffener_type),
+                                          fy_up, fy_st)
+        fy_c = min(fy_up, fy_st)
+        mat_c = f"steel_fy{fy_c:.0f}"
+        m.materials.setdefault(mat_c, Steel(mat_c, fy=fy_c))
+        comp.material = mat_c
+        m.sections[comp.name] = comp
+        for (i, s), ids in upright_members.items():
+            for u in ids:
+                um0 = m.members[u]
+                if max(m.nodes[um0.node_i].z,
+                       m.nodes[um0.node_j].z) <= rh + _TOL:
+                    um0.section = comp.name
+    elif stiff_name:
         rh = min(cfg.reinforce_height, H)
         SNID = 8_000_000
         K_TRANS = 1.0e8                       # stiff transverse tie [N/mm]

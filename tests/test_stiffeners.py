@@ -1,4 +1,5 @@
-"""Upright stiffener as a PARTIAL-COMPOSITE built-up member: a separate member
+"""Upright stiffener: MONOLITHIC equivalent section (default, industry
+assumption) and the PARTIAL-COMPOSITE research model - a separate member
 on its own (offset) centroid, tied to the upright at bolt rows by interface
 links (transverse stiff, vertical = bolt shear stiffness)."""
 
@@ -21,6 +22,7 @@ _STIFF = "UP-100x100x2.0"
 
 
 def _reinf(**extra):
+    extra.setdefault("stiffener_modelling", "separate")
     return build_rack(RackConfig(**_HEAVY, stiffener_section=_STIFF,
                                  reinforce_height=_RH, **extra))
 
@@ -79,7 +81,8 @@ def test_buckling_reduces_without_moment_spike():
                    key=lambda r: r["util"])
     bare = low()
     reinf = low(stiffener_section=_STIFF, reinforce_height=_RH,
-                stiffener_offset=30.0, stiffener_type=1)
+                stiffener_offset=30.0, stiffener_type=1,
+                stiffener_modelling="separate")
     assert reinf["util"] < bare["util"]          # buckling reduced
     assert reinf["My_kNm"] <= bare["My_kNm"] + 0.1   # no induced moment
 
@@ -131,7 +134,8 @@ def test_mount_offset_from_section_overrides_config():
     lib.get(_pick(lib, _STIFF, "upright")).mount_offset = 42.0
     m = build_rack(RackConfig(**_HEAVY, library=lib, stiffener_section=_STIFF,
                               reinforce_height=_RH, stiffener_offset=30.0,
-                              stiffener_type=1))
+                              stiffener_type=1,
+                              stiffener_modelling="separate"))
     SNID = 8_000_000
     sn = next(nd for nid, nd in m.nodes.items() if nid >= SNID)
     up = m.nodes[sn.id - SNID]
@@ -161,3 +165,60 @@ def test_no_singular_stiffener_displacements():
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_monolithic_default_composite_section():
+    """Default stiffener modelling is MONOLITHIC: the reinforced upright
+    segments carry the composite equivalent section (one member line, no
+    interface links / separate members), with A summed and the cross-aisle
+    Iy gaining the parallel-axis term."""
+    m = build_rack(RackConfig(**_HEAVY, stiffener_section=_STIFF,
+                              reinforce_height=_RH, stiffener_offset=40.0))
+    assert not m.links
+    assert not any(mm.member_set == "upright stiffeners"
+                   for mm in m.members.values())
+    comp = next(s for s in m.sections.values() if "+" in s.name)
+    up = m.sections["UP-100x100x2.0"]
+    assert comp.A == 2 * up.A                      # areas sum
+    assert comp.Iz == 2 * up.Iz                    # down-aisle simple sum
+    assert comp.Iy > 2 * up.Iy                     # parallel-axis gain
+    assert comp.A_eff == (up.A_eff or up.A) * 2
+    # applied to the reinforced (bottom) segments only
+    for mm in m.members.values():
+        if mm.member_set != "uprights":
+            continue
+        top = max(m.nodes[mm.node_i].z, m.nodes[mm.node_j].z)
+        assert (mm.section == comp.name) == (top <= _RH + 1e-6)
+    assert m.validate() == []
+
+
+def test_monolithic_relieves_vs_separate():
+    """The monolithic assumption gives an equal-or-lower governing upright
+    buckling utilisation in the reinforced zone than the partial-composite
+    separate model (this is exactly the industry-comparison gap)."""
+    from rack15512.combos import apply_ehf, assemble
+    from rack15512.engine.opensees import OpenSeesEngine
+    from rack15512.model import DIRECTION_VECTORS
+
+    def worst_zone_util(**kw):
+        m = build_rack(RackConfig(**_HEAVY, stiffener_section=_STIFF,
+                                  reinforce_height=_RH, **kw))
+        uls = next(c for c in m.combinations if c.kind == "ULS")
+        loads = apply_ehf(m, assemble(m, uls), m.imperfection.value_for("+x"),
+                          DIRECTION_VECTORS["+x"])
+        case = OpenSeesEngine().run_case(m, loads, name="U", combo="U",
+                                         kind="ULS", order=2,
+                                         imp_direction="+x")
+        assert case.converged
+        checks = run_checks(m, [case])
+        return max(c.utilization for c in checks if c.check == "BUCKLING"
+                   and c.target.startswith("member")
+                   and m.members[int(c.target.split()[1])].member_set
+                   == "uprights"
+                   and max(m.nodes[m.members[int(c.target.split()[1])].node_i].z,
+                           m.nodes[m.members[int(c.target.split()[1])].node_j].z)
+                   <= _RH + 1e-6)
+
+    u_mono = worst_zone_util()                      # default monolithic
+    u_sep = worst_zone_util(stiffener_modelling="separate")
+    assert u_mono <= u_sep * 1.001
