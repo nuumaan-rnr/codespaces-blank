@@ -27,3 +27,4 @@ charts_099_beam150/
 # generated solver-export deliverables
 *_SAP2000_export.xlsx
 ProjectA_SAP2000_export.xlsx
+graphify-out/
