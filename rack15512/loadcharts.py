@@ -402,15 +402,18 @@ def _label(btype, pitch, xs):
 
 
 def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
-                      nlev=None, compute_alpha_cr=False, include_sls=False):
-    """Single-module 3-bay rack at a per-level load, reduced to the governing
-    ULS2 combination with down-aisle imperfection (fast capacity eval).
+                      nlev=None, compute_alpha_cr=False, include_sls=False,
+                      n_bays=None):
+    """Single-module (single row, not back-to-back - module="single") rack at
+    a per-level load, reduced to the governing ULS2 combination with
+    down-aisle imperfection (fast capacity eval).
 
     compute_alpha_cr: when True, runs the first-order companion solve per ULS
     case so CaseResult.alpha_cr_estimate is available (used by the alpha_cr>=
     limit constraint in _eval_util); off by default to keep the sweep fast.
     include_sls: when True, also keeps the (linear, order=1) SLS1 combination
-    so beam deflection can be evaluated under service loads."""
+    so beam deflection can be evaluated under service loads.
+    n_bays: overrides MODEL_NBAYS (default 3) for this build."""
     import dataclasses
     from .builder import RackConfig, build_rack, LevelSpec
     nlev = int(nlev or MODEL_NLEV)
@@ -419,7 +422,7 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
     h = nlev * gap + 200.0
     kw["levels"] = [LevelSpec(gap=gap, beam_section=MODEL_BEAM, pallet_load=load)
                     for _ in range(nlev)]
-    kw.update(master=mw, module="single", n_bays=MODEL_NBAYS,
+    kw.update(master=mw, module="single", n_bays=int(n_bays or MODEL_NBAYS),
               upright_section=section, beam_section=MODEL_BEAM,
               bracing_type=btype, bracing_pitch=pitch, frame_height=h,
               pallet_load_per_level=load, ca_brace_zones=(), ca_x_height=None,
@@ -636,7 +639,7 @@ DEFL_CAP_MM = 15.0          # ... capped at 15 mm net deflection, whichever bind
 
 
 def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
-               alpha_cr_min=None, check_deflection=False):
+               alpha_cr_min=None, check_deflection=False, n_bays=None):
     """Governing utilisation at (load per level, nlev), folding in all four
     capacity criteria (see module note above).  Returns a dict:
 
@@ -662,7 +665,7 @@ def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
     from .checks.en15512 import run_checks
     m = _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load, nlev,
                           compute_alpha_cr=bool(alpha_cr_min),
-                          include_sls=check_deflection)
+                          include_sls=check_deflection, n_bays=n_bays)
     if m is None:
         return None
     sentinel = dict(converged=False, gov=99.0, stress_util=99.0,
@@ -716,7 +719,8 @@ def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
 
 
 def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
-               max_load=1.0e9, alpha_cr_min=None, check_deflection=False):
+               max_load=1.0e9, alpha_cr_min=None, check_deflection=False,
+               n_bays=None):
     """At a fixed level count, tune the load per level so the governing
     utilisation (see _eval_util) reaches the 0.97..0.99 band, never exceeding
     max_load.  Returns the best converged point - a dict as _eval_util plus
@@ -729,7 +733,7 @@ def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
     for _ in range(7):
         r = _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
                        alpha_cr_min=alpha_cr_min,
-                       check_deflection=check_deflection)
+                       check_deflection=check_deflection, n_bays=n_bays)
         if r is None:
             return None
         gov = r["gov"]
@@ -755,42 +759,44 @@ def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
 
 
 def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
-                     cap_kg=None, alpha_cr_min=None, check_deflection=False):
-    """Find (n_levels, load per level) giving the governing utilisation (see
-    _eval_util) in 0.97..0.99 with the load per level HARD-capped at
-    UTIL_LOAD_CAP_KG.
+                     cap_kg=None, alpha_cr_min=None, check_deflection=False,
+                     n_bays=None, min_levels=1, floor_kg=None,
+                     max_levels=None):
+    """Find the (n_levels, load per level) that MAXIMISES total frame capacity
+    (n * load) with the load per level bounded to [floor_kg, cap_kg]
+    (defaults UTIL_LOAD_FLOOR_KG/UTIL_LOAD_CAP_KG) and at least min_levels
+    beam levels, subject to the governing utilisation (see _eval_util)
+    staying <= UTIL_HI (0.99).
 
-    Capacity is built by ADDING LEVELS (not weight): the load stays at the cap
-    and the level count is raised until util enters the band; only when the band
-    falls between two integer level counts is the load trimmed below the cap at
-    the higher level count (more levels, lighter).  With the load fixed a stiffer
-    config carries more levels, so capacity is monotone XS > X > D.
+    Levels are climbed one at a time from min_levels: at each level count the
+    load is tuned within [floor_kg, cap_kg] to land the governing utilisation
+    as close to UTIL_TARGET as the bounds allow (_tune_load).  Some criteria
+    (e.g. beam DEFLECTION) barely depend on level count, so adding levels
+    keeps raising total capacity even while the per-level load holds near the
+    cap; once BUCKLING/STRESS/ALPHA_CR (which do grow with height/stacked
+    axial load) start forcing the load down faster than levels are gained,
+    total capacity peaks and the climb stops (a few consecutive
+    non-improving levels, or the floor load itself becomes infeasible).
 
     alpha_cr_min: when given, the elastic critical load factor alpha_cr is
     folded into the governing utilisation as an extra "stability util"
-    alpha_cr_min / alpha_cr (see _eval_util), so a config that would need
-    alpha_cr < alpha_cr_min to reach the 0.97..0.99 stress/buckling band is
-    instead tuned to alpha_cr ~= alpha_cr_min - the frame stays sway-safe even
-    where the section itself has more stress/buckling capacity to give.
+    alpha_cr_min / alpha_cr (see _eval_util).
     check_deflection: when True, also folds in the beam-deflection utilisation
     (SLS, vs min(L/DEFL_RATIO, DEFL_CAP_MM)) into the governing utilisation.
+    n_bays: overrides MODEL_NBAYS for the built rack (single row, module
+    "single" - never back-to-back).
     """
     lcr_ca = pitch if btype == "X" else 2.0 * pitch
     if xs:
         depth = round(mw.library.get(section).depth_h or 0.0)
         if depth not in (90, 120):
             return None
-    cap = (cap_kg or UTIL_LOAD_CAP_KG) * G_ACC       # N per level (hard cap)
-
-    def at_cap(n):
-        """(feasible, result_dict) at the cap load for n levels; feasible =
-        converged and util <= UTIL_HI."""
-        r = _eval_util(mw, arch, section, gap, btype, pitch, xs, cap, n,
-                       alpha_cr_min=alpha_cr_min,
-                       check_deflection=check_deflection)
-        if r is None:
-            return None
-        return (r["converged"] and r["gov"] <= UTIL_HI, r)
+    cap_kg = cap_kg or UTIL_LOAD_CAP_KG
+    floor_kg = floor_kg or UTIL_LOAD_FLOOR_KG
+    min_levels = max(int(min_levels), 1)
+    max_n = min(int(max_levels) if max_levels else MAX_LEVELS_CAP, MAX_LEVELS_CAP)
+    cap = cap_kg * G_ACC                              # N per level (hard cap)
+    floor = floor_kg * G_ACC                           # N per level (hard floor)
 
     def pack(n, load, r):
         out = {"section": section, "config": _label(btype, pitch, xs),
@@ -812,92 +818,65 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
                                  buckling_util=0.0, deflection_util=0.0,
                                  gov=0.0, alpha_cr=None))
 
-    def reduced(n):
-        """n levels with the load trimmed below the cap to land util in band;
-        returns a dict (as _tune_load) or None."""
-        return _tune_load(mw, arch, section, gap, btype, pitch, xs, n, cap,
-                          max_load=cap, alpha_cr_min=alpha_cr_min,
-                          check_deflection=check_deflection)
+    def eval_load(n, load):
+        return _eval_util(mw, arch, section, gap, btype, pitch, xs, load, n,
+                          alpha_cr_min=alpha_cr_min,
+                          check_deflection=check_deflection, n_bays=n_bays)
 
-    _cache: Dict[int, object] = {}
+    def tuned_at(n, prev_load=None):
+        """Best (result dict incl. "load") at level n, load in [floor, cap].
+        None only when even the floor load can't reach a converged, <=UTIL_HI
+        design at this level count (i.e. n is structurally infeasible).
 
-    def cap_eval(n):
-        if n not in _cache:
-            _cache[n] = at_cap(n)
-        return _cache[n]
-
-    # --- find N_max = the largest level count that fits at the cap load -------
-    # (converged AND util <= UTIL_HI).  Feasibility is monotone in n (taller =
-    # less stable / higher util), so walk up/down from the seed.
-    n = max(int(n_seed) if n_seed else 3, 1)
-    f = cap_eval(n)
-    if f is None:
-        return empty()
-    if f[0]:                                          # seed fits -> climb up
-        N_max = n
-        while N_max < MAX_LEVELS_CAP:
-            g = cap_eval(N_max + 1)
-            if g is None or not g[0]:
-                break
-            N_max += 1
-    else:                                             # seed too tall -> descend
-        N_max = 0
-        m = n - 1
-        while m >= 1:
-            g = cap_eval(m)
-            if g is not None and g[0]:
-                N_max = m
-                break
-            m -= 1
-
-    # --- candidates: maximise capacity (n * load) with load<=cap, util<=UTIL_HI
-    cands = []                          # (frame_kg, n, load, result_dict)
-    if N_max >= 1:
-        a = cap_eval(N_max)
-        cands.append((UTIL_LOAD_CAP_KG * N_max, N_max, cap, a[1]))
-    # one extra level at a trimmed (sub-cap) load - usually more total capacity
-    rb = reduced(N_max + 1)
-    if rb and rb["gov"] <= UTIL_HI + 1e-6:
-        cands.append((rb["load"] / G_ACC * (N_max + 1), N_max + 1, rb["load"],
-                      rb))
-    if N_max == 0:                                    # even 1 level over at cap
-        r1 = reduced(1)
-        if r1:
-            cands.append((r1["load"] / G_ACC, 1, r1["load"], r1))
-    if not cands:
-        return empty()
-    # pick the highest capacity (frame load); util is <= UTIL_HI by construction
-    best = max(cands, key=lambda c: c[0])             # (frame, n, load, dict)
-    if best[3]["gov"] >= UTIL_LO:                     # already in band -> done
-        return pack(best[1], best[2], best[3])
-
-    # sway/cap-limited below the band: the load cap left the frame's capacity
-    # under-used -> ADD LEVELS and REDUCE the load (down to UTIL_LOAD_FLOOR_KG)
-    # so the same buckling capacity is reached over more, lighter levels.  The
-    # extra-level climb is bounded (a few levels above N_max) and stops at the
-    # first in-band result, so it cannot run away into huge, very slow models.
-    floor = UTIL_LOAD_FLOOR_KG * G_ACC
-    misses = 0
-    n2 = max(N_max + 1, 2)
-    n2_max = min(MAX_LEVELS_CAP, max(N_max, 1) + 6)
-    while n2 <= n2_max and misses < 3:
-        r = _tune_load(mw, arch, section, gap, btype, pitch, xs, n2, cap,
+        Three fast paths before the 7-iteration bisection, cheapest first:
+        (1) prev_load (the load that worked one level down) - criteria like
+        beam DEFLECTION barely depend on level count, so the same load often
+        stays feasible for many consecutive levels; (2) the CAP load itself;
+        only when neither is feasible does it fall back to _tune_load (and
+        then the floor clamp)."""
+        if prev_load is not None:
+            p = eval_load(n, prev_load)
+            if p is not None and p["converged"] and p["gov"] <= UTIL_HI:
+                return dict(p, load=prev_load)
+        a = eval_load(n, cap)
+        if a is None:
+            return None
+        if a["converged"] and a["gov"] <= UTIL_HI:
+            return dict(a, load=cap)
+        r = _tune_load(mw, arch, section, gap, btype, pitch, xs, n, cap,
                        max_load=cap, alpha_cr_min=alpha_cr_min,
-                       check_deflection=check_deflection)
+                       check_deflection=check_deflection, n_bays=n_bays)
         if r is None:
-            break
-        if r["load"] < floor - 1.0:                   # would need < 1500 kg -> stop
-            break
-        frame_r = r["load"] / G_ACC * n2
-        if UTIL_LO <= r["gov"] <= UTIL_HI:            # reached the band -> done
-            return pack(n2, r["load"], r)
-        misses += 1
-        # keep the closest-to-target as an improved fallback (still load>=floor)
-        if abs(r["gov"] - UTIL_TARGET) < abs(best[3]["gov"] - UTIL_TARGET):
-            best = (frame_r, n2, r["load"], r)
-        n2 += 1
+            return None
+        if r["load"] >= floor - 1.0:
+            return r
+        # the bisection wants a load below the floor -> clamp to the floor
+        # and accept whatever (possibly under-target) utilisation results
+        rf = eval_load(n, floor)
+        if rf is None or not rf["converged"] or rf["gov"] > UTIL_HI + 1e-6:
+            return None                                # infeasible at the floor
+        return dict(rf, load=floor)
 
-    return pack(best[1], best[2], best[3])
+    best_n, best_r, best_frame = None, None, -1.0
+    misses = 0
+    n = min_levels
+    prev_load = None
+    while n <= max_n and misses < 3:
+        r = tuned_at(n, prev_load)
+        if r is None:
+            break                       # this level count can't be built at all
+        prev_load = r["load"]
+        frame_kg = r["load"] / G_ACC * n
+        if best_r is None or frame_kg > best_frame + 1e-6:
+            best_frame, best_n, best_r = frame_kg, n, r
+            misses = 0
+        else:
+            misses += 1
+        n += 1
+
+    if best_r is None:
+        return empty()
+    return pack(best_n, best_r["load"], best_r)
 
 
 _WORKER: dict = {}
@@ -1131,12 +1110,16 @@ def _plot_levels(name, curves, path):
 # utilization-targeted chart generator (parallel, resumable)
 # --------------------------------------------------------------------------
 def _wpoint_util(args):
-    s, bt, p, xs, g, nseed, alpha_cr_min, check_deflection = args
+    (s, bt, p, xs, g, nseed, alpha_cr_min, check_deflection, cap_kg, floor_kg,
+     min_levels, n_bays, max_levels) = args
     key = f"{s}|{_label(bt, p, xs)}|{g}"
     try:
         pt = model_util_point(_WORKER["mw"], _WORKER["arch"], s, float(g),
-                              bt, p, xs, nseed, alpha_cr_min=alpha_cr_min,
-                              check_deflection=check_deflection)
+                              bt, p, xs, nseed, cap_kg=cap_kg,
+                              alpha_cr_min=alpha_cr_min,
+                              check_deflection=check_deflection,
+                              n_bays=n_bays, min_levels=min_levels,
+                              floor_kg=floor_kg, max_levels=max_levels)
     except Exception:
         pt = None
     return key, (pt or {})
@@ -1237,16 +1220,22 @@ def _read_level_seeds(path):
 def generate_util_based(master_path, out_dir, seeds_file=None,
                         checkpoint=None, workers=None, sections=None,
                         da_range=None, alpha_cr_min=None,
-                        check_deflection=False):
-    """Resumable, parallel utilisation-targeted chart: for every case tune the
-    soft load per level (and slightly the level count) so the governing upright
-    util (max of STRESS over all members, upright BUCKLING, - when
-    check_deflection - beam DEFLECTION vs min(L/200, 15 mm), and - when
-    alpha_cr_min is given - the stability util alpha_cr_min/alpha_cr) lands in
-    0.97..0.99.  Level counts are seeded from a prior chart (seeds_file) when
-    given.  `sections` restricts the upright list (default: all in the
-    master).  `da_range` overrides the default Lcr_DA grid (MODEL_DA) for
-    this run only."""
+                        check_deflection=False, cap_kg=None, floor_kg=None,
+                        min_levels=1, n_bays=None, max_levels=None):
+    """Resumable, parallel utilisation-targeted chart: for every case, climb
+    the level count from min_levels and tune the load per level within
+    [floor_kg, cap_kg] so the governing utilisation (max of STRESS over all
+    members, upright BUCKLING, - when check_deflection - beam DEFLECTION vs
+    min(L/200, 15 mm), and - when alpha_cr_min is given - the stability util
+    alpha_cr_min/alpha_cr) lands in 0.97..0.99, picking the level count that
+    maximises total frame capacity (see model_util_point).  `sections`
+    restricts the upright list (default: all in the master).  `da_range`
+    overrides the default Lcr_DA grid (MODEL_DA) for this run only.
+    `cap_kg`/`floor_kg` bound the load per level (default
+    UTIL_LOAD_CAP_KG/UTIL_LOAD_FLOOR_KG); `min_levels`/`max_levels` bound the
+    beam levels considered; `n_bays` overrides MODEL_NBAYS (single row,
+    module "single").  seeds_file is currently unused (level count is always
+    climbed from min_levels)."""
     import multiprocessing as mp
     os.makedirs(out_dir, exist_ok=True)
     checkpoint = checkpoint or os.path.join(out_dir, "_util_checkpoint.json")
@@ -1256,7 +1245,6 @@ def generate_util_based(master_path, out_dir, seeds_file=None,
     all_secs = load_master(master_path).library.names("upright")
     sections = [s for s in all_secs if s in sections] if sections else all_secs
     da_grid = list(da_range) if da_range else MODEL_DA
-    seeds = _read_level_seeds(seeds_file)
     todo = []
     for s in sections:
         for (_lbl, bt, p, xs) in MODEL_CONFIGS:
@@ -1264,15 +1252,18 @@ def generate_util_based(master_path, out_dir, seeds_file=None,
                 key = f"{s}|{_label(bt, p, xs)}|{g}"
                 if key in done:
                     continue
-                nseed = seeds.get((s, _label(bt, p, xs), int(g)), 3)
-                todo.append((s, bt, p, xs, g, nseed, alpha_cr_min,
-                            check_deflection))
+                todo.append((s, bt, p, xs, g, None, alpha_cr_min,
+                            check_deflection, cap_kg, floor_kg, min_levels,
+                            n_bays, max_levels))
     total = len(sections) * len(MODEL_CONFIGS) * len(da_grid)
     workers = workers or min(4, os.cpu_count() or 1)
     print(f"util-target grid: {total} pts, {len(todo)} to do, {workers} workers, "
           f"target util {UTIL_LO}-{UTIL_HI}"
           + (f", alpha_cr>={alpha_cr_min:g}" if alpha_cr_min else "")
-          + (", deflection<=min(L/200,15mm)" if check_deflection else ""),
+          + (", deflection<=min(L/200,15mm)" if check_deflection else "")
+          + f", load {floor_kg or UTIL_LOAD_FLOOR_KG:g}-{cap_kg or UTIL_LOAD_CAP_KG:g} kg/level"
+          + f", levels {min_levels}-{max_levels or MAX_LEVELS_CAP}"
+          + (f", n_bays={n_bays}" if n_bays else ""),
           flush=True)
     n = 0
     with mp.Pool(workers, initializer=_winit, initargs=(master_path,)) as pool:
