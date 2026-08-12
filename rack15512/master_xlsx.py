@@ -822,3 +822,27 @@ def _is_number(s: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def load_master_json(path: str) -> MasterWorkbook:
+    """Load a master exported as JSON (the app's own master-export format:
+    {"sections": {name: {...CrossSection fields...}}, "base_tables":
+    {upright: [[N, k, M_Rd], ...]}, "fy": {name: fy}}) - an alternative to
+    the .xlsx importers above for masters that were exported/shared as JSON."""
+    import json
+    import dataclasses
+    with open(path, encoding="utf-8") as f:
+        d = json.load(f)
+    valid = {f.name for f in dataclasses.fields(CrossSection)}
+    sections = {name: CrossSection(**{k: v for k, v in row.items() if k in valid})
+               for name, row in d.get("sections", {}).items()}
+    base_tables = {up: [tuple(row) for row in table]
+                   for up, table in d.get("base_tables", {}).items()}
+    return MasterWorkbook(library=SectionLibrary(sections),
+                          base_tables=base_tables, fy=dict(d.get("fy", {})))
+
+
+def load_any_master(path: str) -> MasterWorkbook:
+    """load_master (.xlsx) or load_master_json (.json), by extension."""
+    return (load_master_json(path) if str(path).lower().endswith(".json")
+           else load_master(path))

@@ -34,7 +34,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import branding
 from .builder import _closed_upright_section
-from .master_xlsx import load_master
+from .master_xlsx import load_master, load_any_master
 from .model import CrossSection, Steel
 from .presize import upright_utilisation
 
@@ -382,7 +382,12 @@ MODEL_DA = list(range(250, 4001, 100))     # beam gap = Lcr_DA [mm], 100 mm step
 # load / resistance factors used by the model-based chart (overridable):
 CHART_GAMMA_G = 1.2         # dead load factor at ULS (was 1.3)
 CHART_GAMMA_Q = 1.2         # imposed (pallet) load factor at ULS (was 1.4)
-CHART_GAMMA_M1 = 1.0        # member buckling resistance factor (was 1.1)
+# EN 15512 standard buckling resistance factor.  A real per-project Design
+# Validation Report (full app run) showed the down-aisle direction FAILING TO
+# CONVERGE at a load this chart, run at the previous gamma_M1=1.0 ("no
+# derate") convention, had reported as safely within utilisation - revert to
+# the standard 1.1 so the chart matches the app's own real behaviour.
+CHART_GAMMA_M1 = 1.1
 # (label, bracing_type, pitch, with-stiffener) - 600 mm pitch only
 MODEL_CONFIGS = [
     ("X-600", "X", 600.0, False),
@@ -403,7 +408,7 @@ def _label(btype, pitch, xs):
 
 def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
                       nlev=None, compute_alpha_cr=False, include_sls=False,
-                      n_bays=None):
+                      n_bays=None, beam_name=None):
     """Single-module (single row, not back-to-back - module="single") rack at
     a per-level load, reduced to the governing ULS2 combination with
     down-aisle imperfection (fast capacity eval).
@@ -413,17 +418,21 @@ def _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load,
     limit constraint in _eval_util); off by default to keep the sweep fast.
     include_sls: when True, also keeps the (linear, order=1) SLS1 combination
     so beam deflection can be evaluated under service loads.
-    n_bays: overrides MODEL_NBAYS (default 3) for this build."""
+    n_bays: overrides MODEL_NBAYS (default 3) for this build.
+    beam_name: overrides MODEL_BEAM (the uniform beam used at every level);
+    default None keeps the fixed reference beam for backward compatibility
+    with the other (non-util-based) chart generators in this module."""
     import dataclasses
     from .builder import RackConfig, build_rack, LevelSpec
     nlev = int(nlev or MODEL_NLEV)
+    beam_name = beam_name or MODEL_BEAM
     fields = {f.name for f in dataclasses.fields(RackConfig)}
     kw = {k: v for k, v in arch.items() if k in fields}
     h = nlev * gap + 200.0
-    kw["levels"] = [LevelSpec(gap=gap, beam_section=MODEL_BEAM, pallet_load=load)
+    kw["levels"] = [LevelSpec(gap=gap, beam_section=beam_name, pallet_load=load)
                     for _ in range(nlev)]
     kw.update(master=mw, module="single", n_bays=int(n_bays or MODEL_NBAYS),
-              upright_section=section, beam_section=MODEL_BEAM,
+              upright_section=section, beam_section=beam_name,
               bracing_type=btype, bracing_pitch=pitch, frame_height=h,
               pallet_load_per_level=load, ca_brace_zones=(), ca_x_height=None,
               steel_fy=FY_UPRIGHT, fy_override=True,
@@ -638,16 +647,46 @@ DEFL_RATIO = 200.0          # criterion 3: beam deflection <= L / 200 ...
 DEFL_CAP_MM = 15.0          # ... capped at 15 mm net deflection, whichever binds
 
 
-def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
-               alpha_cr_min=None, check_deflection=False, n_bays=None,
-               alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM):
-    """Governing utilisation at (load per level, nlev), folding in the active
-    capacity criteria (see module note above).  Returns a dict:
+def _beam_candidates(mw):
+    """Beam section names, ascending by cross-section area (lightest first)."""
+    names = mw.library.names("beam")
+    if not names:
+        raise ValueError("master has no beam sections")
+    return sorted(names, key=lambda n: mw.library.get(n).A)
+
+
+def _select_beam_start(mw, load_N, bay_width, cands):
+    """Index into `cands` of the lightest beam that passes a closed-form,
+    SIMPLY-SUPPORTED bending check at `load_N` (total per bay per level,
+    both rails) over `bay_width` - a cheap starting guess for the real
+    (semi-rigid-connector) full-FEA search in _eval_util.  The real beam-
+    to-upright connector is semi-rigid, which measurably reduces true
+    deflection/moment below the simply-supported estimate, so this is
+    deliberately bending-only and not authoritative - _eval_util's full FEA
+    is, and may accept an even lighter beam than this guess."""
+    w_line = (load_N / 2.0) / bay_width          # N/mm UDL per rail
+    m_max = w_line * bay_width ** 2 / 8.0
+    for i, name in enumerate(cands):
+        sec = mw.library.get(name)
+        fy = mw.fy.get(name, FY_UPRIGHT)
+        if m_max / sec.Wely <= fy / GAMMA_M0:
+            return i
+    return len(cands) - 1
+
+
+def _eval_at_beam(mw, arch, section, gap, btype, pitch, xs, load, nlev,
+                  beam_name, alpha_cr_min=None, check_deflection=False,
+                  n_bays=None, alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM):
+    """Governing utilisation at (load per level, nlev) with a SPECIFIC
+    beam_name, folding in the active capacity criteria (see module note
+    above).  Returns a dict:
 
       converged        bool - False (gov=99 sentinel) when the model is
                         unstable / no ULS combination converges at this load
       gov               max of the below (drives the 0.97..0.99 tuning loop)
       stress_util       max STRESS utilisation over ALL members (criterion 4)
+      stress_util_beam  STRESS restricted to the beam member set - used by
+                        _eval_util to decide whether a heavier beam helps
       buckling_util     max BUCKLING utilisation over the upright (+
                         upright-stiffener) members only (criterion 2)
       deflection_util   max beam-deflection utilisation vs
@@ -664,31 +703,43 @@ def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
                         limits capacity
       bottom_axial_kN   governing upright axial load, for reporting
 
+    A case that fails to CONVERGE (down-aisle sway instability, not merely
+    an over-utilisation) produces a STABILITY check (utilization=99) rather
+    than STRESS/BUCKLING entries - folded into `gov` directly so an unstable
+    point is never mistaken for a low-utilisation, safe one.
+
     Returns None when the (section, config) combination is not buildable
     (e.g. an XS stiffener depth mismatch)."""
     from .analysis import run_all
     from .checks.en15512 import run_checks
     m = _build_model_rack(mw, arch, section, gap, btype, pitch, xs, load, nlev,
                           compute_alpha_cr=bool(alpha_cr_min),
-                          include_sls=check_deflection, n_bays=n_bays)
+                          include_sls=check_deflection, n_bays=n_bays,
+                          beam_name=beam_name)
     if m is None:
         return None
     sentinel = dict(converged=False, gov=99.0, stress_util=99.0,
-                    buckling_util=99.0, deflection_util=99.0, alpha_cr=None,
-                    alpha_util=99.0, bottom_axial_kN=0.0)
+                    stress_util_beam=99.0, buckling_util=99.0,
+                    deflection_util=99.0, alpha_cr=None, alpha_util=99.0,
+                    bottom_axial_kN=0.0, beam=beam_name)
     try:
         cases = run_all(m)
         checks = run_checks(m, cases)
     except Exception:
         return sentinel
-    su = bu = 0.0
+    su = su_beam = bu = stab = 0.0
     n_ax = 0.0
     buckling_sets = ("uprights", "upright stiffeners")
     for ch in checks:
         if ch.informative:
             continue
+        if ch.check == "STABILITY":                  # a ULS/SLS case that
+            stab = max(stab, ch.utilization)          # failed to CONVERGE -
+            continue                                  # not a mere over-util
         if ch.check == "STRESS":                    # criterion 4: ALL members
             su = max(su, ch.utilization)
+            if ch.member_set == "pallet beams":
+                su_beam = max(su_beam, ch.utilization)
         elif ch.check == "BUCKLING" and ch.member_set in buckling_sets:
             bu = max(bu, ch.utilization)             # criterion 2: upright only
             x = ch.extra or {}
@@ -718,10 +769,47 @@ def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
         if estimates:
             alpha_cr_val = min(estimates)
             alpha_util = alpha_cr_min / alpha_cr_val
-    gov = max(su, bu, du, alpha_util if alpha_cr_governs else 0.0)
+    gov = max(su, bu, du, stab, alpha_util if alpha_cr_governs else 0.0)
     return dict(converged=(gov < 50.0 and gov > 0.0), gov=gov, stress_util=su,
-               buckling_util=bu, deflection_util=du, alpha_cr=alpha_cr_val,
-               alpha_util=alpha_util, bottom_axial_kN=n_ax)
+               stress_util_beam=su_beam, buckling_util=bu, deflection_util=du,
+               alpha_cr=alpha_cr_val, alpha_util=alpha_util,
+               bottom_axial_kN=n_ax, beam=beam_name)
+
+
+def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
+               alpha_cr_min=None, check_deflection=False, n_bays=None,
+               alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM):
+    """_eval_at_beam, but with the beam AUTO-SELECTED: starts from the
+    lightest beam that passes a closed-form bending check (cheap starting
+    guess - see _select_beam_start), then escalates to the next heavier
+    beam (up to 2 escalations) whenever the full-FEA result shows the BEAM
+    ITSELF governing (STRESS or DEFLECTION on the beam member set > 0.99) -
+    the real semi-rigid connector stiffness (not captured by the
+    closed-form guess) often makes a lighter beam adequate than the
+    starting guess suggests, so this only escalates on genuine full-model
+    evidence, never de-escalates.  Stops escalating (accepts the result as
+    the frame's answer) once the beam is no longer the binding constraint -
+    e.g. buckling, alpha_cr or a down-aisle STABILITY failure is what
+    actually limits this point (a bigger beam alone won't reliably fix a
+    sway-instability, so this doesn't chase that with beam escalation)."""
+    bay_width = arch.get("bay_width", 2700.0)   # RackConfig.bay_width default
+    cands = _beam_candidates(mw)
+    i0 = _select_beam_start(mw, load, bay_width, cands)
+    i = i0
+    while True:
+        r = _eval_at_beam(mw, arch, section, gap, btype, pitch, xs, load, nlev,
+                          cands[i], alpha_cr_min=alpha_cr_min,
+                          check_deflection=check_deflection, n_bays=n_bays,
+                          alpha_cr_governs=alpha_cr_governs,
+                          defl_cap_mm=defl_cap_mm)
+        if r is None:
+            return None
+        beam_inadequate = (r["converged"]
+                           and (r["stress_util_beam"] > UTIL_HI
+                                or r["deflection_util"] > UTIL_HI))
+        if not beam_inadequate or i >= min(i0 + 2, len(cands) - 1):
+            return r
+        i += 1
 
 
 def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
@@ -817,6 +905,7 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
         out.update(n_levels=int(n), load_per_level_kg=round(load_kg, 1),
                    frame_load_kg=round(load_kg * n, 1),
                    bottom_axial_kN=round(r["bottom_axial_kN"], 1),
+                   beam=r.get("beam"),
                    stress_util=round(r["stress_util"], 3),
                    buckling_util=round(r["buckling_util"], 3),
                    deflection_util=round(r.get("deflection_util", 0.0), 3),
@@ -827,7 +916,7 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
     def empty():
         return pack(0, 0.0, dict(bottom_axial_kN=0.0, stress_util=0.0,
                                  buckling_util=0.0, deflection_util=0.0,
-                                 gov=0.0, alpha_cr=None))
+                                 gov=0.0, alpha_cr=None, beam=None))
 
     def eval_load(n, load):
         return _eval_util(mw, arch, section, gap, btype, pitch, xs, load, n,
@@ -899,7 +988,7 @@ _WORKER: dict = {}
 
 
 def _winit(master_path):
-    _WORKER["mw"] = load_master(master_path)
+    _WORKER["mw"] = load_any_master(master_path)
     _WORKER["arch"] = _load_archetype()
 
 
@@ -1266,7 +1355,7 @@ def generate_util_based(master_path, out_dir, seeds_file=None,
     done = {}
     if os.path.exists(checkpoint):
         done = _json.load(open(checkpoint, encoding="utf-8"))
-    all_secs = load_master(master_path).library.names("upright")
+    all_secs = load_any_master(master_path).library.names("upright")
     sections = [s for s in all_secs if s in sections] if sections else all_secs
     da_grid = list(da_range) if da_range else MODEL_DA
     model_configs = ([c for c in MODEL_CONFIGS if c[0] in configs] if configs
@@ -1340,8 +1429,8 @@ def _finalize_util(done, out_dir, alpha_cr_min=None, check_deflection=False,
     acr_hdr = "alpha_cr (info only)" if not alpha_cr_governs else "alpha_cr"
     ws.append(["section", "config", "Lcr_CA_mm", "Lcr_DA_mm", "n_levels",
                "load_per_level_kg", "frame_load_kg", "bottom_upright_axial_kN",
-               "stress_util", "buckling_util", "deflection_util", acr_hdr,
-               "gov_util", "governs", "status"])
+               "beam", "stress_util", "buckling_util", "deflection_util",
+               acr_hdr, "gov_util", "governs", "status"])
     for key, pt in sorted(done.items()):
         if pt:
             gov = pt.get("gov_util")
@@ -1365,7 +1454,7 @@ def _finalize_util(done, out_dir, alpha_cr_min=None, check_deflection=False,
             ws.append([pt["section"], pt["config"], pt["lcr_ca"], pt["lcr_da"],
                        pt.get("n_levels"), pt.get("load_per_level_kg"),
                        pt.get("frame_load_kg"), pt.get("bottom_axial_kN"),
-                       su, bu, du, acr, gov, governs, status])
+                       pt.get("beam"), su, bu, du, acr, gov, governs, status])
     xlsx = os.path.join(out_dir, "Upright_Load_Chart_Utilised.xlsx")
     wb.save(xlsx)
     png_zip = os.path.join(out_dir, "upright_util_png.zip")
