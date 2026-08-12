@@ -778,8 +778,10 @@ def _eval_at_beam(mw, arch, section, gap, btype, pitch, xs, load, nlev,
 
 def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
                alpha_cr_min=None, check_deflection=False, n_bays=None,
-               alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM):
-    """_eval_at_beam, but with the beam AUTO-SELECTED: starts from the
+               alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM,
+               beam_name=None):
+    """_eval_at_beam, but with the beam AUTO-SELECTED (unless beam_name is
+    given, which fixes it and skips all of the below): starts from the
     lightest beam that passes a closed-form bending check (cheap starting
     guess - see _select_beam_start), then escalates to the next heavier
     beam (up to 2 escalations) whenever the full-FEA result shows the BEAM
@@ -792,6 +794,12 @@ def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
     e.g. buckling, alpha_cr or a down-aisle STABILITY failure is what
     actually limits this point (a bigger beam alone won't reliably fix a
     sway-instability, so this doesn't chase that with beam escalation)."""
+    if beam_name:
+        return _eval_at_beam(mw, arch, section, gap, btype, pitch, xs, load,
+                             nlev, beam_name, alpha_cr_min=alpha_cr_min,
+                             check_deflection=check_deflection, n_bays=n_bays,
+                             alpha_cr_governs=alpha_cr_governs,
+                             defl_cap_mm=defl_cap_mm)
     bay_width = arch.get("bay_width", 2700.0)   # RackConfig.bay_width default
     cands = _beam_candidates(mw)
     i0 = _select_beam_start(mw, load, bay_width, cands)
@@ -814,7 +822,8 @@ def _eval_util(mw, arch, section, gap, btype, pitch, xs, load, nlev,
 
 def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
                max_load=1.0e9, alpha_cr_min=None, check_deflection=False,
-               n_bays=None, alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM):
+               n_bays=None, alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM,
+               beam_name=None):
     """At a fixed level count, tune the load per level so the governing
     utilisation (see _eval_util) reaches the 0.97..0.99 band, never exceeding
     max_load.  Returns the best converged point - a dict as _eval_util plus
@@ -829,7 +838,7 @@ def _tune_load(mw, arch, section, gap, btype, pitch, xs, nlev, seed,
                        alpha_cr_min=alpha_cr_min,
                        check_deflection=check_deflection, n_bays=n_bays,
                        alpha_cr_governs=alpha_cr_governs,
-                       defl_cap_mm=defl_cap_mm)
+                       defl_cap_mm=defl_cap_mm, beam_name=beam_name)
         if r is None:
             return None
         gov = r["gov"]
@@ -858,7 +867,7 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
                      cap_kg=None, alpha_cr_min=None, check_deflection=False,
                      n_bays=None, min_levels=1, floor_kg=None,
                      max_levels=None, alpha_cr_governs=True,
-                     defl_cap_mm=DEFL_CAP_MM):
+                     defl_cap_mm=DEFL_CAP_MM, beam_name=None):
     """Find the (n_levels, load per level) that MAXIMISES total frame capacity
     (n * load) with the load per level bounded to [floor_kg, cap_kg]
     (defaults UTIL_LOAD_FLOOR_KG/UTIL_LOAD_CAP_KG) and at least min_levels
@@ -923,7 +932,7 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
                           alpha_cr_min=alpha_cr_min,
                           check_deflection=check_deflection, n_bays=n_bays,
                           alpha_cr_governs=alpha_cr_governs,
-                          defl_cap_mm=defl_cap_mm)
+                          defl_cap_mm=defl_cap_mm, beam_name=beam_name)
 
     def tuned_at(n, prev_load=None):
         """Best (result dict incl. "load") at level n, load in [floor, cap].
@@ -949,7 +958,7 @@ def model_util_point(mw, arch, section, gap, btype, pitch, xs, n_seed=3,
                        max_load=cap, alpha_cr_min=alpha_cr_min,
                        check_deflection=check_deflection, n_bays=n_bays,
                        alpha_cr_governs=alpha_cr_governs,
-                       defl_cap_mm=defl_cap_mm)
+                       defl_cap_mm=defl_cap_mm, beam_name=beam_name)
         if (r is not None and r["gov"] <= UTIL_HI + 1e-6
                 and r["load"] >= floor - 1.0):
             return r
@@ -1216,7 +1225,8 @@ def _plot_levels(name, curves, path):
 # --------------------------------------------------------------------------
 def _wpoint_util(args):
     (s, bt, p, xs, g, nseed, alpha_cr_min, check_deflection, cap_kg, floor_kg,
-     min_levels, n_bays, max_levels, alpha_cr_governs, defl_cap_mm) = args
+     min_levels, n_bays, max_levels, alpha_cr_governs, defl_cap_mm,
+     beam_name) = args
     key = f"{s}|{_label(bt, p, xs)}|{g}"
     try:
         pt = model_util_point(_WORKER["mw"], _WORKER["arch"], s, float(g),
@@ -1226,7 +1236,7 @@ def _wpoint_util(args):
                               n_bays=n_bays, min_levels=min_levels,
                               floor_kg=floor_kg, max_levels=max_levels,
                               alpha_cr_governs=alpha_cr_governs,
-                              defl_cap_mm=defl_cap_mm)
+                              defl_cap_mm=defl_cap_mm, beam_name=beam_name)
     except Exception:
         pt = None
     return key, (pt or {})
@@ -1330,7 +1340,7 @@ def generate_util_based(master_path, out_dir, seeds_file=None,
                         check_deflection=False, cap_kg=None, floor_kg=None,
                         min_levels=1, n_bays=None, max_levels=None,
                         alpha_cr_governs=True, defl_cap_mm=DEFL_CAP_MM,
-                        configs=None):
+                        configs=None, beam_name=None):
     """Resumable, parallel utilisation-targeted chart: for every case, climb
     the level count from min_levels and tune the load per level within
     [floor_kg, cap_kg] so the governing utilisation (max of STRESS over all
@@ -1347,8 +1357,11 @@ def generate_util_based(master_path, out_dir, seeds_file=None,
     only.  `cap_kg`/`floor_kg` bound the load per level (default
     UTIL_LOAD_CAP_KG/UTIL_LOAD_FLOOR_KG); `min_levels`/`max_levels` bound the
     beam levels considered; `n_bays` overrides MODEL_NBAYS (single row,
-    module "single").  seeds_file is currently unused (level count is always
-    climbed from min_levels)."""
+    module "single").  `beam_name` fixes the beam section for every point
+    (e.g. "RHS122X61X1.6"), skipping the usual auto-selection (default None:
+    auto-select the lightest adequate beam per point, see _eval_util).
+    seeds_file is currently unused (level count is always climbed from
+    min_levels)."""
     import multiprocessing as mp
     os.makedirs(out_dir, exist_ok=True)
     checkpoint = checkpoint or os.path.join(out_dir, "_util_checkpoint.json")
@@ -1369,7 +1382,8 @@ def generate_util_based(master_path, out_dir, seeds_file=None,
                     continue
                 todo.append((s, bt, p, xs, g, None, alpha_cr_min,
                             check_deflection, cap_kg, floor_kg, min_levels,
-                            n_bays, max_levels, alpha_cr_governs, defl_cap_mm))
+                            n_bays, max_levels, alpha_cr_governs, defl_cap_mm,
+                            beam_name))
     total = len(sections) * len(model_configs) * len(da_grid)
     workers = workers or min(4, os.cpu_count() or 1)
     print(f"util-target grid: {total} pts, {len(todo)} to do, {workers} workers, "
@@ -1383,6 +1397,7 @@ def generate_util_based(master_path, out_dir, seeds_file=None,
           + f", load {floor_kg or UTIL_LOAD_FLOOR_KG:g}-{cap_kg or UTIL_LOAD_CAP_KG:g} kg/level"
           + f", levels {min_levels}-{max_levels or MAX_LEVELS_CAP}"
           + (f", n_bays={n_bays}" if n_bays else "")
+          + (f", beam={beam_name} (fixed)" if beam_name else ", beam=auto")
           + f", configs={[c[0] for c in model_configs]}",
           flush=True)
     n = 0
