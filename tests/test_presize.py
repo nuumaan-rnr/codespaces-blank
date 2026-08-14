@@ -79,3 +79,58 @@ def test_static_demand_selective_and_drive_in():
     # down-aisle (Iz) buckling is much longer than cross-aisle (Iy)
     assert di["Lcr_z"] > di["Lcr_y"]
     assert di["n_levels"] == 3
+
+
+def test_beam_bending_utilisation_matches_hand_calc():
+    """M_max = w*L^2/8 (UDL per rail = half the bay load / span), util =
+    safety_factor * M_max / M_Rd with M_Rd from the MAJOR axis (Welz)."""
+    lib = SectionLibrary.bundled()
+    sec = lib.get("BM-100x40x1.5")
+    span, load_per_bay, fy = 2700.0, 35000.0, 355.0
+    u = presize.beam_bending_utilisation(sec, fy, span, load_per_bay,
+                                         safety_factor=1.2)
+    w = (load_per_bay / 2.0) / span
+    m_max = w * span ** 2 / 8.0
+    m_rd = sec.Welz * fy
+    assert abs(u["M_max"] - m_max) < 1e-6
+    assert abs(u["M_Rd"] - m_rd) < 1e-6
+    assert abs(u["util"] - 1.2 * m_max / m_rd) < 1e-9
+
+
+def test_beam_safety_factor_changes_pass_fail_boundary():
+    """The same demand passes at SF 1.0 but fails at SF 1.2, for a load
+    chosen right at that section's SF-1.2 utilisation boundary."""
+    lib = SectionLibrary.bundled()
+    sec = lib.get("BM-100x40x1.5")
+    span, load_per_bay, fy = 2700.0, 35000.0, 355.0
+    u_10 = presize.beam_bending_utilisation(sec, fy, span, load_per_bay,
+                                            safety_factor=1.0)
+    u_12 = presize.beam_bending_utilisation(sec, fy, span, load_per_bay,
+                                            safety_factor=1.2)
+    assert u_10["util"] <= 1.0
+    assert u_12["util"] > 1.0
+    assert abs(u_12["util"] - 1.2 * u_10["util"]) < 1e-9
+
+
+def test_suggest_beams_ranks_and_recommends():
+    lib = SectionLibrary.bundled()
+    rows = presize.suggest_beams(lib, lambda n: 355.0, span=2700.0,
+                                 load_per_bay=35000.0)
+    assert rows
+    assert [r["area"] for r in rows] == sorted(r["area"] for r in rows)
+    assert all(r["util"] <= 1.0 + 1e-9 for r in rows if r["passes"])
+    rec = [r for r in rows if r["recommended"]]
+    assert len(rec) == 1
+    lightest_pass = next(r for r in rows if r["passes"])
+    assert rec[0]["name"] == lightest_pass["name"]
+
+
+def test_suggest_beams_heavier_load_needs_heavier_section():
+    lib = SectionLibrary.bundled()
+    light = presize.suggest_beams(lib, lambda n: 355.0, span=2700.0,
+                                  load_per_bay=15000.0)
+    heavy = presize.suggest_beams(lib, lambda n: 355.0, span=2700.0,
+                                  load_per_bay=45000.0)
+    rec_light = next(r for r in light if r["recommended"])
+    rec_heavy = next(r for r in heavy if r["recommended"])
+    assert rec_heavy["area"] >= rec_light["area"]

@@ -513,6 +513,66 @@ def run_cancellable_poll(run_fn, label="Running analysis", key="run"):
     return ("done", h["result"])
 
 
+def run_in_background(config_dir: str, label: str = "Running analysis",
+                      key: str = "run"):
+    """Poll a rack15512.background_run-started subprocess via its on-disk
+    status file, rendering the same staged status box / progress bar / Stop
+    button as run_cancellable_poll.  Unlike run_cancellable_poll (a thread,
+    tied to this session's state), the run itself is a separate OS process
+    started by rack15512.background_run.start_run() - a Streamlit rerun
+    (from any click, anywhere) never touches it, and polling works from any
+    browser session or after a full page refresh since the status lives on
+    disk, not in session_state.  Drives itself by short reruns while the run
+    is not done (it calls st.rerun() and does NOT return in that case).
+
+    Returns one of:
+      ("done", summary)   - run finished; summary is the run's result dict
+      ("cancelled", None) - the user pressed Stop (or another session did)
+      ("error", status)   - run raised; status carries "error"/"error_type"
+    """
+    from .background_run import poll_status, request_cancel
+    status = poll_status(config_dir) or {
+        "done": False, "stage": "Starting…", "frac": 0.0, "elapsed": 0.0}
+
+    box = st.status(f"⚙️  {label}…", expanded=True,
+                    state="running" if not status["done"] else "complete")
+    box.progress(min(max(status.get("frac", 0.0), 0.0), 1.0))
+    stage = status.get("stage") or ""
+    el = status.get("elapsed", 0.0)
+    if stage:
+        box.write(f"• {stage}  ·  ⏱ {el:.0f}s")
+        log(f"{stage}  ({el:.0f}s)")
+        _render_console()
+
+    if not status["done"]:
+        if st.button("⛔ Stop analysis", key=f"_stop_{key}", type="secondary"):
+            if request_cancel(config_dir):
+                box.write("⛔ Stop requested — cancelling after the current "
+                          "step…")
+        _time.sleep(0.6)
+        st.rerun()                                 # poll again (exits here)
+
+    total = status.get("elapsed", 0.0)
+    if status.get("cancelled"):
+        box.update(label=f"⛔ Analysis cancelled after {total:.0f}s",
+                   state="error", expanded=False)
+        log("⛔ Analysis cancelled by user", "warn")
+        _render_console()
+        return ("cancelled", None)
+    if status.get("error"):
+        box.update(label=f"❌ Run failed after {total:.0f}s",
+                   state="error", expanded=True)
+        box.write(f"Error: {status['error']}")
+        log(f"FAILED: {status['error']}", "error")
+        _render_console()
+        return ("error", status)
+    box.update(label=f"✅  Analysis complete in {total:.0f}s",
+               state="complete", expanded=False)
+    log(f"✓ {label} complete in {total:.0f}s", "ok")
+    _render_console()
+    return ("done", status.get("summary"))
+
+
 def theme_toggle() -> None:
     cur = st.toggle("🌙 Dark mode", key="dark_mode")
     if cur != load_dark_pref():

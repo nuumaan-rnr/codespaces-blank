@@ -70,6 +70,70 @@ def test_upright_suggester_apply_no_error(tmp_path, monkeypatch):
     assert at.session_state["cfg_upright"]
 
 
+def test_beam_load_change_auto_suggests_heavier_section(tmp_path, monkeypatch):
+    """Raising a level's load past the current beam's SF-1.2 bending
+    capacity must swap in a heavier section on the SAME rerun the load
+    widget changes in - no click/rerun needed, unlike the upright suggester's
+    deferred-apply pattern (the beam widget hasn't been instantiated yet)."""
+    if not os.path.exists(MASTER):
+        pytest.skip("Master.xlsx not present")
+    monkeypatch.chdir(tmp_path)
+    from rack15512.master_store import MasterStore
+    from rack15512.project import ProjectStore
+    MasterStore("masters").import_xlsx(MASTER, name="Standard", company="Acme")
+    ps = ProjectStore("projects")
+    proj = ps.create_project("Job")
+    sysm = ps.add_system(proj.id, "Aisle 1")
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    _setss(at, view="configure", project_id=proj.id, system_id=sysm.id,
+          config_id=None, edit_cfg=None)
+    at.run()
+    assert not at.exception
+    beam0 = next((sb for sb in at.selectbox if sb.key == "b0"), None)
+    if beam0 is None:
+        pytest.skip("no beam-level selectbox rendered (drive-in layout?)")
+    initial = beam0.value
+
+    at.number_input(key="l0").set_value(3000.0).run()
+    assert not at.exception
+    beam0 = next(sb for sb in at.selectbox if sb.key == "b0")
+    assert beam0.value != initial       # a heavier load auto-picked a heavier section
+
+
+def test_beam_manual_override_survives_unrelated_rerun(tmp_path, monkeypatch):
+    """A manual beam pick must NOT be reset by touching an unrelated field
+    (the gap) - only a genuine bay-span or load change re-triggers the
+    auto-suggestion (basis-tracking keyed on (bay_width, load), not on every
+    rerun)."""
+    if not os.path.exists(MASTER):
+        pytest.skip("Master.xlsx not present")
+    monkeypatch.chdir(tmp_path)
+    from rack15512.master_store import MasterStore
+    from rack15512.project import ProjectStore
+    MasterStore("masters").import_xlsx(MASTER, name="Standard", company="Acme")
+    ps = ProjectStore("projects")
+    proj = ps.create_project("Job")
+    sysm = ps.add_system(proj.id, "Aisle 1")
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    _setss(at, view="configure", project_id=proj.id, system_id=sysm.id,
+          config_id=None, edit_cfg=None)
+    at.run()
+    assert not at.exception
+    beam0 = next((sb for sb in at.selectbox if sb.key == "b0"), None)
+    if beam0 is None:
+        pytest.skip("no beam-level selectbox rendered (drive-in layout?)")
+    manual = next(o for o in beam0.options if o != beam0.value)
+    at.selectbox(key="b0").set_value(manual).run()
+    assert not at.exception
+    assert next(sb for sb in at.selectbox if sb.key == "b0").value == manual
+
+    at.number_input(key="g0").set_value(1800.0).run()
+    assert not at.exception
+    assert next(sb for sb in at.selectbox if sb.key == "b0").value == manual
+
+
 def test_new_project_and_configure_shows_first_side(tmp_path, monkeypatch):
     if not os.path.exists(MASTER):
         pytest.skip("Master.xlsx not present")

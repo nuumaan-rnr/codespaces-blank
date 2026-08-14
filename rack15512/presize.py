@@ -95,6 +95,56 @@ def suggest_uprights(lib, fy_of: Callable[[str], float], *, N: float,
     return rows
 
 
+def beam_bending_utilisation(sec: CrossSection, fy: float, span: float,
+                             load_per_bay: float, *, gamma_M0: float = 1.0,
+                             safety_factor: float = 1.2) -> Dict:
+    """Closed-form simply-supported UDL bending check for one beam section:
+    M_max = w*L^2/8, gravity bending on the MAJOR axis (local z / Welz -
+    see model.py's convention note for non-vertical members), demand
+    factored by safety_factor before comparing to M_Rd = Welz_eff*fy/gamma_M0.
+
+    load_per_bay is the total factored load carried by the bay [N] (both
+    rails); each rail (beam) carries half, spread as a UDL over the span.
+    A transparent hand-calc pre-check only - the full analysis (semi-rigid
+    end connectors, 2nd order) typically governs a lower peak moment than
+    this simply-supported estimate, so a section that fails here by a small
+    margin may still pass the real run."""
+    w = (load_per_bay / 2.0) / span                # UDL per rail [N/mm]
+    M_max = w * span ** 2 / 8.0
+    M_rd = sec.mod_z_eff * fy / gamma_M0
+    util = (safety_factor * M_max) / M_rd if M_rd > 0 else 99.0
+    return {"M_max": M_max, "M_Rd": M_rd, "util": util}
+
+
+def suggest_beams(lib, fy_of: Callable[[str], float], *, span: float,
+                  load_per_bay: float, safety_factor: float = 1.2,
+                  gamma_M0: float = 1.0) -> List[Dict]:
+    """Rank the master beam sections for a given span and factored bay load.
+    fy_of(name) returns the section's design yield [MPa].  Rows are sorted by
+    area (lightest first); the lightest passing (util <= 1) row carries
+    recommended=True."""
+    names = lib.names("beam") or lib.names()
+    rows: List[Dict] = []
+    for name in names:
+        try:
+            sec = lib.get(name)
+        except (KeyError, ValueError):
+            continue
+        fy = float(fy_of(name))
+        u = beam_bending_utilisation(sec, fy, span, load_per_bay,
+                                     gamma_M0=gamma_M0,
+                                     safety_factor=safety_factor)
+        rows.append({"name": name, "area": sec.area_eff, "fy": fy,
+                     "passes": u["util"] <= 1.0 + 1e-9, "recommended": False,
+                     **u})
+    rows.sort(key=lambda r: (r["area"], r["name"]))
+    for r in rows:                                # lightest passing = recommended
+        if r["passes"]:
+            r["recommended"] = True
+            break
+    return rows
+
+
 def static_upright_demand(cfg) -> Dict:
     """Pre-run static axial-demand estimate per upright, plus default pinned-
     pinned (K = 1.0) buckling lengths, derived from the configuration.  All

@@ -15,9 +15,9 @@ import streamlit as st
 
 import pickle
 
-from rack15512 import branding as B
+from rack15512 import background_run, branding as B
 from rack15512 import ui
-from rack15512.analysis import UnstableModelError, run_all
+from rack15512.analysis import run_all
 from rack15512.auth import UserStore
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
@@ -29,7 +29,6 @@ from rack15512.library import SectionLibrary
 from rack15512.master_store import MasterStore
 from rack15512.model import BasePlate, CrossSection
 from rack15512.project import ProjectStore, rackconfig_from_dict
-from rack15512.project_run import run_configuration
 from rack15512.report import write_report
 from rack15512.viewer import (plot_deformed, plot_footplate,
                               plot_frame_elevation, plot_front_elevation,
@@ -492,6 +491,30 @@ def _sap2000_import_panel(cdir, conf):
 
 # view_config section selector (state-driven so we can jump to a tab)
 _VC_TABS = ["🧱 Model", "📊 Results", "📄 Report", "⚙️ Parameters"]
+
+
+def _run_or_poll(cdir, label, *, on_done=None):
+    """If a background run (started via rack15512.background_run.start_run)
+    is in progress for this configuration, render its live status and
+    return True; the run keeps executing in its own OS process regardless of
+    what the user clicks elsewhere on the page, and this resumes watching it
+    on the next rerun/page-load - a click no longer loses the run.  Returns
+    False when nothing is in progress, so the caller renders its own Run
+    button (which should call background_run.start_run() + st.rerun())."""
+    status = background_run.poll_status(cdir)
+    if status is None or status.get("done", True):
+        return False
+    kind, payload = ui.run_in_background(cdir, label=label)
+    if kind == "done" and on_done:
+        on_done(payload)
+    elif kind == "cancelled":
+        st.warning("⛔ Analysis cancelled.")
+    elif kind == "error":
+        if payload.get("error_type") == "UnstableModelError":
+            st.error(f"🛑 Model not stable — run stopped. {payload.get('error')}")
+        else:
+            st.error(f"Analysis failed: {payload.get('error')}")
+    return True
 
 
 @st.dialog("Analysis run summary", width="large")
@@ -1169,6 +1192,17 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                          top_beam_gap=top_gap)
         else:
             ui.section("🪜", "Beam levels  ·  gap · section · load, per level")
+            from rack15512 import presize
+            BEAM_SF = 1.2
+
+            def _beam_fy_of(name):
+                if master is not None:
+                    try:
+                        return master.fy.get(name) or 355.0
+                    except Exception:
+                        return 355.0
+                return 355.0
+
             n_levels = st.number_input("Number of beam levels", 1, 20,
                                        len(levels0) if levels0 else 3)
             levels, elev = [], 0.0
@@ -1178,10 +1212,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                 gap = cc[0].number_input(f"L{k+1} gap [mm]", 300.0, 4000.0,
                                          float(l0.gap if l0 else 1500.0), 50.0,
                                          key=f"g{k}")
-                bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
-                                     index=_idx(beam_names,
-                                                l0.beam_section if l0 else None),
-                                     key=f"b{k}")
+                # load is read BEFORE the beam widget below is created, so the
+                # auto-suggested section can be written into its session_state
+                # key this same run (no rerun needed, unlike the deferred-
+                # apply trick the upright suggester uses further down).
                 ld_kg = cc[2].number_input(
                     f"L{k+1} load [kg]", 0.0, 10000.0,
                     float((l0.pallet_load if l0 else 20000.0) / G_ACC), 50.0,
@@ -1189,6 +1223,44 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                     help=f"Converted to N via × g ({G_ACC:g} m/s²) for the "
                          f"analysis, not the ×10 shortcut.")
                 cc[2].caption(f"= {ld_kg * G_ACC / 1e3:.2f} kN")
+
+                # auto-suggest the beam section (closed-form simply-supported
+                # UDL bending check, safety factor 1.2) whenever the bay span
+                # or this level's load actually changes during editing.
+                # Seeded from the saved value so opening an existing config
+                # doesn't silently override a deliberate prior beam choice -
+                # a manual override survives unrelated reruns (e.g. touching
+                # the gap field) since the basis only changes with span/load.
+                basis_key = f"_beam_auto_basis_{k}"
+                basis_now = (bay_width, ld_kg)
+                if basis_key not in ss:
+                    ss[basis_key] = ((bay_width, float(l0.pallet_load) / G_ACC)
+                                     if l0 else None)
+                if ss[basis_key] != basis_now and beam_names:
+                    sugg = presize.suggest_beams(
+                        lib, _beam_fy_of, span=bay_width,
+                        load_per_bay=ld_kg * G_ACC, safety_factor=BEAM_SF)
+                    rec = next((r["name"] for r in sugg if r["recommended"]),
+                              None)
+                    if rec:
+                        ss[f"b{k}"] = rec
+                    ss[basis_key] = basis_now
+
+                bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
+                                     index=_idx(beam_names,
+                                                l0.beam_section if l0 else None),
+                                     key=f"b{k}")
+                try:
+                    u = presize.beam_bending_utilisation(
+                        lib.get(bs), _beam_fy_of(bs), bay_width,
+                        ld_kg * G_ACC, safety_factor=BEAM_SF)
+                    cc[1].caption(
+                        f"SF {BEAM_SF:g} bending check: util {u['util']:.2f} "
+                        + ("✅" if u["util"] <= 1.0
+                           else "⚠️ overstressed — pick a heavier beam"))
+                except (KeyError, ValueError):
+                    pass
+
                 levels.append(LevelSpec(gap=gap, beam_section=bs,
                                         pallet_load=ld_kg * G_ACC))
                 elev += gap
@@ -2730,39 +2802,32 @@ def render_view_config():
                     st.caption(f"Method {seis.get('method')} · seismic weight "
                                f"{seis.get('seismic_weight_kN')} kN · captured "
                                f"mass {seis.get('captured_mass_x_pct')}%")
-        rc = st.columns(3)
-        if rc[0].button("▶ Run / re-run analysis", type="primary",
-                        width="stretch"):
-            ui.log(f"Run invoked: {proj.name} · {sysm.name} · {conf.name}")
-            # synchronous run with the staged status box + bottom command log
-            # (per-combination convergence lines stream via the progress
-            # callback).  OpenSees must run on the main thread - a threaded
-            # runner starves under Streamlit's rerun loop and hangs.
-            try:
-                summary, _ = ui.run_with_status(
-                    lambda progress: run_configuration(
-                        PSTORE, proj.id, sysm.id, conf.id, progress=progress),
+        def _on_run_done(summary):
+            ui.toast_verdict(summary["verdict"])
+            _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
+
+        if not _run_or_poll(cdir, "OpenSees second-order analysis",
+                            on_done=_on_run_done):
+            rc = st.columns(3)
+            if rc[0].button("▶ Run / re-run analysis", type="primary",
+                            width="stretch"):
+                ui.log(f"Run invoked: {proj.name} · {sysm.name} · {conf.name}")
+                background_run.start_run(
+                    PSTORE.root, "masters", proj.id, sysm.id, conf.id,
                     label="OpenSees second-order analysis")
-                ui.toast_verdict(summary["verdict"])
-                _run_summary_dialog(summary,
-                                    target=(proj.id, sysm.id, conf.id))
-            except UnstableModelError as exc:
-                st.error(f"🛑 Model not stable — run stopped. {exc}")
-            except Exception as exc:
-                st.error(f"Analysis failed: {exc}")
-                st.exception(exc)
-        if rc[1].button("🌐 Seismic design (IS 1893)",
-                        width="stretch"):
-            goto("seismic_study", project_id=proj.id, system_id=sysm.id,
-                 config_id=conf.id)
-        if rc[2].button("🔩 Anchor & footplate designer",
-                        width="stretch",
-                        disabled=not _load_results(cdir),
-                        help="Design the anchor + footplate against the "
-                             "governing ULS / seismic base reactions "
-                             "(after a run)."):
-            goto("anchor_designer", project_id=proj.id, system_id=sysm.id,
-                 config_id=conf.id)
+                st.rerun()
+            if rc[1].button("🌐 Seismic design (IS 1893)",
+                            width="stretch"):
+                goto("seismic_study", project_id=proj.id, system_id=sysm.id,
+                     config_id=conf.id)
+            if rc[2].button("🔩 Anchor & footplate designer",
+                            width="stretch",
+                            disabled=not _load_results(cdir),
+                            help="Design the anchor + footplate against the "
+                                 "governing ULS / seismic base reactions "
+                                 "(after a run)."):
+                goto("anchor_designer", project_id=proj.id, system_id=sysm.id,
+                     config_id=conf.id)
 
     if active == _VC_TABS[2]:
         st.markdown("#### Design Validation Report (EN 15512)")
@@ -2928,30 +2993,27 @@ def render_view_config():
         notes = st.text_input("Notes", conf.notes or "", key="param_notes")
         for lvl, msg in _config_warnings(cfg_edit, lib):
             (st.error if lvl == "error" else st.warning)(msg)
-        pc = st.columns(2)
-        if pc[0].button("💾 Update configuration", width="stretch",
-                        key="param_save"):
-            if _save_config(proj.id, sysm.id, cfg_edit, conf.master_id, notes):
-                st.rerun()
-        if pc[1].button("💾▶ Update & re-run analysis", type="primary",
-                        width="stretch", key="param_run"):
-            if _save_config(proj.id, sysm.id, cfg_edit, conf.master_id, notes,
-                            silent=True):
-                ui.log(f"Re-run invoked: {conf.name}")
-                try:
-                    summary, _ = ui.run_with_status(
-                        lambda progress: run_configuration(
-                            PSTORE, proj.id, sysm.id, conf.id,
-                            progress=progress),
+        def _on_update_run_done(summary):
+            ui.toast_verdict(summary["verdict"])
+            _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
+
+        if not _run_or_poll(cdir, "OpenSees second-order analysis",
+                            on_done=_on_update_run_done):
+            pc = st.columns(2)
+            if pc[0].button("💾 Update configuration", width="stretch",
+                            key="param_save"):
+                if _save_config(proj.id, sysm.id, cfg_edit, conf.master_id,
+                                notes):
+                    st.rerun()
+            if pc[1].button("💾▶ Update & re-run analysis", type="primary",
+                            width="stretch", key="param_run"):
+                if _save_config(proj.id, sysm.id, cfg_edit, conf.master_id,
+                                notes, silent=True):
+                    ui.log(f"Re-run invoked: {conf.name}")
+                    background_run.start_run(
+                        PSTORE.root, "masters", proj.id, sysm.id, conf.id,
                         label="OpenSees second-order analysis")
-                    ui.toast_verdict(summary["verdict"])
-                    _run_summary_dialog(summary,
-                                        target=(proj.id, sysm.id, conf.id))
-                except UnstableModelError as exc:
-                    st.error(f"🛑 Model not stable — run stopped. {exc}")
-                except Exception as exc:
-                    st.error(f"Analysis failed: {exc}")
-                    st.exception(exc)
+                    st.rerun()
         with st.expander("Raw configuration JSON"):
             st.json(conf.config)
 
@@ -3262,19 +3324,14 @@ def render_seismic_study():
                                     cfg_save, master_id=master_id,
                                     notes=conf.notes or "")
         ui.log(f"Seismic run invoked (zone {zone}): {conf.name}")
-        try:
-            summary, _ = ui.run_with_status(
-                lambda progress: run_configuration(
-                    PSTORE, proj.id, sysm.id, conf.id, progress=progress),
-                label="Seismic + EN 15512 analysis")
-            ui.toast_verdict(summary["verdict"])
-            goto("view_config", project_id=proj.id, system_id=sysm.id,
-                 config_id=conf.id)
-        except UnstableModelError as exc:
-            st.error(f"🛑 Model not stable — run stopped. {exc}")
-        except Exception as exc:
-            st.error(f"Analysis failed: {exc}")
-            st.exception(exc)
+        background_run.start_run(
+            PSTORE.root, "masters", proj.id, sysm.id, conf.id,
+            label="Seismic + EN 15512 analysis")
+        # land on the Results tab, which picks up and shows the run's live
+        # progress - it survives navigating away from here (separate process)
+        ss["vc_jump"] = _VC_TABS[1]
+        goto("view_config", project_id=proj.id, system_id=sysm.id,
+             config_id=conf.id)
 
 
 # ------------------------------------------------ anchor & footplate designer
@@ -3552,19 +3609,14 @@ def render_configure():
         if conf:
             ss.config_id = conf.id
             ui.log(f"Save & run invoked: {conf.name}")
-            try:
-                summary, _ = ui.run_with_status(
-                    lambda progress: run_configuration(
-                        PSTORE, proj.id, sysm.id, conf.id, progress=progress),
-                    label="OpenSees second-order analysis")
-                ui.toast_verdict(summary["verdict"])
-                # popup: cases/combinations/convergence/stress + results link
-                _run_summary_dialog(summary, target=(proj.id, sysm.id, conf.id))
-            except UnstableModelError as exc:
-                st.error(f"🛑 Model not stable — run stopped. {exc}")
-            except Exception as exc:
-                st.error(f"Analysis failed: {exc}")
-                st.exception(exc)
+            background_run.start_run(
+                PSTORE.root, "masters", proj.id, sysm.id, conf.id,
+                label="OpenSees second-order analysis")
+            # land on the Results tab, which picks up and shows the run's
+            # live progress - it survives navigating away from here
+            ss["vc_jump"] = _VC_TABS[1]
+            goto("view_config", project_id=proj.id, system_id=sysm.id,
+                 config_id=conf.id)
 
 
 def _save_config(pid, sid, cfg, master_id, notes, silent=False):
