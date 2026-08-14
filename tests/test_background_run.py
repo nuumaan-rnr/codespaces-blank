@@ -6,6 +6,7 @@ real OpenSees run, so these stay fast while still covering the real
 subprocess boundary: status-file plumbing, cancellation, and error surface."""
 
 import os
+import signal
 import sys
 import time
 
@@ -118,3 +119,36 @@ def test_failed_run_reports_error_type(tmp_path):
     assert status["error_type"] == "ValueError"
     assert "synthetic failure" in status["error"]
     assert status["cancelled"] is False
+
+
+def test_killed_worker_reported_as_crash_not_frozen_forever(tmp_path):
+    """A worker that's killed outright (OOM, native-code fault, ...) skips
+    every except clause in _run_worker and never writes a final status - the
+    UI must not just poll a frozen "not done" status forever with no
+    feedback; poll_status() should notice the process is gone and surface a
+    clear error itself."""
+    root = str(tmp_path / "projects")
+    cdir = background_run.start_run(
+        root, "masters", "p6", "s1", "c1",
+        target="tests.test_background_run:_fake_run_configuration_slow")
+    pid = None
+    for _ in range(50):
+        status = background_run.poll_status(cdir)
+        if status and status.get("pid") and status.get("frac", 0.0) > 0.0:
+            pid = status["pid"]
+            break
+        time.sleep(0.05)
+    assert pid, "worker never reported a pid / made progress"
+    os.kill(pid, signal.SIGKILL)
+
+    status = None
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        status = background_run.poll_status(cdir)
+        if status and status.get("done"):
+            break
+        time.sleep(0.1)
+    assert status["done"] is True
+    assert status["cancelled"] is False
+    assert status["error_type"] == "WorkerProcessDied"
+    assert status["stage"] != "Complete"

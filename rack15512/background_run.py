@@ -24,6 +24,15 @@ refresh - it isn't tied to the session_state of whoever started the run.
 Cancellation is a small flag file for the same reason (so Stop works even if
 a different session/tab requests it, or the one that started the run is
 gone) rather than an in-memory object shared with the child.
+
+Every status write carries the worker's PID; poll_status() checks it's still
+alive whenever the status says "not done" so a worker that's killed outright
+(OOM, a native-code fault - anything that skips the except Exception in
+_run_worker) is reported as a crash instead of leaving the status frozen and
+polled forever with no feedback. The liveness check prefers the Popen handle
+kept in _PROCS (this server process only) over a bare PID check: a killed
+child stays a zombie - os.kill(pid, 0) keeps "succeeding" - until something
+calls wait()/poll() on it, which only the process that spawned it can do.
 """
 
 from __future__ import annotations
@@ -41,6 +50,10 @@ from typing import Optional
 # reference, so it can be named on the subprocess command line and so tests
 # can point it at a fast fake instead of a real OpenSees run.
 _DEFAULT_TARGET = "rack15512.project_run:run_configuration"
+
+# config_dir -> subprocess.Popen, so THIS server process can reap and check
+# the real exit status of a run it started (see module docstring).
+_PROCS: dict = {}
 
 
 def _resolve(target: str):
@@ -70,14 +83,53 @@ def _write_status(config_dir: str, data: dict) -> None:
         raise
 
 
+def _pid_alive(pid) -> bool:
+    if not pid:
+        return True                            # unknown - don't second-guess
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                            # exists, just owned elsewhere
+    return True
+
+
+def _worker_alive(config_dir: str, pid) -> bool:
+    proc = _PROCS.get(config_dir)
+    if proc is not None:
+        return proc.poll() is None             # reaps it if it has exited
+    return _pid_alive(pid)                     # best effort: another process
+
+
 def poll_status(config_dir: str) -> Optional[dict]:
     """Current run status for a configuration, or None if no run has ever
-    been started for it (or its status file has been cleared)."""
+    been started for it (or its status file has been cleared).
+
+    If the status still says "not done" but the worker process is no longer
+    alive, it died without reporting completion - a crash (OOM kill,
+    native-code fault, ...) rather than a Python exception, which would
+    otherwise leave the UI polling a frozen status forever with no feedback.
+    Detected here (not just left to the caller) and persisted so every
+    subsequent poll - from any session - sees the same resolved outcome
+    instead of re-deriving it."""
     try:
         with open(_status_path(config_dir), encoding="utf-8") as f:
-            return json.load(f)
+            status = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
+    if status.get("done", True):
+        _PROCS.pop(config_dir, None)
+    elif not _worker_alive(config_dir, status.get("pid")):
+        status = {**status, "done": True, "cancelled": False,
+                 "error": "The analysis process stopped unexpectedly while "
+                          f"on: {status.get('stage') or 'an earlier step'}. "
+                          "If results had already been saved before this "
+                          "point, they may still be available below.",
+                 "error_type": "WorkerProcessDied"}
+        _write_status(config_dir, status)
+        _PROCS.pop(config_dir, None)
+    return status
 
 
 def _run_worker(config_dir, project_root, master_root, project_id, system_id,
@@ -87,6 +139,7 @@ def _run_worker(config_dir, project_root, master_root, project_id, system_id,
     from .project import ProjectStore
 
     start = time.time()
+    pid = os.getpid()
     run_fn = _resolve(target)
     cancel_flag = _cancel_flag_path(config_dir)
 
@@ -97,7 +150,7 @@ def _run_worker(config_dir, project_root, master_root, project_id, system_id,
         _write_status(config_dir, {
             "done": False, "error": None, "cancelled": False,
             "stage": stage, "frac": min(max(frac, 0.0), 1.0),
-            "elapsed": time.time() - start, "label": label})
+            "elapsed": time.time() - start, "label": label, "pid": pid})
 
     store = ProjectStore(project_root)
     try:
@@ -108,20 +161,20 @@ def _run_worker(config_dir, project_root, master_root, project_id, system_id,
         _write_status(config_dir, {
             "done": True, "error": None, "cancelled": True,
             "stage": "Cancelled", "frac": 1.0,
-            "elapsed": time.time() - start, "label": label})
+            "elapsed": time.time() - start, "label": label, "pid": pid})
     except Exception as exc:
         import traceback
         _write_status(config_dir, {
             "done": True, "error": str(exc), "cancelled": False,
             "stage": "Failed", "frac": 1.0,
-            "elapsed": time.time() - start, "label": label,
+            "elapsed": time.time() - start, "label": label, "pid": pid,
             "error_type": type(exc).__name__,
             "traceback": traceback.format_exc()})
     else:
         _write_status(config_dir, {
             "done": True, "error": None, "cancelled": False,
             "stage": "Complete", "frac": 1.0,
-            "elapsed": time.time() - start, "label": label,
+            "elapsed": time.time() - start, "label": label, "pid": pid,
             "summary": summary})
     finally:
         try:
@@ -153,15 +206,17 @@ def start_run(project_root: str, master_root: str, project_id: str,
         os.remove(_cancel_flag_path(config_dir))    # clear any stale flag
     except OSError:
         pass
-    _write_status(config_dir, {"done": False, "error": None,
-                              "cancelled": False, "stage": "Starting…",
-                              "frac": 0.0, "elapsed": 0.0, "label": label})
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "rack15512._bg_worker", config_dir,
          project_root, master_root, project_id, system_id, config_id,
          "1" if plots else "0", label, target],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, close_fds=True)
+    _PROCS[config_dir] = proc
+    _write_status(config_dir, {"done": False, "error": None,
+                              "cancelled": False, "stage": "Starting…",
+                              "frac": 0.0, "elapsed": 0.0, "label": label,
+                              "pid": proc.pid})
     return config_dir
 
 
