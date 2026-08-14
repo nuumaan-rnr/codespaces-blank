@@ -36,24 +36,34 @@ def _save_dark_pref(value: bool) -> None:
     except Exception:
         pass
 
-# ---- palette (Vercel-clean: crisp surfaces, thin borders) ------------------
+# ---- palette (Vercel-clean surfaces + a floating shell on a soft brand-
+# toned backdrop; teal stays primary - amber/slate are secondary accents
+# used sparingly, e.g. one per sidebar section, not a decorative rainbow) --
 _LIGHT = {
     "bg": "#FFFFFF", "bg2": "#FAFAFA",
     "surface": "#FFFFFF", "surface2": "#FAFAFA",
     "text": "#111111", "muted": "#666666", "border": "#EAEAEA",
     "teal": "#0C8490", "teal2": "#12A6B4", "grey": "#545454",
+    "amber": "#B9791A", "slate": "#51628C",
     "shadow": "0 1px 2px rgba(0,0,0,.05)",
     "shadow_hi": "0 6px 20px rgba(0,0,0,.10)",
     "sidebar": "#0B0B0C", "sidebar_text": "#EDEDED",
+    "page_bg": "linear-gradient(135deg,#E8F2F2 0%,#EAEEF6 45%,#F1ECF3 100%)",
+    "shell_shadow": "0 24px 60px -16px rgba(15,35,40,.28), "
+                    "0 2px 10px rgba(15,35,40,.08)",
 }
 _DARK = {
     "bg": "#000000", "bg2": "#0A0A0A",
     "surface": "#0A0A0A", "surface2": "#111111",
     "text": "#EDEDED", "muted": "#8A8A8A", "border": "#262626",
     "teal": "#22B8C6", "teal2": "#3AD0DE", "grey": "#C7D2D4",
+    "amber": "#E0A83F", "slate": "#8C9CC9",
     "shadow": "0 1px 2px rgba(0,0,0,.6)",
     "shadow_hi": "0 8px 28px rgba(0,0,0,.6)",
     "sidebar": "#000000", "sidebar_text": "#EDEDED",
+    "page_bg": "linear-gradient(135deg,#050B0C 0%,#08090D 50%,#0B080D 100%)",
+    "shell_shadow": "0 24px 60px -16px rgba(0,0,0,.7), "
+                    "0 2px 10px rgba(0,0,0,.5)",
 }
 
 
@@ -71,20 +81,34 @@ def apply_theme() -> None:
   --bg:{v['bg']}; --bg2:{v['bg2']}; --surface:{v['surface']};
   --surface2:{v['surface2']}; --text:{v['text']}; --muted:{v['muted']};
   --border:{v['border']}; --teal:{v['teal']}; --teal2:{v['teal2']};
-  --grey:{v['grey']}; --shadow:{v['shadow']}; --shadow-hi:{v['shadow_hi']};
+  --grey:{v['grey']}; --amber:{v['amber']}; --slate:{v['slate']};
+  --shadow:{v['shadow']}; --shadow-hi:{v['shadow_hi']};
   /* one radius scale, used everywhere below instead of ad-hoc values */
   --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
   /* sidebar text always sits on a near-black surface (both themes) - a
      fixed, contrast-checked tone for secondary sidebar text (>=4.5:1 on
      black) instead of opacity, which can silently drop below AA */
   --sidebar-muted:rgba(237,237,237,.72);
+  --shell-gap:14px;
 }}
 html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"] {{
   font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
 }}
-.stApp, [data-testid="stAppViewContainer"] {{
+/* the page itself carries a soft brand-toned backdrop; the app renders as
+   one floating rounded shell (sidebar + content together) inset from the
+   edges, so the backdrop shows through as a frame - .stApp is the single
+   outermost element wrapping both, so rounding/shadowing/insetting it
+   (rather than sidebar and content separately) keeps them visually one
+   piece instead of two separately-floating cards */
+html, body {{ background:{v['page_bg']}; }}
+.stApp {{
   background:var(--bg); color:var(--text);
+  margin:var(--shell-gap); width:calc(100% - (var(--shell-gap) * 2));
+  min-height:calc(100vh - (var(--shell-gap) * 2));
+  border-radius:22px; box-shadow:{v['shell_shadow']};
+  overflow:hidden;
 }}
+[data-testid="stAppViewContainer"] {{ background:var(--bg); color:var(--text); }}
 [data-testid="stHeader"] {{ background:transparent; z-index:1000000; }}
 /* keep the sidebar expand control visible + clickable after collapsing
    (covers the several test-ids Streamlit has used across versions) */
@@ -116,25 +140,40 @@ hr {{ border-color:var(--border); }}
 }}
 [data-testid="stSidebar"] * {{ color:{v['sidebar_text']}; }}
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ gap:.4rem; }}
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {{
+  gap:8px; align-items:center;
+}}
 [data-testid="stSidebar"] hr {{
   margin:14px 0; border-color:rgba(255,255,255,.10);
 }}
-[data-testid="stSidebar"] .stButton>button {{
+/* per-section colour badge next to each nav button (icon separated from the
+   label rather than baked into the button text, so it reads as a distinct
+   "space" marker) - a muted tint of the section's accent, not a solid fill */
+.rnr-navbadge {{ width:28px; height:28px; border-radius:var(--r-sm);
+  display:flex; align-items:center; justify-content:center; font-size:.85rem;
+  flex:none; border:1px solid transparent; }}
+.rnr-navbadge.teal {{ background:{v['teal']}26; color:{v['teal']};
+  border-color:{v['teal']}40; }}
+.rnr-navbadge.amber {{ background:{v['amber']}26; color:{v['amber']};
+  border-color:{v['amber']}40; }}
+.rnr-navbadge.slate {{ background:{v['slate']}26; color:{v['slate']};
+  border-color:{v['slate']}40; }}
+[data-testid="stSidebar"] .stButton button {{
   background:transparent; border:1px solid transparent;
   color:{v['sidebar_text']}; font-weight:600; border-radius:var(--r-md);
   transition:.14s ease; justify-content:flex-start; gap:8px;
   padding:.5rem .7rem; box-shadow:none;
 }}
-[data-testid="stSidebar"] .stButton>button p {{ text-align:left; }}
-[data-testid="stSidebar"] .stButton>button:hover {{
+[data-testid="stSidebar"] .stButton button p {{ text-align:left; }}
+[data-testid="stSidebar"] .stButton button:hover {{
   background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.10);
   color:#fff; transform:none;
 }}
-[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
+[data-testid="stSidebar"] .stButton button[kind="primary"] {{
   background:{v['teal']}; border-color:{v['teal']}; color:#fff;
   box-shadow:0 2px 12px {v['teal']}4d;
 }}
-[data-testid="stSidebar"] .stButton>button[kind="primary"]:hover {{
+[data-testid="stSidebar"] .stButton button[kind="primary"]:hover {{
   background:{v['teal2']}; border-color:{v['teal2']};
 }}
 [data-testid="stSidebar"] .stToggle {{ margin:2px 0 4px; }}
@@ -162,21 +201,21 @@ hr {{ border-color:var(--border); }}
 
 /* buttons - nowrap so a narrow column (e.g. a compact list's action column)
    never wraps a short label onto two lines and inflates the row height */
-.stButton>button, .stDownloadButton>button {{
+.stButton button, .stDownloadButton button {{
   border-radius:var(--r-md); font-weight:600; padding:.5rem 1rem;
   border:1px solid var(--border); background:var(--surface);
   color:var(--text); transition:.18s ease; box-shadow:0 1px 2px rgba(0,0,0,.04);
   white-space:nowrap;
 }}
-.stButton>button:hover, .stDownloadButton>button:hover {{
+.stButton button:hover, .stDownloadButton button:hover {{
   border-color:{v['teal']}; color:{v['teal']};
   transform:translateY(-1px); box-shadow:var(--shadow);
 }}
-.stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {{
+.stButton button[kind="primary"], .stDownloadButton button[kind="primary"] {{
   background:{v['teal']}; color:#fff; border:1px solid {v['teal']};
   box-shadow:none;
 }}
-.stButton>button[kind="primary"]:hover {{
+.stButton button[kind="primary"]:hover {{
   background:{v['teal2']}; border-color:{v['teal2']};
   transform:translateY(-1px); color:#fff;
 }}
@@ -247,9 +286,17 @@ textarea {{
 .rnr-statrow {{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px;
   margin:-6px 0 22px; }}
 .rnr-stat {{ background:var(--surface); border:1px solid var(--border);
-  border-radius:var(--r-lg); padding:16px; box-shadow:var(--shadow);
-  transition:.16s; }}
-.rnr-stat:hover {{ border-color:{v['teal']}55; box-shadow:var(--shadow-hi); }}
+  border-top:3px solid {v['teal']}; border-radius:var(--r-lg); padding:16px;
+  box-shadow:var(--shadow); transition:.16s; }}
+/* one accent per tile, cycling teal/amber/slate - a restrained echo of the
+   coloured column headers on a kanban board, not a decorative rainbow */
+.rnr-statrow .rnr-stat:nth-child(4n+2) {{ border-top-color:{v['amber']}; }}
+.rnr-statrow .rnr-stat:nth-child(4n+3) {{ border-top-color:{v['slate']}; }}
+.rnr-statrow .rnr-stat:nth-child(4n+4) {{ border-top-color:{v['teal2']}; }}
+/* only the non-top edges brighten on hover, so each tile's accent colour
+   (set above, possibly amber/slate) isn't stomped by a hard-coded teal */
+.rnr-stat:hover {{ border-left-color:{v['teal']}55; border-right-color:{v['teal']}55;
+  border-bottom-color:{v['teal']}55; box-shadow:var(--shadow-hi); }}
 .rnr-stat .v {{ font-size:1.7rem; font-weight:800; color:var(--text);
   line-height:1.1; }}
 .rnr-stat .k {{ font-size:.74rem; color:var(--muted); font-weight:600;
@@ -293,6 +340,12 @@ textarea {{
 .rnr-pill.idle {{ background:var(--surface2); color:var(--muted);
   border:1px solid var(--border); }}
 .rnr-dot {{ width:8px; height:8px; border-radius:50%; display:inline-block; }}
+/* a small count badge next to a heading, e.g. "Projects (3)" - echoes the
+   item-count pills next to each column name on a kanban board */
+.rnr-count {{ display:inline-flex; align-items:center; justify-content:center;
+  min-width:24px; height:22px; padding:0 8px; border-radius:var(--r-pill);
+  background:var(--surface2); border:1px solid var(--border); color:var(--muted);
+  font-size:.78rem; font-weight:700; vertical-align:middle; margin-left:6px; }}
 /* compact list rows (the projects dashboard, via st.container(key="proj_list"),
    which Streamlit stamps with the .st-key-proj_list class below) - collapse
    Streamlit's default block gap and give each row a slim divider + hover
@@ -367,13 +420,19 @@ textarea {{
   border:1px solid {v['teal']}33; color:var(--text); }}
 .rnr-topbar .ic {{ font-size:1rem; }}
 /* CAD-style command/log bar pinned to the bottom of the page */
-.rnr-console {{ position:fixed; left:0; right:0; bottom:0; z-index:999990;
+/* inset to the shell's own gap (not flush with the true viewport edge, now
+   that .stApp floats with a margin) with matching rounded bottom corners,
+   so it reads as the bottom of the same floating card, not a separate bar */
+.rnr-console {{ position:fixed; left:var(--shell-gap); right:var(--shell-gap);
+  bottom:var(--shell-gap); z-index:999990;
   background:var(--surface); border-top:2px solid {v['teal']};
+  border-radius:0 0 22px 22px;
   box-shadow:0 -4px 16px rgba(0,0,0,.10); transition:left .2s ease;
-  font-family:'JetBrains Mono',ui-monospace,monospace; }}
+  font-family:'JetBrains Mono',ui-monospace,monospace; overflow:hidden; }}
 /* keep the bar in the content area so an expanded sidebar can't cover it */
-[data-testid="stApp"]:has([data-testid="stSidebar"][aria-expanded="true"])
-  .rnr-console {{ left:21rem; }}
+.stApp:has([data-testid="stSidebar"][aria-expanded="true"]) .rnr-console {{
+  left:calc(21rem + var(--shell-gap));
+}}
 .rnr-console .hd {{ display:flex; align-items:center; gap:8px;
   padding:6px 16px; border-bottom:1px solid var(--border);
   font-size:.8rem; font-weight:700; color:var(--text); }}
@@ -461,6 +520,13 @@ def role_badge(is_admin: bool) -> str:
     cls = "pass" if is_admin else "idle"
     label = "ADMIN" if is_admin else "USER"
     return f'<span class="rnr-pill {cls}">{label}</span>'
+
+
+def nav_badge(icon: str, color: str = "teal") -> str:
+    """A small colour-tinted square marking a sidebar nav item's section -
+    color is one of "teal"/"amber"/"slate" (see the .rnr-navbadge rules)."""
+    return (f'<div class="rnr-navbadge {color}" aria-hidden="true">'
+            f'{icon}</div>')
 
 
 def sidebar_brand(name: str, tagline: str) -> None:

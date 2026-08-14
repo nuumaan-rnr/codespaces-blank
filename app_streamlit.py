@@ -2005,7 +2005,8 @@ def render_dashboard():
 
     with st.container(key="dash_top"):
         top = st.columns([3, 1])
-        top[0].subheader("Projects")
+        top[0].markdown(f"### Projects <span class='rnr-count'>"
+                        f"{len(projects)}</span>", unsafe_allow_html=True)
         if top[1].button("➕ Create new project", width="stretch",
                          type="primary"):
             goto("new_project")
@@ -4065,21 +4066,22 @@ with st.sidebar:
     ui.sidebar_brand(B.PRODUCT, B.TAGLINE)
     st.divider()
 
-    # highlight the current section so the nav doubles as a "you are here"
+    # highlight the current section so the nav doubles as a "you are here";
+    # each item gets its own small colour-tinted badge (one accent per
+    # section, not a decorative rainbow) instead of a bare emoji prefix
     nav_section = ("masters" if ss.view == "masters" else
                   "user_access" if ss.view == "user_access" else "dashboard")
-    if st.button("🏠  Dashboard", width="stretch",
-                type="primary" if nav_section == "dashboard" else "secondary"):
-        goto("dashboard")
+    _nav_items = [("🏠", "teal", "Dashboard", "dashboard")]
     if is_admin:
-        if st.button("📚  Section masters", width="stretch",
-                    type="primary" if nav_section == "masters"
-                    else "secondary"):
-            goto("masters")
-        if st.button("👤  User access", width="stretch",
-                    type="primary" if nav_section == "user_access"
-                    else "secondary"):
-            goto("user_access")
+        _nav_items += [("📚", "amber", "Section masters", "masters"),
+                       ("👤", "slate", "User access", "user_access")]
+    for icon, color, label, view_key in _nav_items:
+        nc = st.columns([0.16, 0.84])
+        nc[0].markdown(ui.nav_badge(icon, color), unsafe_allow_html=True)
+        if nc[1].button(label, key=f"nav_{view_key}", width="stretch",
+                        type="primary" if nav_section == view_key
+                        else "secondary"):
+            goto(view_key)
     ui.theme_toggle()
     if ss.project_id and ss.view in ("project", "configure", "view_config"):
         try:
