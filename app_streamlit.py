@@ -1246,6 +1246,19 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                          f"analysis, not the ×10 shortcut.")
                 cc[1].caption(f"= {ld_kg * G_ACC / 1e3:.2f} kN")
 
+                # seed this widget's session_state (once, before it's created)
+                # instead of passing `index=` - a selectbox given BOTH a
+                # session_state value and an `index` default triggers
+                # Streamlit's "value set via both a default and Session
+                # State" warning, and the auto-suggest block below writes
+                # into this same key, so index= would trip it on every level
+                # whose suggestion just changed.
+                bkey = f"b{k}"
+                if bkey not in ss:
+                    ss[bkey] = (l0.beam_section
+                               if l0 and l0.beam_section in beam_names
+                               else (beam_names[0] if beam_names else None))
+
                 # auto-suggest the beam section (closed-form simply-supported
                 # UDL bending check, safety factor 1.2) whenever the bay span
                 # or this level's load actually changes during editing.
@@ -1265,13 +1278,10 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                     rec = next((r["name"] for r in sugg if r["recommended"]),
                               None)
                     if rec:
-                        ss[f"b{k}"] = rec
+                        ss[bkey] = rec
                     ss[basis_key] = basis_now
 
-                bs = cc[2].selectbox(f"L{k+1} beam", beam_names,
-                                     index=_idx(beam_names,
-                                                l0.beam_section if l0 else None),
-                                     key=f"b{k}")
+                bs = cc[2].selectbox(f"L{k+1} beam", beam_names, key=bkey)
                 try:
                     u = presize.beam_bending_utilisation(
                         lib.get(bs), _beam_fy_of(bs), bay_width,
