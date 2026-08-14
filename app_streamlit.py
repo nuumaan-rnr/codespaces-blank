@@ -495,26 +495,47 @@ _VC_TABS = ["🧱 Model", "📊 Results", "📄 Report", "⚙️ Parameters"]
 
 def _run_or_poll(cdir, label, *, on_done=None):
     """If a background run (started via rack15512.background_run.start_run)
-    is in progress for this configuration, render its live status and
-    return True; the run keeps executing in its own OS process regardless of
-    what the user clicks elsewhere on the page, and this resumes watching it
-    on the next rerun/page-load - a click no longer loses the run.  Returns
-    False when nothing is in progress, so the caller renders its own Run
-    button (which should call background_run.start_run() + st.rerun())."""
+    is in progress for this configuration, render its live status; the run
+    keeps executing in its own OS process regardless of what the user clicks
+    elsewhere on the page, and this resumes watching it on the next
+    rerun/page-load - a click no longer loses the run.  Returns False when
+    nothing is in progress, so the caller renders its own Run button (which
+    should call background_run.start_run() + st.rerun()).
+
+    The completion popup/message is LEVEL-triggered, not edge-triggered: a
+    "watching" flag is set in session_state as soon as this session observes
+    the run in progress (whether it started it or just opened the page while
+    someone else's run was live), and is only consumed - firing on_done /
+    the cancelled-or-error message exactly once - once poll_status() shows
+    done.  A naive "only react on the exact rerun that first sees done" was
+    tried first and silently dropped the popup whenever that specific rerun
+    got interrupted (e.g. a dropped websocket) before finishing - the run
+    itself was unaffected (separate process), only the UI's one-shot
+    reaction was lost.  This version re-checks on every later page visit
+    too, so a missed rerun just means the popup appears on the next one
+    instead of never.  Deliberately does NOT fire for a run that was already
+    done before this session ever looked at it (no watch flag set), so
+    opening an old, previously-run configuration doesn't surprise-popup."""
+    watch_key = f"_run_watch_{cdir}"
     status = background_run.poll_status(cdir)
-    if status is None or status.get("done", True):
+    if status is None:
         return False
-    kind, payload = ui.run_in_background(cdir, label=label)
-    if kind == "done" and on_done:
-        on_done(payload)
-    elif kind == "cancelled":
-        st.warning("⛔ Analysis cancelled.")
-    elif kind == "error":
-        if payload.get("error_type") == "UnstableModelError":
-            st.error(f"🛑 Model not stable — run stopped. {payload.get('error')}")
-        else:
-            st.error(f"Analysis failed: {payload.get('error')}")
-    return True
+    if not status.get("done", True):
+        ss[watch_key] = True
+        ui.run_in_background(cdir, label=label)     # aborts via st.rerun()
+        status = background_run.poll_status(cdir) or status  # only if done
+    if ss.pop(watch_key, False) and status.get("done", True):
+        if status.get("cancelled"):
+            st.warning("⛔ Analysis cancelled.")
+        elif status.get("error"):
+            if status.get("error_type") == "UnstableModelError":
+                st.error("🛑 Model not stable — run stopped. "
+                        f"{status.get('error')}")
+            else:
+                st.error(f"Analysis failed: {status.get('error')}")
+        elif on_done:
+            on_done(status.get("summary"))
+    return False
 
 
 @st.dialog("Analysis run summary", width="large")
@@ -1208,21 +1229,22 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
             levels, elev = [], 0.0
             for k in range(int(n_levels)):
                 l0 = levels0[k] if levels0 and k < len(levels0) else None
-                cc = st.columns([1, 1.6, 1])
+                cc = st.columns([1, 1, 1.6])
                 gap = cc[0].number_input(f"L{k+1} gap [mm]", 300.0, 4000.0,
                                          float(l0.gap if l0 else 1500.0), 50.0,
                                          key=f"g{k}")
                 # load is read BEFORE the beam widget below is created, so the
                 # auto-suggested section can be written into its session_state
                 # key this same run (no rerun needed, unlike the deferred-
-                # apply trick the upright suggester uses further down).
-                ld_kg = cc[2].number_input(
+                # apply trick the upright suggester uses further down) - and
+                # shown first (left of the beam column) since it drives it.
+                ld_kg = cc[1].number_input(
                     f"L{k+1} load [kg]", 0.0, 10000.0,
                     float((l0.pallet_load if l0 else 20000.0) / G_ACC), 50.0,
                     key=f"l{k}",
                     help=f"Converted to N via × g ({G_ACC:g} m/s²) for the "
                          f"analysis, not the ×10 shortcut.")
-                cc[2].caption(f"= {ld_kg * G_ACC / 1e3:.2f} kN")
+                cc[1].caption(f"= {ld_kg * G_ACC / 1e3:.2f} kN")
 
                 # auto-suggest the beam section (closed-form simply-supported
                 # UDL bending check, safety factor 1.2) whenever the bay span
@@ -1246,7 +1268,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                         ss[f"b{k}"] = rec
                     ss[basis_key] = basis_now
 
-                bs = cc[1].selectbox(f"L{k+1} beam", beam_names,
+                bs = cc[2].selectbox(f"L{k+1} beam", beam_names,
                                      index=_idx(beam_names,
                                                 l0.beam_section if l0 else None),
                                      key=f"b{k}")
@@ -1254,7 +1276,7 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                     u = presize.beam_bending_utilisation(
                         lib.get(bs), _beam_fy_of(bs), bay_width,
                         ld_kg * G_ACC, safety_factor=BEAM_SF)
-                    cc[1].caption(
+                    cc[2].caption(
                         f"SF {BEAM_SF:g} bending check: util {u['util']:.2f} "
                         + ("✅" if u["util"] <= 1.0
                            else "⚠️ overstressed — pick a heavier beam"))
