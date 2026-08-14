@@ -9,7 +9,8 @@ import os
 COMPANY = "Racks & Rollers"
 TAGLINE = "Storage Technologies and Automation"
 WEBSITE = "www.racksandrollers.com"
-PRODUCT = "EN 15512 SPR Design"
+PRODUCT = "RackVerify"
+PRODUCT_TAGLINE = "EN 15512 SPR Design"
 # Short marker shown in the sidebar (keep this terse - just enough to confirm
 # which build is running). Bump VERSION and set BUILD_DATE on every release;
 # put the actual change description in BUILD below instead, which is kept
@@ -58,6 +59,10 @@ GREY_LIGHT = "#848484"
 BG_TINT = "#EAF3F4"       # very light teal tint for panels
 
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "rnr_logo.png")
+PRODUCT_ICON_PATH = os.path.join(os.path.dirname(__file__), "assets",
+                                 "rackverify_icon.svg")
+PRODUCT_LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets",
+                                 "rackverify_logo.svg")
 
 
 def logo_bytes() -> bytes | None:
@@ -73,3 +78,16 @@ def logo_data_uri() -> str:
     if not data:
         return ""
     return "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+
+
+def product_icon_svg(size: int = 36) -> str:
+    """The RackVerify mark (rack levels + a verified checkmark badge) as
+    inline SVG markup sized to `size`px - self-contained teal-on-white
+    badge that reads fine on any background, light or dark."""
+    try:
+        with open(PRODUCT_ICON_PATH, encoding="utf-8") as f:
+            svg = f.read()
+    except OSError:
+        return ""
+    return svg.replace('width="84"', f'width="{size}"', 1).replace(
+        'height="84"', f'height="{size}"', 1)

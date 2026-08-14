@@ -47,7 +47,7 @@ _LIGHT = {
     "amber": "#B9791A", "slate": "#51628C",
     "shadow": "0 1px 2px rgba(0,0,0,.05)",
     "shadow_hi": "0 6px 20px rgba(0,0,0,.10)",
-    "sidebar": "#0B0B0C", "sidebar_text": "#EDEDED",
+    "sidebar": "#0A1A1C", "sidebar_text": "#EDEDED",
     "page_bg": "linear-gradient(135deg,#E8F2F2 0%,#EAEEF6 45%,#F1ECF3 100%)",
     "shell_shadow": "0 24px 60px -16px rgba(15,35,40,.28), "
                     "0 2px 10px rgba(15,35,40,.08)",
@@ -60,7 +60,7 @@ _DARK = {
     "amber": "#E0A83F", "slate": "#8C9CC9",
     "shadow": "0 1px 2px rgba(0,0,0,.6)",
     "shadow_hi": "0 8px 28px rgba(0,0,0,.6)",
-    "sidebar": "#000000", "sidebar_text": "#EDEDED",
+    "sidebar": "#050F10", "sidebar_text": "#EDEDED",
     "page_bg": "linear-gradient(135deg,#050B0C 0%,#08090D 50%,#0B080D 100%)",
     "shell_shadow": "0 24px 60px -16px rgba(0,0,0,.7), "
                     "0 2px 10px rgba(0,0,0,.5)",
@@ -133,11 +133,21 @@ p, span, label, .stMarkdown {{ color:var(--text); }}
 hr {{ border-color:var(--border); }}
 
 /* sidebar - a compact, app-like nav: left-aligned pills, a filled "active"
-   state for the current section, and grouped-by-whitespace (not lines)  */
+   state for the current section, and grouped-by-whitespace (not lines).
+   One solid brand-toned surface (not the old 2-stop black-to-grey fade) -
+   a soft fixed teal glow in the corner gives it some life without turning
+   it into a second gradient */
 [data-testid="stSidebar"] {{
-  background:linear-gradient(180deg,{v['sidebar']},{v['bg2']});
+  background:{v['sidebar']};
   border-right:1px solid var(--border);
+  position:relative; overflow:hidden;
 }}
+[data-testid="stSidebar"]::before {{
+  content:""; position:absolute; top:-160px; left:-120px; width:340px;
+  height:340px; border-radius:50%; pointer-events:none;
+  background:radial-gradient(circle, #2BC2D12E, transparent 72%);
+}}
+[data-testid="stSidebarContent"] {{ position:relative; z-index:1; }}
 [data-testid="stSidebar"] * {{ color:{v['sidebar_text']}; }}
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ gap:.4rem; }}
 [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {{
@@ -178,7 +188,12 @@ hr {{ border-color:var(--border); }}
 }}
 [data-testid="stSidebar"] .stToggle {{ margin:2px 0 4px; }}
 .rnr-sb-brand {{ display:flex; align-items:center; gap:10px; padding:2px 0 4px; }}
-.rnr-sb-brand .name {{ font-weight:800; font-size:1rem; letter-spacing:-.01em; }}
+.rnr-sb-brand svg {{ flex:none; border-radius:var(--r-sm); }}
+.rnr-sb-brand .name {{ font-weight:800; font-size:1.05rem; letter-spacing:-.01em; }}
+/* sidebar is always a dark surface regardless of app theme, so the accent
+   is a fixed bright teal here (not the theme's var(--teal), which is the
+   darker light-mode shade tuned for a white surface, not this one) */
+.rnr-sb-brand .name .accent {{ color:#2BC2D1; }}
 .rnr-sb-brand .tag {{ font-size:.72rem; color:var(--sidebar-muted); margin-top:1px; }}
 .rnr-sbchip {{ background:rgba(255,255,255,.05); border:1px solid
   rgba(255,255,255,.10); border-radius:var(--r-sm); padding:8px 12px;
@@ -530,9 +545,21 @@ def nav_badge(icon: str, color: str = "teal") -> str:
 
 
 def sidebar_brand(name: str, tagline: str) -> None:
+    """The RackVerify mark + wordmark + a short functional tagline (e.g.
+    "EN 15512 SPR Design") - the Racks & Rollers company credit lives
+    separately at the bottom of the sidebar (see app_streamlit.py), so it
+    isn't repeated here."""
+    icon = B.product_icon_svg(34)
+    # split "RackVerify" into "Rack" + accent "Verify" if the name matches;
+    # otherwise just show it plain (keeps this safe for any product name)
+    if name.lower().startswith("rack") and len(name) > 4:
+        name_html = (f'{_html.escape(name[:4])}'
+                    f'<span class="accent">{_html.escape(name[4:])}</span>')
+    else:
+        name_html = _html.escape(name)
     st.markdown(
-        f'<div class="rnr-sb-brand"><div>'
-        f'<div class="name">{_html.escape(name)}</div>'
+        f'<div class="rnr-sb-brand">{icon}<div>'
+        f'<div class="name">{name_html}</div>'
         f'<div class="tag">{_html.escape(tagline)}</div></div></div>',
         unsafe_allow_html=True)
 
@@ -823,14 +850,15 @@ def render_login(user_store) -> None:
     col = st.columns([1, 1.1, 1])[1]
     with col:
         with st.container(border=True):
-            if _os.path.exists(B.LOGO_PATH):
-                lc = st.columns([1, 2, 1])[1]
-                lc.image(B.LOGO_PATH, width="stretch")
+            icon = B.product_icon_svg(56)
             st.markdown(
-                f"<h2 style='text-align:center;margin:6px 0 2px'>"
-                f"{_html.escape(B.PRODUCT)}</h2>"
-                f"<p class='rnr-muted' style='text-align:center;"
-                f"margin-bottom:18px'>Sign in to continue</p>",
+                f"<div style='text-align:center'>{icon}"
+                f"<h2 style='margin:10px 0 0'>Rack"
+                f"<span style='color:var(--teal)'>Verify</span></h2>"
+                f"<p class='rnr-muted' style='margin:2px 0 14px;"
+                f"font-size:.82rem'>by {_html.escape(B.COMPANY)}</p>"
+                f"<p class='rnr-muted' style='margin-bottom:18px'>"
+                f"Sign in to continue</p></div>",
                 unsafe_allow_html=True)
             with st.form("login_form"):
                 username = st.text_input("Username")
@@ -846,9 +874,12 @@ def render_login(user_store) -> None:
                         "username": user.username, "name": user.name,
                         "role": user.role}
                     st.rerun()
+        if _os.path.exists(B.LOGO_PATH):
+            lc = st.columns([1.4, 1, 1.4])[1]
+            lc.image(B.LOGO_PATH, width="stretch")
         st.markdown(
             f"<div class='rnr-muted' style='text-align:center;"
-            f"margin-top:12px;font-size:.82rem'>© {B.COMPANY} · "
+            f"margin-top:8px;font-size:.82rem'>© {B.COMPANY} · "
             f"internal tool — access is restricted to authorised users</div>",
             unsafe_allow_html=True)
 

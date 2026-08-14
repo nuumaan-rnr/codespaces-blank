@@ -1,0 +1,11 @@
+<svg width="84" height="84" viewBox="0 0 84 84" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RackVerify">
+  <title>RackVerify</title>
+  <rect x="1" y="1" width="82" height="82" rx="22" fill="#0C8490"/>
+  <rect x="18" y="21" width="48" height="8" rx="4" fill="#FFFFFF"/>
+  <rect x="18" y="39" width="48" height="8" rx="4" fill="#FFFFFF"/>
+  <rect x="18" y="57" width="30" height="8" rx="4" fill="#FFFFFF"/>
+  <circle cx="67" cy="67" r="19" fill="#FFFFFF"/>
+  <circle cx="67" cy="67" r="19" fill="none" stroke="#0C8490" stroke-width="3"/>
+  <path d="M58 67.5l6 6 12.5-13" fill="none" stroke="#0C8490" stroke-width="5.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

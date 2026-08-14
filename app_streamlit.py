@@ -35,7 +35,8 @@ from rack15512.viewer import (plot_deformed, plot_footplate,
                               plot_frame_elevation, plot_front_elevation,
                               plot_model, plot_plan, plot_side_elevation)
 
-st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
+st.set_page_config(page_title=f"{B.PRODUCT} · {B.COMPANY}", page_icon="✅",
+                   layout="wide",
                    initial_sidebar_state="expanded")
 
 G_ACC = 9.81   # m/s^2 - standard gravity, kg -> N throughout the UI (matches
@@ -1991,7 +1992,7 @@ def render_dashboard():
               "EN 15512 utilisations side by side.", kind="tip")
     ui.hero("Storage Rack Design", "Design, verify and document selective "
             "pallet racking to EN 15512 — second-order analysis with "
-            "semi-rigid connections.", eyebrow=f"{B.COMPANY} · {B.PRODUCT}")
+            "semi-rigid connections.", eyebrow=f"{B.PRODUCT} · {B.COMPANY}")
 
     projects = PSTORE.list_projects()
     # portfolio KPIs
@@ -4061,9 +4062,7 @@ def render_user_access():
 is_admin = ss.user.get("role") == "admin"
 
 with st.sidebar:
-    if os.path.exists(B.LOGO_PATH):
-        st.image(B.LOGO_PATH, width="stretch")
-    ui.sidebar_brand(B.PRODUCT, B.TAGLINE)
+    ui.sidebar_brand(B.PRODUCT, B.PRODUCT_TAGLINE)
     st.divider()
 
     # highlight the current section so the nav doubles as a "you are here";
@@ -4101,10 +4100,17 @@ with st.sidebar:
     ui.sidebar_footer([
         "OpenSees 2nd-order · semi-rigid",
         "Units: N, mm, MPa",
-        f"© {B.COMPANY} · "
-        f"<a href='https://{B.WEBSITE}' target='_blank'>{B.WEBSITE}</a>",
         f"v{B.VERSION} · {B.BUILD_DATE}",
     ])
+    if os.path.exists(B.LOGO_PATH):
+        st.markdown('<div style="margin-top:10px"></div>', unsafe_allow_html=True)
+        lc = st.columns([1, 3, 1])[1]
+        lc.image(B.LOGO_PATH, width="stretch")
+        st.markdown(
+            f"<div class='rnr-sbfooter' style='text-align:center;margin-top:4px'>"
+            f"© {B.COMPANY} · "
+            f"<a href='https://{B.WEBSITE}' target='_blank'>{B.WEBSITE}</a>"
+            f"</div>", unsafe_allow_html=True)
 
 _VIEWS = {
     "dashboard": render_dashboard,
