@@ -72,6 +72,12 @@ def apply_theme() -> None:
   --surface2:{v['surface2']}; --text:{v['text']}; --muted:{v['muted']};
   --border:{v['border']}; --teal:{v['teal']}; --teal2:{v['teal2']};
   --grey:{v['grey']}; --shadow:{v['shadow']}; --shadow-hi:{v['shadow_hi']};
+  /* one radius scale, used everywhere below instead of ad-hoc values */
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
+  /* sidebar text always sits on a near-black surface (both themes) - a
+     fixed, contrast-checked tone for secondary sidebar text (>=4.5:1 on
+     black) instead of opacity, which can silently drop below AA */
+  --sidebar-muted:rgba(237,237,237,.72);
 }}
 html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"] {{
   font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
@@ -90,7 +96,7 @@ html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"] {{
   display:flex !important; visibility:visible !important; opacity:1 !important;
   z-index:1000002 !important; color:var(--text) !important;
   background:var(--surface) !important; border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:var(--r-sm);
 }}
 [data-testid="stMain"] .block-container {{
   padding-top:2.2rem; padding-bottom:170px; max-width:1280px;
@@ -115,7 +121,7 @@ hr {{ border-color:var(--border); }}
 }}
 [data-testid="stSidebar"] .stButton>button {{
   background:transparent; border:1px solid transparent;
-  color:{v['sidebar_text']}; font-weight:600; border-radius:10px;
+  color:{v['sidebar_text']}; font-weight:600; border-radius:var(--r-md);
   transition:.14s ease; justify-content:flex-start; gap:8px;
   padding:.5rem .7rem; box-shadow:none;
 }}
@@ -134,28 +140,30 @@ hr {{ border-color:var(--border); }}
 [data-testid="stSidebar"] .stToggle {{ margin:2px 0 4px; }}
 .rnr-sb-brand {{ display:flex; align-items:center; gap:10px; padding:2px 0 4px; }}
 .rnr-sb-brand .name {{ font-weight:800; font-size:1rem; letter-spacing:-.01em; }}
-.rnr-sb-brand .tag {{ font-size:.72rem; opacity:.55; margin-top:1px; }}
+.rnr-sb-brand .tag {{ font-size:.72rem; color:var(--sidebar-muted); margin-top:1px; }}
 .rnr-sbchip {{ background:rgba(255,255,255,.05); border:1px solid
-  rgba(255,255,255,.10); border-radius:10px; padding:8px 10px; margin:2px 0; }}
+  rgba(255,255,255,.10); border-radius:var(--r-sm); padding:8px 12px;
+  margin:2px 0; }}
 .rnr-sbchip .k {{ font-size:.64rem; text-transform:uppercase;
-  letter-spacing:.07em; opacity:.5; font-weight:700; }}
+  letter-spacing:.07em; color:var(--sidebar-muted); font-weight:700; }}
 .rnr-sbchip .v {{ font-size:.85rem; font-weight:700; margin-top:2px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
 .rnr-profile {{ display:flex; align-items:center; gap:10px; padding:4px 0; }}
-.rnr-profile .av {{ width:32px; height:32px; border-radius:50%;
+.rnr-profile .av {{ width:32px; height:32px; border-radius:var(--r-pill);
   background:{v['teal']}; color:#fff; display:flex; align-items:center;
   justify-content:center; font-weight:800; font-size:.9rem; flex:none; }}
 .rnr-profile .meta {{ min-width:0; }}
 .rnr-profile .nm {{ font-weight:700; font-size:.86rem; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap; }}
-.rnr-profile .un {{ font-size:.72rem; opacity:.55; margin-left:5px; }}
-.rnr-sbfooter {{ font-size:.7rem; line-height:1.8; opacity:.5; margin-top:2px; }}
+.rnr-profile .un {{ font-size:.72rem; color:var(--sidebar-muted); margin-left:5px; }}
+.rnr-sbfooter {{ font-size:.7rem; line-height:1.8; color:var(--sidebar-muted);
+  margin-top:2px; }}
 .rnr-sbfooter a {{ color:inherit; }}
 
 /* buttons - nowrap so a narrow column (e.g. a compact list's action column)
    never wraps a short label onto two lines and inflates the row height */
 .stButton>button, .stDownloadButton>button {{
-  border-radius:12px; font-weight:600; padding:.5rem 1rem;
+  border-radius:var(--r-md); font-weight:600; padding:.5rem 1rem;
   border:1px solid var(--border); background:var(--surface);
   color:var(--text); transition:.18s ease; box-shadow:0 1px 2px rgba(0,0,0,.04);
   white-space:nowrap;
@@ -176,7 +184,7 @@ hr {{ border-color:var(--border); }}
 /* cards = bordered containers */
 [data-testid="stVerticalBlockBorderWrapper"] {{
   background:var(--surface); border:1px solid var(--border)!important;
-  border-radius:12px; box-shadow:var(--shadow); padding:6px;
+  border-radius:var(--r-md); box-shadow:var(--shadow); padding:8px;
   transition:.16s ease;
 }}
 [data-testid="stVerticalBlockBorderWrapper"]:hover {{
@@ -187,7 +195,7 @@ hr {{ border-color:var(--border); }}
 [data-baseweb="input"], [data-baseweb="select"]>div,
 [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
 textarea {{
-  border-radius:10px!important;
+  border-radius:var(--r-sm)!important;
 }}
 [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {{
   background:var(--surface2); color:var(--text);
@@ -196,7 +204,7 @@ textarea {{
 /* metrics */
 [data-testid="stMetric"] {{
   background:var(--surface); border:1px solid var(--border);
-  border-radius:16px; padding:14px 16px; box-shadow:var(--shadow);
+  border-radius:var(--r-lg); padding:16px; box-shadow:var(--shadow);
 }}
 [data-testid="stMetricValue"] {{ color:{v['teal']}; font-weight:800; }}
 [data-testid="stMetricLabel"] {{ color:var(--muted); }}
@@ -204,27 +212,28 @@ textarea {{
 /* tabs */
 [data-baseweb="tab-list"] {{ gap:6px; border-bottom:1px solid var(--border); }}
 [data-baseweb="tab"] {{
-  background:transparent; border-radius:10px 10px 0 0; font-weight:600;
-  color:var(--muted); padding:8px 16px;
+  background:transparent; border-radius:var(--r-sm) var(--r-sm) 0 0;
+  font-weight:600; color:var(--muted); padding:8px 16px;
 }}
 [data-baseweb="tab"][aria-selected="true"] {{
   color:{v['teal']}; background:var(--surface);
   border-bottom:2px solid {v['teal']};
 }}
-[data-testid="stDataFrame"] {{ border-radius:12px; overflow:hidden; }}
+[data-testid="stDataFrame"] {{ border-radius:var(--r-md); overflow:hidden; }}
 [data-testid="stExpander"] {{
-  border:1px solid var(--border); border-radius:14px; background:var(--surface);
+  border:1px solid var(--border); border-radius:var(--r-lg);
+  background:var(--surface);
 }}
 
 /* premium building blocks - clean Vercel panel hero */
 .rnr-hero {{
-  position:relative; border-radius:14px; padding:30px 32px; margin-bottom:24px;
+  position:relative; border-radius:var(--r-lg); padding:32px; margin-bottom:24px;
   background:var(--surface); border:1px solid var(--border);
   box-shadow:var(--shadow); overflow:hidden;
 }}
 .rnr-hero::after {{
   content:""; position:absolute; right:-80px; top:-120px; width:320px;
-  height:320px; border-radius:50%;
+  height:320px; border-radius:var(--r-pill);
   background:radial-gradient({v['teal']}1f, transparent 70%);
 }}
 .rnr-hero .eyebrow {{ font-size:.72rem; letter-spacing:.16em;
@@ -235,31 +244,48 @@ textarea {{
 .rnr-crumb {{ font-size:.8rem; color:var(--muted); margin-bottom:8px; }}
 .rnr-crumb .sep {{ margin:0 7px; opacity:.6; }}
 .rnr-crumb span:last-child {{ color:{v['teal']}; font-weight:600; }}
-.rnr-statrow {{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px;
+.rnr-statrow {{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px;
   margin:-6px 0 22px; }}
 .rnr-stat {{ background:var(--surface); border:1px solid var(--border);
-  border-radius:14px; padding:16px 18px; box-shadow:var(--shadow);
+  border-radius:var(--r-lg); padding:16px; box-shadow:var(--shadow);
   transition:.16s; }}
 .rnr-stat:hover {{ border-color:{v['teal']}55; box-shadow:var(--shadow-hi); }}
 .rnr-stat .v {{ font-size:1.7rem; font-weight:800; color:var(--text);
   line-height:1.1; }}
 .rnr-stat .k {{ font-size:.74rem; color:var(--muted); font-weight:600;
   text-transform:uppercase; letter-spacing:.06em; margin-top:4px; }}
+/* responsive: the fixed 4-column KPI grid and generous hero padding are
+   sized for desktop - reflow instead of overflowing/crushing on narrower
+   viewports (tested at 1440/1024/768/320 per the frontend skill's checklist) */
+@media (max-width:1024px) {{
+  .rnr-statrow {{ grid-template-columns:repeat(2,1fr); }}
+}}
+@media (max-width:480px) {{
+  .rnr-hero {{ padding:20px; }}
+  .rnr-hero h1 {{ font-size:1.6rem; }}
+  .rnr-statrow {{ grid-template-columns:1fr; }}
+}}
 .rnr-empty {{ text-align:center; padding:56px 24px; border:1.5px dashed
-  var(--border); border-radius:18px; background:var(--surface2);
+  var(--border); border-radius:var(--r-lg); background:var(--surface2);
   margin-top:8px; }}
 .rnr-empty .ic {{ font-size:3rem; }}
 .rnr-empty .t {{ font-size:1.2rem; font-weight:800; margin-top:8px;
   color:var(--text); }}
 .rnr-empty .s {{ color:var(--muted); margin-top:4px; }}
+/* .rnr-section renders on a real <h2> (see ui.section()) so screen-reader
+   users get an actual heading, not silent styled divs, when navigating a
+   long config form by heading - the h1..h4 rule above already sets
+   font-weight/letter-spacing generically, these declarations (higher
+   specificity) are what actually take effect */
 .rnr-section {{ display:flex; align-items:center; gap:10px; margin:2px 0 10px;
   font-weight:700; font-size:1.02rem; color:var(--text); }}
-.rnr-section .ic {{ width:30px; height:30px; border-radius:9px;
+.rnr-section .ic {{ width:30px; height:30px; border-radius:var(--r-sm);
   display:inline-flex; align-items:center; justify-content:center;
   background:{v['teal']}14; color:{v['teal']}; font-size:1rem;
   border:1px solid {v['teal']}33; }}
 .rnr-pill {{ display:inline-flex; align-items:center; gap:6px;
-  padding:4px 12px; border-radius:999px; font-weight:700; font-size:.8rem; }}
+  padding:4px 12px; border-radius:var(--r-pill); font-weight:700;
+  font-size:.8rem; white-space:nowrap; }}
 .rnr-pill.pass {{ background:{v['teal']}1f; color:{v['teal']};
   border:1px solid {v['teal']}55; }}
 .rnr-pill.fail {{ background:#e5393522; color:#e35335;
@@ -278,7 +304,7 @@ textarea {{
 .st-key-proj_list[data-testid="stVerticalBlock"],
 .st-key-proj_list [data-testid="stVerticalBlock"] {{ gap:0 !important; }}
 .st-key-proj_list [data-testid="stHorizontalBlock"] {{
-  padding:7px 8px; margin:0 !important; border-radius:10px;
+  padding:8px; margin:0 !important; border-radius:var(--r-sm);
   align-items:center; transition:background .12s ease;
 }}
 .st-key-proj_list [data-testid="stHorizontalBlock"]:hover {{
@@ -287,15 +313,56 @@ textarea {{
 .st-key-proj_list hr {{ margin:0 !important; opacity:.6; }}
 .rnr-row-title {{ font-weight:700; font-size:.92rem; line-height:1.3; }}
 .rnr-row-meta {{ color:var(--muted); font-size:.74rem; line-height:1.3; }}
+/* the 8-column row (name/ID/SO/rev/systems/configs/status/actions) has no
+   room to breathe under ~900px - Streamlit's columns are server-rendered
+   from fixed ratios, so there's no Python-side "stack on mobile"; drop the
+   secondary columns (2nd-6th: Project ID, SO No, Rev, Systems, Configs)
+   via CSS instead and let name/status/actions expand to fill the row
+   (display:none fully removes them from the flex layout, so the survivors
+   grow to fill the freed space - not just leave a gap) */
+@media (max-width:900px) {{
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(2),
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(3),
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(4),
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(5),
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(6) {{
+    display:none;
+  }}
+  /* Streamlit hides the SECOND of a nested column pair outright at narrow
+     widths as its own built-in behavior (computed display:none, confirmed
+     via devtools - not a wrapping/height issue) - deleting a project has
+     no other entry point in this app, so silently losing the button here
+     would strand the capability, not just make it "harder to tap". Force
+     it back on and keep both buttons on one shrunk-to-fit line. */
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(8)
+    [data-testid="stHorizontalBlock"] {{ flex-wrap:nowrap !important; }}
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(8)
+    [data-testid="stColumn"] {{
+    display:block !important; min-width:0 !important;
+  }}
+  .st-key-proj_list [data-testid="stColumn"]:nth-of-type(8) button {{
+    padding-left:.5rem; padding-right:.5rem;
+  }}
+}}
+/* the page-header action row (title + "Create new project") also has no
+   room at tablet/phone widths - stack it instead of letting the button
+   clip off the right edge (same breakpoint as the list above, for one
+   consistent "narrow" behavior across the dashboard) */
+@media (max-width:900px) {{
+  .st-key-dash_top [data-testid="stHorizontalBlock"] {{ flex-wrap:wrap; }}
+  .st-key-dash_top [data-testid="stColumn"] {{
+    min-width:100% !important; flex:1 1 100% !important;
+  }}
+}}
 .rnr-tile {{ background:var(--surface); border:1px solid var(--border);
-  border-radius:16px; padding:14px 18px; box-shadow:var(--shadow); }}
+  border-radius:var(--r-lg); padding:16px; box-shadow:var(--shadow); }}
 .rnr-tile .k {{ color:var(--muted); font-size:.78rem; font-weight:600;
   text-transform:uppercase; letter-spacing:.06em; }}
 .rnr-tile .v {{ color:{v['teal']}; font-size:1.5rem; font-weight:800; }}
 .rnr-chiprow {{ display:flex; gap:8px; flex-wrap:wrap; }}
 .rnr-muted {{ color:var(--muted); }}
 .rnr-topbar {{ display:flex; align-items:center; gap:10px; margin:-8px 0 18px;
-  padding:9px 16px; border-radius:12px; font-size:.86rem; font-weight:600;
+  padding:8px 16px; border-radius:var(--r-md); font-size:.86rem; font-weight:600;
   background:linear-gradient(90deg,{v['teal']}14,{v['teal']}05);
   border:1px solid {v['teal']}33; color:var(--text); }}
 .rnr-topbar .ic {{ font-size:1rem; }}
@@ -323,7 +390,7 @@ textarea {{
 .rnr-console .ln.err {{ color:#e35335; }}
 .rnr-console .ln.ok {{ color:{v['teal']}; font-weight:600; }}
 .rnr-cmp {{ background:var(--surface); border:1px solid var(--border);
-  border-radius:16px; padding:6px 16px 14px; box-shadow:var(--shadow);
+  border-radius:var(--r-lg); padding:8px 16px 16px; box-shadow:var(--shadow);
   height:100%; }}
 .rnr-cmp-head {{ display:flex; align-items:center; justify-content:space-between;
   gap:8px; padding:12px 0 10px; border-bottom:1px solid var(--border);
@@ -336,10 +403,10 @@ textarea {{
   text-transform:uppercase; letter-spacing:.05em; }}
 .rnr-cmp-row .v {{ font-size:1.02rem; font-weight:700; color:var(--text);
   margin-top:1px; }}
-.rnr-cmp-bar {{ margin-top:6px; height:6px; border-radius:999px;
+.rnr-cmp-bar {{ margin-top:6px; height:6px; border-radius:var(--r-pill);
   background:var(--surface2); border:1px solid var(--border);
   overflow:hidden; }}
-.rnr-cmp-bar span {{ display:block; height:100%; border-radius:999px; }}
+.rnr-cmp-bar span {{ display:block; height:100%; border-radius:var(--r-pill); }}
 #MainMenu, footer, [data-testid="stToolbar"] {{ visibility:hidden; }}
 </style>""", unsafe_allow_html=True)
 
@@ -368,8 +435,12 @@ def stat_strip(stats) -> None:
 
 
 def empty_state(icon: str, title: str, text: str = "") -> None:
+    # role="status" so a screen reader announces it when it appears
+    # dynamically (e.g. a search that now matches nothing), not just on
+    # first paint
     st.markdown(
-        f'<div class="rnr-empty"><div class="ic">{icon}</div>'
+        f'<div class="rnr-empty" role="status"><div class="ic" '
+        f'aria-hidden="true">{icon}</div>'
         f'<div class="t">{_html.escape(title)}</div>'
         f'<div class="s">{_html.escape(text)}</div></div>',
         unsafe_allow_html=True)
@@ -378,8 +449,11 @@ def empty_state(icon: str, title: str, text: str = "") -> None:
 def pill(verdict: str) -> str:
     v = (verdict or "not run").upper()
     cls = "pass" if v == "PASS" else "fail" if v == "FAIL" else "idle"
+    # the dot is decorative (colour), the text label already carries the
+    # status - hidden from screen readers so it isn't announced as noise
     return (f'<span class="rnr-pill {cls}"><span class="rnr-dot" '
-            f'style="background:currentColor"></span>{_html.escape(v)}</span>')
+            f'aria-hidden="true" style="background:currentColor"></span>'
+            f'{_html.escape(v)}</span>')
 
 
 def role_badge(is_admin: bool) -> str:
@@ -429,9 +503,14 @@ def tile(label: str, value: str) -> str:
 
 
 def section(icon: str, title: str) -> None:
-    """An icon + title header for a form section card."""
-    st.markdown(f'<div class="rnr-section"><span class="ic">{icon}</span>'
-                f'{_html.escape(title)}</div>', unsafe_allow_html=True)
+    """An icon + title header for a form section card, rendered as a real
+    <h2> - screen-reader users can jump between sections (masters, beam
+    levels, bracing, ...) via heading navigation, not just sighted users
+    scanning styled divs. hero() renders the page's one <h1>, so this is the
+    correct next level (st.subheader()'s native <h3> nests under it)."""
+    st.markdown(f'<h2 class="rnr-section"><span class="ic" aria-hidden="true">'
+                f'{icon}</span>{_html.escape(title)}</h2>',
+                unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------- command log

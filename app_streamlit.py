@@ -2003,11 +2003,12 @@ def render_dashboard():
     ui.stat_strip([("Projects", len(projects)), ("Systems", n_sys),
                    ("Configurations", len(confs)), ("Pass rate", pass_rate)])
 
-    top = st.columns([3, 1])
-    top[0].subheader("Projects")
-    if top[1].button("➕ Create new project", width="stretch",
-                     type="primary"):
-        goto("new_project")
+    with st.container(key="dash_top"):
+        top = st.columns([3, 1])
+        top[0].subheader("Projects")
+        if top[1].button("➕ Create new project", width="stretch",
+                         type="primary"):
+            goto("new_project")
 
     if not projects:
         ui.empty_state("📦", "No projects yet",
@@ -2045,7 +2046,7 @@ def render_dashboard():
     start = (page - 1) * PAGE_SIZE
     page_projects = projects[start:start + PAGE_SIZE]
 
-    _ROW_COLS = [2.2, 1.1, 1.1, 0.9, 0.9, 0.9, 1, 1.7]
+    _ROW_COLS = [2.1, 1.0, 1.0, 0.6, 0.8, 0.8, 1.1, 2.1]
     with st.container(key="proj_list"):
         hdr = st.columns(_ROW_COLS)
         for h, label in zip(hdr, ("Project", "Project ID", "SO No.", "Rev",
@@ -2081,7 +2082,7 @@ def render_dashboard():
             if ac[0].button("Open", key=f"open_{proj.id}", width="stretch",
                             type="primary"):
                 goto("project", project_id=proj.id)
-            if ac[1].button("🗑", key=f"delp_{proj.id}", width="stretch",
+            if ac[1].button("🗑 Delete", key=f"delp_{proj.id}", width="stretch",
                             help="Delete project"):
                 ss[f"confirm_delp_{proj.id}"] = True
             if ss.get(f"confirm_delp_{proj.id}"):
