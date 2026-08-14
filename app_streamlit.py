@@ -2041,7 +2041,20 @@ def render_dashboard():
                        f"Nothing matches '{query}'.")
         return
 
-    for proj in projects:
+    # pagination - a new search (or the result count shrinking below the
+    # current page) snaps back to page 1 instead of showing a blank page
+    PAGE_SIZE = 15
+    if ss.get("_proj_search_last") != q:
+        ss["proj_page"] = 1
+        ss["_proj_search_last"] = q
+    n_total = len(projects)
+    n_pages = max(1, -(-n_total // PAGE_SIZE))          # ceil div, no import
+    page = min(max(int(ss.get("proj_page", 1)), 1), n_pages)
+    ss["proj_page"] = page
+    start = (page - 1) * PAGE_SIZE
+    page_projects = projects[start:start + PAGE_SIZE]
+
+    for proj in page_projects:
         n_cfg = sum(len(s.configurations) for s in proj.systems)
         verdicts = [c.run_summary["verdict"]
                     for s in proj.systems for c in s.configurations
@@ -2081,6 +2094,28 @@ def render_dashboard():
                 ss[f"confirm_delp_{proj.id}"] = False
                 st.rerun()
         st.divider()
+
+    if n_pages > 1:
+        pc = st.columns([1, 1, 3, 1, 1])
+        if pc[0].button("« First", disabled=page <= 1, key="proj_page_first"):
+            ss["proj_page"] = 1
+            st.rerun()
+        if pc[1].button("‹ Prev", disabled=page <= 1, key="proj_page_prev"):
+            ss["proj_page"] = page - 1
+            st.rerun()
+        pc[2].markdown(
+            f"<div style='text-align:center' class='rnr-muted'>Page "
+            f"<b>{page}</b> of <b>{n_pages}</b> · {start + 1}–"
+            f"{min(start + PAGE_SIZE, n_total)} of {n_total} projects</div>",
+            unsafe_allow_html=True)
+        if pc[3].button("Next ›", disabled=page >= n_pages,
+                        key="proj_page_next"):
+            ss["proj_page"] = page + 1
+            st.rerun()
+        if pc[4].button("Last »", disabled=page >= n_pages,
+                        key="proj_page_last"):
+            ss["proj_page"] = n_pages
+            st.rerun()
 
 
 def render_new_project():

@@ -301,6 +301,39 @@ def test_dashboard_lists_and_searches_projects(tmp_path, monkeypatch):
     assert "Alpha Tower" not in md and "Beta Warehouse" not in md
 
 
+def test_dashboard_paginates_projects(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from rack15512.project import ProjectStore
+    ps = ProjectStore("projects")
+    for i in range(18):                      # > PAGE_SIZE (15) - two pages
+        ps.create_project(f"Project {i:02d}")
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at)
+    at.run()
+    assert not at.exception
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "Project 00" in md and "Project 14" in md
+    assert "Project 15" not in md and "Project 17" not in md
+    assert "Page <b>1</b> of <b>2</b>" in md
+    next_btn = next(b for b in at.button if b.key == "proj_page_next")
+    assert not next_btn.disabled
+    prev_btn = next(b for b in at.button if b.key == "proj_page_prev")
+    assert prev_btn.disabled
+
+    next_btn.click().run()
+    assert not at.exception
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "Project 15" in md and "Project 17" in md
+    assert "Project 00" not in md
+    assert "Page <b>2</b> of <b>2</b>" in md
+
+    # a new search resets back to page 1 rather than showing a blank page
+    at.text_input(key="proj_search").set_value("Project").run()
+    assert not at.exception
+    assert at.session_state["proj_page"] == 1
+
+
 def test_new_project_form_has_project_id_so_revision_fields(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     at = AppTest.from_file(APP, default_timeout=60)
