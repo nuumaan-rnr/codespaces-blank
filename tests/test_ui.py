@@ -16,6 +16,11 @@ def test_pill_variants():
     assert "<span" in ui.pill("PASS")
 
 
+def test_role_badge():
+    assert "ADMIN" in ui.role_badge(True) and "rnr-pill pass" in ui.role_badge(True)
+    assert "USER" in ui.role_badge(False) and "rnr-pill idle" in ui.role_badge(False)
+
+
 def test_tile_html():
     h = ui.tile("Systems", 3)
     assert "rnr-tile" in h and "Systems" in h and "3" in h

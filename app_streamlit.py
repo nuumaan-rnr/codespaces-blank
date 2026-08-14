@@ -18,6 +18,7 @@ import pickle
 from rack15512 import branding as B
 from rack15512 import ui
 from rack15512.analysis import UnstableModelError, run_all
+from rack15512.auth import UserStore
 from rack15512.builder import (LevelSpec, RackConfig, bracing_elevations,
                                build_rack)
 from rack15512.checks.en15512 import all_ok, governing, run_checks
@@ -39,6 +40,8 @@ st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
 
 PSTORE = ProjectStore("projects")
 MSTORE = MasterStore("masters")  # starts empty; masters are uploaded per company
+USTORE = UserStore("users")      # login directory - admin manages this in-app
+USTORE.bootstrap_admin_from_env()   # first boot only: seeds one admin (see auth.py)
 
 ss = st.session_state
 ss.setdefault("view", "dashboard")
@@ -47,8 +50,14 @@ ss.setdefault("system_id", None)
 ss.setdefault("config_id", None)
 ss.setdefault("edit_cfg", None)        # RackConfig pre-fill when editing
 ss.setdefault("dark_mode", ui.load_dark_pref())   # persisted across sessions
+ss.setdefault("user", None)            # {"username","name","role"} once logged in
 
 ui.apply_theme()
+
+if ss.user is None:
+    ui.render_login(USTORE)
+    st.stop()
+
 ui.console()           # CAD-style command/log bar pinned to the page bottom
 
 
@@ -3776,7 +3785,94 @@ def _render_master(sm):
                                 os.remove(_p)
 
 
+def render_user_access():
+    """Admin-only: who can sign in, and with which role.  A non-admin can
+    never reach this view (see the _ADMIN_ONLY_VIEWS guard in the router)."""
+    ui.hero("User Access", "Admins can manage section masters and user "
+            "access; everyone else only sees the projects dashboard.",
+            eyebrow="Admin")
+
+    users = USTORE.list_users()
+    ui.stat_strip([("Users", len(users)),
+                   ("Admins", sum(u.is_admin for u in users))])
+
+    st.subheader("Add a user")
+    with st.form("add_user_form", clear_on_submit=True):
+        cc = st.columns([2, 2, 2, 1.4])
+        new_username = cc[0].text_input("Username")
+        new_name = cc[1].text_input("Full name")
+        new_password = cc[2].text_input("Temporary password", type="password")
+        new_role = cc[3].selectbox("Role", ["user", "admin"])
+        if st.form_submit_button("➕ Add user", type="primary"):
+            if not new_username.strip() or not new_password:
+                st.error("Username and a temporary password are required.")
+            elif USTORE.exists(new_username):
+                st.error(f"'{new_username.strip().lower()}' already exists.")
+            else:
+                USTORE.add_user(new_username, new_name, new_password, new_role)
+                st.success(f"Added '{new_username.strip().lower()}' "
+                           f"({new_role}). Share the temporary password with "
+                           f"them directly — it is not stored or shown again.")
+                st.rerun()
+
+    st.subheader("Existing users")
+    me = ss.user["username"]
+    last_admin = USTORE.admin_count() <= 1
+    for u in users:
+        with st.container(border=True):
+            cc = st.columns([3, 2, 2, 2, 1.6])
+            cc[0].markdown(f"**{u.name}**  \n"
+                           f"<span class='rnr-muted'>@{u.username}"
+                           f"{' · you' if u.username == me else ''}</span>",
+                           unsafe_allow_html=True)
+            cc[1].markdown(ui.role_badge(u.is_admin), unsafe_allow_html=True)
+            # role toggle - never let the last admin demote themselves out
+            can_demote = not (u.is_admin and last_admin)
+            new_r = cc[2].selectbox(
+                "Role", ["user", "admin"], index=0 if u.role == "user" else 1,
+                key=f"role_{u.username}", label_visibility="collapsed",
+                disabled=not can_demote)
+            if new_r != u.role:
+                if can_demote:
+                    USTORE.set_role(u.username, new_r)
+                    st.rerun()
+                else:
+                    cc[2].caption("⚠️ at least one admin is required")
+            new_pw = cc[3].text_input("Reset password", key=f"pw_{u.username}",
+                                      label_visibility="collapsed",
+                                      placeholder="new password…")
+            if cc[3].button("🔑 Reset", key=f"rpw_{u.username}",
+                            width="stretch"):
+                if new_pw:
+                    USTORE.reset_password(u.username, new_pw)
+                    st.success(f"Password reset for @{u.username}.")
+                else:
+                    st.error("Enter a new password first.")
+            can_delete = u.username != me and not (u.is_admin and last_admin)
+            if cc[4].button("🗑 Delete", key=f"del_{u.username}",
+                            width="stretch", disabled=not can_delete):
+                ss[f"confirm_deluser_{u.username}"] = True
+            if u.username == me:
+                cc[4].caption("can't delete yourself")
+            elif u.is_admin and last_admin:
+                cc[4].caption("last admin")
+            if ss.get(f"confirm_deluser_{u.username}"):
+                st.warning(f"Remove @{u.username}'s access? They will no "
+                           f"longer be able to sign in.")
+                wc = st.columns(2)
+                if wc[0].button("Yes, remove access",
+                                key=f"delu_y_{u.username}", type="primary"):
+                    USTORE.delete_user(u.username)
+                    ss[f"confirm_deluser_{u.username}"] = False
+                    st.rerun()
+                if wc[1].button("Cancel", key=f"delu_n_{u.username}"):
+                    ss[f"confirm_deluser_{u.username}"] = False
+                    st.rerun()
+
+
 # ------------------------------------------------------------------- router
+is_admin = ss.user.get("role") == "admin"
+
 with st.sidebar:
     if os.path.exists(B.LOGO_PATH):
         st.image(B.LOGO_PATH, width="stretch")
@@ -3787,8 +3883,11 @@ with st.sidebar:
     st.divider()
     if st.button("🏠  Dashboard", width="stretch"):
         goto("dashboard")
-    if st.button("📚  Section masters", width="stretch"):
-        goto("masters")
+    if is_admin:
+        if st.button("📚  Section masters", width="stretch"):
+            goto("masters")
+        if st.button("👤  User access", width="stretch"):
+            goto("user_access")
     st.divider()
     ui.theme_toggle()
     if ss.project_id and ss.view in ("project", "configure", "view_config"):
@@ -3798,6 +3897,18 @@ with st.sidebar:
             st.info(PSTORE.load(ss.project_id).name)
         except Exception:
             pass
+    st.divider()
+    role_badge = "Admin" if is_admin else "User"
+    st.markdown(f"<div style='font-weight:700'>{ss.user.get('name') or ss.user['username']}"
+                f"</div><div class='rnr-muted' style='font-size:.8rem'>"
+                f"{role_badge} · @{ss.user['username']}</div>",
+                unsafe_allow_html=True)
+    if st.button("🚪  Log out", width="stretch"):
+        ss.user = None
+        ss.view = "dashboard"
+        for k in ("project_id", "system_id", "config_id", "edit_cfg"):
+            ss[k] = None
+        st.rerun()
     st.divider()
     st.caption("OpenSees 2nd-order · semi-rigid · units N, mm, MPa")
     st.caption(f"© {B.COMPANY} · {B.WEBSITE}")
@@ -3813,5 +3924,9 @@ _VIEWS = {
     "seismic_study": render_seismic_study,
     "anchor_designer": render_anchor_designer,
     "masters": render_masters,
+    "user_access": render_user_access,
 }
+_ADMIN_ONLY_VIEWS = ("masters", "user_access")
+if ss.view in _ADMIN_ONLY_VIEWS and not is_admin:
+    ss.view = "dashboard"      # a non-admin can never land on an admin page
 _VIEWS.get(ss.view, render_dashboard)()

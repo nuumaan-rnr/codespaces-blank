@@ -16,13 +16,20 @@ MASTER = os.path.join(os.path.dirname(__file__), "..", "examples",
 
 
 def _setss(at, **kw):
+    """Set AppTest session_state before the first .run(); defaults to an
+    authenticated admin session (most tests need full access) - pass
+    user=None explicitly to exercise the logged-out / non-admin paths."""
+    kw.setdefault("user", {"username": "test", "name": "Test Admin",
+                           "role": "admin"})
     for k, v in kw.items():
         at.session_state[k] = v
 
 
 def test_dashboard_opens_on_load(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    at = AppTest.from_file(APP, default_timeout=60).run()
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at)
+    at.run()
     assert not at.exception
     # hero title rendered as branded markdown
     assert any("Storage Rack Design" in (m.value or "") for m in at.markdown)
@@ -197,6 +204,85 @@ def test_compare_view_shows_two_configs(tmp_path, monkeypatch):
     assert "rnr-cmp" in md                 # comparison cards rendered
     assert "Cfg A" in md and "Cfg B" in md
     assert "util · STRESS" in md
+
+
+def test_unauthenticated_sees_only_the_login_page(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at, user=None)
+    at.run()
+    assert not at.exception
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "Sign in to continue" in md
+    # nothing from the dashboard/sidebar leaked through
+    assert "Storage Rack Design" not in md
+    assert not list(at.sidebar.button)
+
+
+def test_wrong_password_rejected(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "correct-horse-battery-staple")
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at, user=None)
+    at.run()
+    user_in, pw_in = list(at.text_input)[:2]
+    user_in.set_value("admin")
+    pw_in.set_value("not-the-password")
+    submit = next(b for b in at.button if "Sign in" in b.label)
+    submit.click().run()
+    assert not at.exception
+    assert at.session_state["user"] is None
+    md = " ".join(m.value or "" for m in at.markdown) + " ".join(
+        e.value or "" for e in at.error)
+    assert "Incorrect username or password" in md
+
+
+def test_non_admin_cannot_reach_admin_pages(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at, view="masters",
+          user={"username": "bob", "name": "Bob", "role": "user"})
+    at.run()
+    assert not at.exception
+    # a non-admin landing on an admin-only view is bounced to the dashboard
+    assert at.session_state["view"] == "dashboard"
+    assert any("Storage Rack Design" in (m.value or "") for m in at.markdown)
+    # and the admin-only nav buttons are not offered
+    labels = [b.label for b in at.sidebar.button]
+    assert not any("Section masters" in l for l in labels)
+    assert not any("User access" in l for l in labels)
+
+
+def test_admin_sees_masters_and_user_access_nav(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at)                    # default admin session
+    at.run()
+    assert not at.exception
+    labels = [b.label for b in at.sidebar.button]
+    assert any("Section masters" in l for l in labels)
+    assert any("User access" in l for l in labels)
+
+
+def test_user_access_page_add_and_delete_user(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    at = AppTest.from_file(APP, default_timeout=90)
+    _setss(at, view="user_access")
+    at.run()
+    assert not at.exception
+    from rack15512.auth import UserStore
+    us = UserStore("users")
+    assert not us.exists("newbie")
+    inputs = list(at.text_input)
+    inputs[0].set_value("newbie")            # Username
+    inputs[1].set_value("Newbie Newperson")  # Full name
+    inputs[2].set_value("temp-pw-123")       # Temporary password
+    add_btn = next(b for b in at.button if "Add user" in b.label)
+    add_btn.click().run()
+    assert not at.exception
+    assert us.exists("newbie")
+    assert us.get("newbie").role == "user"
 
 
 if __name__ == "__main__":

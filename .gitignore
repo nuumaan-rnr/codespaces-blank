@@ -9,6 +9,7 @@ build/
 dist/
 projects/
 masters/
+users/
 charts/
 charts_util/
 charts_util_smoke/

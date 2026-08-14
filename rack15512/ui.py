@@ -326,6 +326,13 @@ def pill(verdict: str) -> str:
             f'style="background:currentColor"></span>{_html.escape(v)}</span>')
 
 
+def role_badge(is_admin: bool) -> str:
+    """Small ADMIN/USER badge, reusing the pill palette (admin = teal)."""
+    cls = "pass" if is_admin else "idle"
+    label = "ADMIN" if is_admin else "USER"
+    return f'<span class="rnr-pill {cls}">{label}</span>'
+
+
 def tile(label: str, value: str) -> str:
     return (f'<div class="rnr-tile"><div class="k">{_html.escape(label)}</div>'
             f'<div class="v">{_html.escape(str(value))}</div></div>')
@@ -510,6 +517,45 @@ def theme_toggle() -> None:
     cur = st.toggle("🌙 Dark mode", key="dark_mode")
     if cur != load_dark_pref():
         _save_dark_pref(cur)
+
+
+def render_login(user_store) -> None:
+    """Centered sign-in gate.  Call once apply_theme() has run; the caller
+    is responsible for st.stop()-ing right after this when no one is signed
+    in yet (see app_streamlit.py) - nothing else on the page should render
+    until st.session_state["user"] is set here on a successful login."""
+    st.markdown('<div style="height:9vh"></div>', unsafe_allow_html=True)
+    col = st.columns([1, 1.1, 1])[1]
+    with col:
+        with st.container(border=True):
+            if _os.path.exists(B.LOGO_PATH):
+                lc = st.columns([1, 2, 1])[1]
+                lc.image(B.LOGO_PATH, width="stretch")
+            st.markdown(
+                f"<h2 style='text-align:center;margin:6px 0 2px'>"
+                f"{_html.escape(B.PRODUCT)}</h2>"
+                f"<p class='rnr-muted' style='text-align:center;"
+                f"margin-bottom:18px'>Sign in to continue</p>",
+                unsafe_allow_html=True)
+            with st.form("login_form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button(
+                    "Sign in", type="primary", width="stretch")
+            if submitted:
+                user = user_store.verify_login(username, password)
+                if user is None:
+                    st.error("Incorrect username or password.")
+                else:
+                    st.session_state["user"] = {
+                        "username": user.username, "name": user.name,
+                        "role": user.role}
+                    st.rerun()
+        st.markdown(
+            f"<div class='rnr-muted' style='text-align:center;"
+            f"margin-top:12px;font-size:.82rem'>© {B.COMPANY} · "
+            f"internal tool — access is restricted to authorised users</div>",
+            unsafe_allow_html=True)
 
 
 def toast_verdict(verdict: str) -> None:
