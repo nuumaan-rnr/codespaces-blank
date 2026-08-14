@@ -1,0 +1,19 @@
+# Render Blueprint - connect this repo on Render and it reads this file
+# automatically to provision the service. See README.md "Deployment" for
+# the full walkthrough.
+services:
+  - type: web
+    name: rackverify
+    runtime: docker
+    plan: starter  # smallest plan with enough RAM for openseespy+numpy+matplotlib
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: ADMIN_USERNAME
+        sync: false   # set in the Render dashboard, not stored in the repo
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: rackverify-data
+      mountPath: /data
+      sizeGB: 1

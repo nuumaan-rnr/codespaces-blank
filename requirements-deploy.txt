@@ -1,0 +1,6 @@
+# Deployment manifest: the core engine deps (requirements.txt) plus the
+# web UI, which requirements.txt deliberately leaves optional for library
+# use. Install this file (not requirements.txt alone) when deploying the
+# app - see Dockerfile / README.md "Deployment" section.
+-r requirements.txt
+streamlit>=1.30
