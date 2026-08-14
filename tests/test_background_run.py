@@ -10,6 +10,8 @@ import signal
 import sys
 import time
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rack15512 import background_run
@@ -76,6 +78,20 @@ def test_poll_status_none_when_never_started(tmp_path):
     assert background_run.poll_status(str(tmp_path / "nope")) is None
 
 
+def test_pid_alive_cross_platform():
+    """_pid_alive must correctly distinguish a live PID (this process) from
+    one that can't exist, on whichever platform the suite runs on - this is
+    what poll_status()'s crash detection falls back to when it doesn't hold
+    the Popen handle itself (e.g. after a server restart); a wrong answer
+    here previously crashed with a Windows-only OSError (os.kill(pid, 0) is
+    a POSIX idiom, not a portable liveness check)."""
+    assert background_run._pid_alive(os.getpid()) is True
+    assert background_run._pid_alive(None) is True         # unknown - don't guess
+    assert background_run._pid_alive(0) is True             # falsy - don't guess
+    # a PID astronomically unlikely to be in use on any platform/CI runner
+    assert background_run._pid_alive(2**30 - 1) is False
+
+
 def test_start_run_dedups_while_in_progress(tmp_path):
     root = str(tmp_path / "projects")
     target = "tests.test_background_run:_fake_run_configuration_slow"
@@ -121,6 +137,10 @@ def test_failed_run_reports_error_type(tmp_path):
     assert status["cancelled"] is False
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="SIGKILL isn't available on Windows; the "
+                          "cross-platform liveness check itself is "
+                          "exercised indirectly by every other test here")
 def test_killed_worker_reported_as_crash_not_frozen_forever(tmp_path):
     """A worker that's killed outright (OOM, native-code fault, ...) skips
     every except clause in _run_worker and never writes a final status - the

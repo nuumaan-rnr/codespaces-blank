@@ -30,9 +30,13 @@ alive whenever the status says "not done" so a worker that's killed outright
 (OOM, a native-code fault - anything that skips the except Exception in
 _run_worker) is reported as a crash instead of leaving the status frozen and
 polled forever with no feedback. The liveness check prefers the Popen handle
-kept in _PROCS (this server process only) over a bare PID check: a killed
-child stays a zombie - os.kill(pid, 0) keeps "succeeding" - until something
-calls wait()/poll() on it, which only the process that spawned it can do.
+kept in _PROCS (this server process only) over a bare PID check: on POSIX, a
+killed child stays a zombie - os.kill(pid, 0) keeps "succeeding" - until
+something calls wait()/poll() on it, which only the process that spawned it
+can do; _PROCS is also what makes the bare-PID fallback (used when this
+server process didn't spawn the run itself, e.g. after a restart, or a run
+started from elsewhere) portable - os.kill(pid, 0) is POSIX-only, so that
+fallback path uses OpenProcess on Windows instead (see _pid_alive).
 """
 
 from __future__ import annotations
@@ -83,16 +87,37 @@ def _write_status(config_dir: str, data: dict) -> None:
         raise
 
 
-def _pid_alive(pid) -> bool:
-    if not pid:
-        return True                            # unknown - don't second-guess
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True                            # exists, just owned elsewhere
-    return True
+if sys.platform == "win32":
+    import ctypes
+
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+    def _pid_alive(pid) -> bool:
+        # os.kill(pid, 0) is a POSIX idiom (signal 0 = existence check) that
+        # does NOT carry over to Windows - there, os.kill maps to
+        # TerminateProcess and can raise unrelated WinErrors for a plain
+        # liveness check. OpenProcess (read-only query rights) + a null
+        # handle is the correct cross-platform-safe way to ask "does this
+        # PID exist" on Windows without touching the process at all.
+        if not pid:
+            return True                        # unknown - don't second-guess
+        handle = ctypes.windll.kernel32.OpenProcess(
+            _PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+else:
+    def _pid_alive(pid) -> bool:
+        if not pid:
+            return True                        # unknown - don't second-guess
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True                        # exists, just owned elsewhere
+        return True
 
 
 def _worker_alive(config_dir: str, pid) -> bool:
