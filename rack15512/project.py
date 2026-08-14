@@ -139,6 +139,9 @@ class Project:
     engineer: str = ""
     standard: str = "EN 15512 (non-seismic)"
     description: str = ""
+    project_no: str = ""    # customer/job-facing project ID (distinct from `id`)
+    so_no: str = ""         # sales order number
+    revision: str = ""      # revision / rev no.
     created: str = field(default_factory=_now)
     systems: List[System] = field(default_factory=list)
 

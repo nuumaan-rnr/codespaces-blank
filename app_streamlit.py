@@ -38,6 +38,9 @@ from rack15512.viewer import (plot_deformed, plot_footplate,
 st.set_page_config(page_title=f"{B.COMPANY} · {B.PRODUCT}", layout="wide",
                    initial_sidebar_state="expanded")
 
+G_ACC = 9.81   # m/s^2 - standard gravity, kg -> N throughout the UI (matches
+               # builder._G_ACC / loadcharts.G_ACC; never the 10 shortcut)
+
 PSTORE = ProjectStore("projects")
 MSTORE = MasterStore("masters")  # starts empty; masters are uploaded per company
 USTORE = UserStore("users")      # login directory - admin manages this in-app
@@ -1179,12 +1182,15 @@ def configuration_form(lib, master, cfg0: RackConfig | None):
                                      index=_idx(beam_names,
                                                 l0.beam_section if l0 else None),
                                      key=f"b{k}")
-                ld = cc[2].number_input(
-                    f"L{k+1} load [kN]", 0.0, 100.0,
-                    float((l0.pallet_load if l0 else 20000.0) / 1e3), 1.0,
-                    key=f"l{k}")
+                ld_kg = cc[2].number_input(
+                    f"L{k+1} load [kg]", 0.0, 10000.0,
+                    float((l0.pallet_load if l0 else 20000.0) / G_ACC), 50.0,
+                    key=f"l{k}",
+                    help=f"Converted to N via × g ({G_ACC:g} m/s²) for the "
+                         f"analysis, not the ×10 shortcut.")
+                cc[2].caption(f"= {ld_kg * G_ACC / 1e3:.2f} kN")
                 levels.append(LevelSpec(gap=gap, beam_section=bs,
-                                        pallet_load=ld * 1e3))
+                                        pallet_load=ld_kg * G_ACC))
                 elev += gap
             frame_h = st.number_input(
                 "Frame height [mm] (>= top level)", min_value=elev,
@@ -1904,6 +1910,33 @@ def render_dashboard():
         if st.button("➕ Create your first project", type="primary"):
             goto("new_project")
         return
+
+    query = st.text_input(
+        "🔍 Search projects", ss.get("proj_search", ""),
+        placeholder="Search by project name, project ID, SO no. or client…",
+        key="proj_search")
+    q = query.strip().lower()
+    if q:
+        def _hit(p):
+            return q in " ".join((p.name, p.project_no, p.so_no, p.revision,
+                                  p.client)).lower()
+        projects = [p for p in projects if _hit(p)]
+
+    _ROW_COLS = [2.2, 1.1, 1.1, 0.9, 0.9, 0.9, 1, 1.7]
+    hdr = st.columns(_ROW_COLS)
+    for h, label in zip(hdr, ("Project", "Project ID", "SO No.", "Rev",
+                              "Systems", "Configs", "Status", "")):
+        h.markdown(f"<span class='rnr-muted' style='font-size:.74rem;"
+                   f"font-weight:700;text-transform:uppercase;"
+                   f"letter-spacing:.05em'>{label}</span>",
+                   unsafe_allow_html=True)
+    st.divider()
+
+    if not projects:
+        ui.empty_state("🔍", "No matching projects",
+                       f"Nothing matches '{query}'.")
+        return
+
     for proj in projects:
         n_cfg = sum(len(s.configurations) for s in proj.systems)
         verdicts = [c.run_summary["verdict"]
@@ -1912,36 +1945,38 @@ def render_dashboard():
         status = ("PASS" if verdicts and all(v == "PASS" for v in verdicts)
                   else ("FAIL" if any(v == "FAIL" for v in verdicts)
                         else "not run"))
-        with st.container(border=True):
-            cc = st.columns([4, 2, 2, 1.6])
-            meta = " · ".join(x for x in (proj.client, proj.location,
-                                          proj.engineer) if x)
-            cc[0].markdown(f"#### {proj.name}\n<span class='rnr-muted'>"
-                           f"{meta or 'no metadata'}</span>",
-                           unsafe_allow_html=True)
-            cc[1].markdown(ui.tile("Systems", len(proj.systems)),
-                           unsafe_allow_html=True)
-            cc[2].markdown(ui.tile("Configurations", n_cfg),
-                           unsafe_allow_html=True)
-            cc[3].markdown(ui.pill(status), unsafe_allow_html=True)
-            if cc[3].button("Open →", key=f"open_{proj.id}",
-                            width="stretch", type="primary"):
-                goto("project", project_id=proj.id)
-            if cc[3].button("🗑 Delete", key=f"delp_{proj.id}",
-                            width="stretch"):
-                ss[f"confirm_delp_{proj.id}"] = True
-            if ss.get(f"confirm_delp_{proj.id}"):
-                st.warning(f"Permanently delete project '{proj.name}' and all "
-                           f"its systems / configurations / results?")
-                wc = st.columns(2)
-                if wc[0].button("Yes, delete project", key=f"delpy_{proj.id}",
-                                type="primary"):
-                    PSTORE.delete_project(proj.id)
-                    ss[f"confirm_delp_{proj.id}"] = False
-                    st.rerun()
-                if wc[1].button("Cancel", key=f"delpn_{proj.id}"):
-                    ss[f"confirm_delp_{proj.id}"] = False
-                    st.rerun()
+        cc = st.columns(_ROW_COLS, vertical_alignment="center")
+        meta = " · ".join(x for x in (proj.client, proj.location,
+                                      proj.engineer) if x)
+        cc[0].markdown(f"**{proj.name}**" + (f"  \n<span class='rnr-muted' "
+                       f"style='font-size:.8rem'>{meta}</span>"
+                       if meta else ""), unsafe_allow_html=True)
+        cc[1].write(proj.project_no or "—")
+        cc[2].write(proj.so_no or "—")
+        cc[3].write(proj.revision or "—")
+        cc[4].write(len(proj.systems))
+        cc[5].write(n_cfg)
+        cc[6].markdown(ui.pill(status), unsafe_allow_html=True)
+        ac = cc[7].columns(2)
+        if ac[0].button("Open →", key=f"open_{proj.id}", width="stretch",
+                        type="primary"):
+            goto("project", project_id=proj.id)
+        if ac[1].button("🗑", key=f"delp_{proj.id}", width="stretch",
+                        help="Delete project"):
+            ss[f"confirm_delp_{proj.id}"] = True
+        if ss.get(f"confirm_delp_{proj.id}"):
+            st.warning(f"Permanently delete project '{proj.name}' and all "
+                       f"its systems / configurations / results?")
+            wc = st.columns(2)
+            if wc[0].button("Yes, delete project", key=f"delpy_{proj.id}",
+                            type="primary"):
+                PSTORE.delete_project(proj.id)
+                ss[f"confirm_delp_{proj.id}"] = False
+                st.rerun()
+            if wc[1].button("Cancel", key=f"delpn_{proj.id}"):
+                ss[f"confirm_delp_{proj.id}"] = False
+                st.rerun()
+        st.divider()
 
 
 def render_new_project():
@@ -1951,12 +1986,16 @@ def render_new_project():
             "system.", eyebrow="New project")
     with st.form("newproj"):
         name = st.text_input("Project name *", "")
-        c = st.columns(2)
-        client = c[0].text_input("Client", "")
-        location = c[1].text_input("Location", "")
-        engineer = c[0].text_input("Engineer", "")
+        c = st.columns(3)
+        project_no = c[0].text_input("Project ID", "")
+        so_no = c[1].text_input("SO No.", "")
+        revision = c[2].text_input("Revision No.", "")
+        c2 = st.columns(2)
+        client = c2[0].text_input("Client", "")
+        location = c2[1].text_input("Location", "")
+        engineer = c2[0].text_input("Engineer", "")
         desc = st.text_area("Description", "")
-        sysname = st.text_input("First system name", "Aisle 1")
+        sysname = st.text_input("First system identifier", "Aisle 1")
         if st.form_submit_button("Create project", type="primary"):
             if not name.strip():
                 st.error("Project name is required.")
@@ -1964,7 +2003,9 @@ def render_new_project():
                 proj = PSTORE.create_project(name, client=client,
                                              location=location,
                                              engineer=engineer,
-                                             description=desc)
+                                             description=desc,
+                                             project_no=project_no,
+                                             so_no=so_no, revision=revision)
                 sysm = PSTORE.add_system(proj.id, sysname or "System 1")
                 goto("project", project_id=proj.id, system_id=sysm.id)
 
@@ -2119,15 +2160,37 @@ def render_project():
     proj = PSTORE.load(ss.project_id)
     if st.button("← Back to dashboard"):
         goto("dashboard")
-    meta = " · ".join(x for x in (proj.client, proj.location, proj.engineer,
-                                  proj.standard) if x)
+    tags = " · ".join(x for x in (proj.project_no and f"ID {proj.project_no}",
+                                  proj.so_no and f"SO {proj.so_no}",
+                                  proj.revision and f"Rev {proj.revision}")
+                      if x)
+    meta = " · ".join(x for x in (tags, proj.client, proj.location,
+                                  proj.engineer, proj.standard) if x)
     ui.hero(proj.name, meta, eyebrow="Project",
             crumbs=["Dashboard", proj.name])
+
+    with st.expander("✏️ Edit project details"):
+        with st.form("editproj"):
+            ec = st.columns(3)
+            e_no = ec[0].text_input("Project ID", proj.project_no)
+            e_so = ec[1].text_input("SO No.", proj.so_no)
+            e_rev = ec[2].text_input("Revision No.", proj.revision)
+            ec2 = st.columns(2)
+            e_client = ec2[0].text_input("Client", proj.client)
+            e_loc = ec2[1].text_input("Location", proj.location)
+            e_eng = ec2[0].text_input("Engineer", proj.engineer)
+            e_desc = st.text_area("Description", proj.description)
+            if st.form_submit_button("Save changes", type="primary"):
+                proj.project_no, proj.so_no, proj.revision = e_no, e_so, e_rev
+                proj.client, proj.location = e_client, e_loc
+                proj.engineer, proj.description = e_eng, e_desc
+                PSTORE.save(proj)
+                st.rerun()
 
     n_total_cfg = sum(len(s.configurations) for s in proj.systems)
     hc = st.columns([3, 1])
     with hc[0].expander("➕ Add a system"):
-        sn = st.text_input("System name", key="newsysname")
+        sn = st.text_input("System identifier", key="newsysname")
         if st.button("Add system") and sn.strip():
             sysm = PSTORE.add_system(proj.id, sn)
             goto("project", project_id=proj.id, system_id=sysm.id)
@@ -3910,9 +3973,10 @@ with st.sidebar:
             ss[k] = None
         st.rerun()
     st.divider()
-    st.caption("OpenSees 2nd-order · semi-rigid · units N, mm, MPa")
+    st.caption("OpenSees 2nd-order · semi-rigid")
+    st.caption("Units: N, mm, MPa")
     st.caption(f"© {B.COMPANY} · {B.WEBSITE}")
-    st.caption(f"build {B.BUILD}")
+    st.caption(f"v{B.VERSION} · {B.BUILD_DATE}")
 
 _VIEWS = {
     "dashboard": render_dashboard,

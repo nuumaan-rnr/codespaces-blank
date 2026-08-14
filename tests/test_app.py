@@ -206,6 +206,48 @@ def test_compare_view_shows_two_configs(tmp_path, monkeypatch):
     assert "util · STRESS" in md
 
 
+def test_dashboard_lists_and_searches_projects(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from rack15512.project import ProjectStore
+    ps = ProjectStore("projects")
+    ps.create_project("Alpha Tower", project_no="P-100", so_no="SO-1",
+                      revision="A", client="Acme")
+    ps.create_project("Beta Warehouse", project_no="P-200", so_no="SO-2",
+                      revision="B", client="Globex")
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at)
+    at.run()
+    assert not at.exception
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "Alpha Tower" in md and "Beta Warehouse" in md
+    assert "P-100" in md and "P-200" in md
+    assert "SO-1" in md and "SO-2" in md
+
+    at.text_input(key="proj_search").set_value("Beta").run()
+    assert not at.exception
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "Beta Warehouse" in md
+    assert "Alpha Tower" not in md
+
+    at.text_input(key="proj_search").set_value("nothing matches this").run()
+    assert not at.exception
+    md = " ".join(m.value or "" for m in at.markdown)
+    assert "rnr-empty" in md
+    assert "Alpha Tower" not in md and "Beta Warehouse" not in md
+
+
+def test_new_project_form_has_project_id_so_revision_fields(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    at = AppTest.from_file(APP, default_timeout=60)
+    _setss(at, view="new_project")
+    at.run()
+    assert not at.exception
+    labels = {w.label for w in at.text_input}
+    assert {"Project ID", "SO No.", "Revision No.",
+           "First system identifier"} <= labels
+
+
 def test_unauthenticated_sees_only_the_login_page(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     at = AppTest.from_file(APP, default_timeout=60)
