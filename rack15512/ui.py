@@ -102,27 +102,63 @@ h1,h2,h3,h4 {{ color:var(--text); letter-spacing:-.02em; font-weight:800; }}
 p, span, label, .stMarkdown {{ color:var(--text); }}
 hr {{ border-color:var(--border); }}
 
-/* sidebar */
+/* sidebar - a compact, app-like nav: left-aligned pills, a filled "active"
+   state for the current section, and grouped-by-whitespace (not lines)  */
 [data-testid="stSidebar"] {{
   background:linear-gradient(180deg,{v['sidebar']},{v['bg2']});
   border-right:1px solid var(--border);
 }}
 [data-testid="stSidebar"] * {{ color:{v['sidebar_text']}; }}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ gap:.4rem; }}
+[data-testid="stSidebar"] hr {{
+  margin:14px 0; border-color:rgba(255,255,255,.10);
+}}
 [data-testid="stSidebar"] .stButton>button {{
-  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
-  color:{v['sidebar_text']}; font-weight:600; border-radius:12px;
-  transition:.18s;
+  background:transparent; border:1px solid transparent;
+  color:{v['sidebar_text']}; font-weight:600; border-radius:10px;
+  transition:.14s ease; justify-content:flex-start; gap:8px;
+  padding:.5rem .7rem; box-shadow:none;
 }}
+[data-testid="stSidebar"] .stButton>button p {{ text-align:left; }}
 [data-testid="stSidebar"] .stButton>button:hover {{
-  background:{v['teal']}; border-color:{v['teal']}; color:#fff;
-  transform:translateY(-1px);
+  background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.10);
+  color:#fff; transform:none;
 }}
+[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
+  background:{v['teal']}; border-color:{v['teal']}; color:#fff;
+  box-shadow:0 2px 12px {v['teal']}4d;
+}}
+[data-testid="stSidebar"] .stButton>button[kind="primary"]:hover {{
+  background:{v['teal2']}; border-color:{v['teal2']};
+}}
+[data-testid="stSidebar"] .stToggle {{ margin:2px 0 4px; }}
+.rnr-sb-brand {{ display:flex; align-items:center; gap:10px; padding:2px 0 4px; }}
+.rnr-sb-brand .name {{ font-weight:800; font-size:1rem; letter-spacing:-.01em; }}
+.rnr-sb-brand .tag {{ font-size:.72rem; opacity:.55; margin-top:1px; }}
+.rnr-sbchip {{ background:rgba(255,255,255,.05); border:1px solid
+  rgba(255,255,255,.10); border-radius:10px; padding:8px 10px; margin:2px 0; }}
+.rnr-sbchip .k {{ font-size:.64rem; text-transform:uppercase;
+  letter-spacing:.07em; opacity:.5; font-weight:700; }}
+.rnr-sbchip .v {{ font-size:.85rem; font-weight:700; margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+.rnr-profile {{ display:flex; align-items:center; gap:10px; padding:4px 0; }}
+.rnr-profile .av {{ width:32px; height:32px; border-radius:50%;
+  background:{v['teal']}; color:#fff; display:flex; align-items:center;
+  justify-content:center; font-weight:800; font-size:.9rem; flex:none; }}
+.rnr-profile .meta {{ min-width:0; }}
+.rnr-profile .nm {{ font-weight:700; font-size:.86rem; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }}
+.rnr-profile .un {{ font-size:.72rem; opacity:.55; margin-left:5px; }}
+.rnr-sbfooter {{ font-size:.7rem; line-height:1.8; opacity:.5; margin-top:2px; }}
+.rnr-sbfooter a {{ color:inherit; }}
 
-/* buttons */
+/* buttons - nowrap so a narrow column (e.g. a compact list's action column)
+   never wraps a short label onto two lines and inflates the row height */
 .stButton>button, .stDownloadButton>button {{
   border-radius:12px; font-weight:600; padding:.5rem 1rem;
   border:1px solid var(--border); background:var(--surface);
   color:var(--text); transition:.18s ease; box-shadow:0 1px 2px rgba(0,0,0,.04);
+  white-space:nowrap;
 }}
 .stButton>button:hover, .stDownloadButton>button:hover {{
   border-color:{v['teal']}; color:{v['teal']};
@@ -231,6 +267,26 @@ textarea {{
 .rnr-pill.idle {{ background:var(--surface2); color:var(--muted);
   border:1px solid var(--border); }}
 .rnr-dot {{ width:8px; height:8px; border-radius:50%; display:inline-block; }}
+/* compact list rows (the projects dashboard, via st.container(key="proj_list"),
+   which Streamlit stamps with the .st-key-proj_list class below) - collapse
+   Streamlit's default block gap and give each row a slim divider + hover
+   highlight instead of the tall default st.columns()/st.divider() rhythm */
+/* .st-key-proj_list lands on the SAME element as its own stVerticalBlock
+   (Streamlit stamps the key class directly onto the container, not a
+   wrapper around it) - match both that element and any nested vertical
+   block, or the outer row-to-row flex gap (16px by default) survives */
+.st-key-proj_list[data-testid="stVerticalBlock"],
+.st-key-proj_list [data-testid="stVerticalBlock"] {{ gap:0 !important; }}
+.st-key-proj_list [data-testid="stHorizontalBlock"] {{
+  padding:7px 8px; margin:0 !important; border-radius:10px;
+  align-items:center; transition:background .12s ease;
+}}
+.st-key-proj_list [data-testid="stHorizontalBlock"]:hover {{
+  background:var(--surface2);
+}}
+.st-key-proj_list hr {{ margin:0 !important; opacity:.6; }}
+.rnr-row-title {{ font-weight:700; font-size:.92rem; line-height:1.3; }}
+.rnr-row-meta {{ color:var(--muted); font-size:.74rem; line-height:1.3; }}
 .rnr-tile {{ background:var(--surface); border:1px solid var(--border);
   border-radius:16px; padding:14px 18px; box-shadow:var(--shadow); }}
 .rnr-tile .k {{ color:var(--muted); font-size:.78rem; font-weight:600;
@@ -331,6 +387,40 @@ def role_badge(is_admin: bool) -> str:
     cls = "pass" if is_admin else "idle"
     label = "ADMIN" if is_admin else "USER"
     return f'<span class="rnr-pill {cls}">{label}</span>'
+
+
+def sidebar_brand(name: str, tagline: str) -> None:
+    st.markdown(
+        f'<div class="rnr-sb-brand"><div>'
+        f'<div class="name">{_html.escape(name)}</div>'
+        f'<div class="tag">{_html.escape(tagline)}</div></div></div>',
+        unsafe_allow_html=True)
+
+
+def sidebar_chip(label: str, value: str) -> None:
+    """A compact key/value chip for sidebar context (e.g. current project) -
+    lighter-weight than st.info, which reads as a full alert box."""
+    st.markdown(
+        f'<div class="rnr-sbchip"><div class="k">{_html.escape(label)}</div>'
+        f'<div class="v">{_html.escape(value)}</div></div>',
+        unsafe_allow_html=True)
+
+
+def sidebar_profile(name: str, username: str, is_admin: bool) -> None:
+    initial = (name or username or "?").strip()[:1].upper()
+    st.markdown(
+        f'<div class="rnr-profile"><div class="av">{_html.escape(initial)}'
+        f'</div><div class="meta"><div class="nm">'
+        f'{_html.escape(name or username)}</div><div>'
+        f'{role_badge(is_admin)}<span class="un">@{_html.escape(username)}'
+        f'</span></div></div></div>', unsafe_allow_html=True)
+
+
+def sidebar_footer(lines) -> None:
+    """Condensed footer block - one compact paragraph instead of several
+    separate st.caption() calls, each with their own margin."""
+    st.markdown(f'<div class="rnr-sbfooter">{"<br>".join(lines)}</div>',
+                unsafe_allow_html=True)
 
 
 def tile(label: str, value: str) -> str:

@@ -8,6 +8,7 @@ Create a new project or open an existing one to view its model and results
 masters are managed in their own page and held inside the system.
 """
 
+import html as _html
 import os
 import tempfile
 
@@ -2026,16 +2027,6 @@ def render_dashboard():
                                   p.client)).lower()
         projects = [p for p in projects if _hit(p)]
 
-    _ROW_COLS = [2.2, 1.1, 1.1, 0.9, 0.9, 0.9, 1, 1.7]
-    hdr = st.columns(_ROW_COLS)
-    for h, label in zip(hdr, ("Project", "Project ID", "SO No.", "Rev",
-                              "Systems", "Configs", "Status", "")):
-        h.markdown(f"<span class='rnr-muted' style='font-size:.74rem;"
-                   f"font-weight:700;text-transform:uppercase;"
-                   f"letter-spacing:.05em'>{label}</span>",
-                   unsafe_allow_html=True)
-    st.divider()
-
     if not projects:
         ui.empty_state("🔍", "No matching projects",
                        f"Nothing matches '{query}'.")
@@ -2054,46 +2045,58 @@ def render_dashboard():
     start = (page - 1) * PAGE_SIZE
     page_projects = projects[start:start + PAGE_SIZE]
 
-    for proj in page_projects:
-        n_cfg = sum(len(s.configurations) for s in proj.systems)
-        verdicts = [c.run_summary["verdict"]
-                    for s in proj.systems for c in s.configurations
-                    if c.run_summary]
-        status = ("PASS" if verdicts and all(v == "PASS" for v in verdicts)
-                  else ("FAIL" if any(v == "FAIL" for v in verdicts)
-                        else "not run"))
-        cc = st.columns(_ROW_COLS, vertical_alignment="center")
-        meta = " · ".join(x for x in (proj.client, proj.location,
-                                      proj.engineer) if x)
-        cc[0].markdown(f"**{proj.name}**" + (f"  \n<span class='rnr-muted' "
-                       f"style='font-size:.8rem'>{meta}</span>"
-                       if meta else ""), unsafe_allow_html=True)
-        cc[1].write(proj.project_no or "—")
-        cc[2].write(proj.so_no or "—")
-        cc[3].write(proj.revision or "—")
-        cc[4].write(len(proj.systems))
-        cc[5].write(n_cfg)
-        cc[6].markdown(ui.pill(status), unsafe_allow_html=True)
-        ac = cc[7].columns(2)
-        if ac[0].button("Open →", key=f"open_{proj.id}", width="stretch",
-                        type="primary"):
-            goto("project", project_id=proj.id)
-        if ac[1].button("🗑", key=f"delp_{proj.id}", width="stretch",
-                        help="Delete project"):
-            ss[f"confirm_delp_{proj.id}"] = True
-        if ss.get(f"confirm_delp_{proj.id}"):
-            st.warning(f"Permanently delete project '{proj.name}' and all "
-                       f"its systems / configurations / results?")
-            wc = st.columns(2)
-            if wc[0].button("Yes, delete project", key=f"delpy_{proj.id}",
-                            type="primary"):
-                PSTORE.delete_project(proj.id)
-                ss[f"confirm_delp_{proj.id}"] = False
-                st.rerun()
-            if wc[1].button("Cancel", key=f"delpn_{proj.id}"):
-                ss[f"confirm_delp_{proj.id}"] = False
-                st.rerun()
+    _ROW_COLS = [2.2, 1.1, 1.1, 0.9, 0.9, 0.9, 1, 1.7]
+    with st.container(key="proj_list"):
+        hdr = st.columns(_ROW_COLS)
+        for h, label in zip(hdr, ("Project", "Project ID", "SO No.", "Rev",
+                                  "Systems", "Configs", "Status", "")):
+            h.markdown(f"<span class='rnr-muted' style='font-size:.72rem;"
+                       f"font-weight:700;text-transform:uppercase;"
+                       f"letter-spacing:.05em'>{label}</span>",
+                       unsafe_allow_html=True)
         st.divider()
+
+        for proj in page_projects:
+            n_cfg = sum(len(s.configurations) for s in proj.systems)
+            verdicts = [c.run_summary["verdict"]
+                        for s in proj.systems for c in s.configurations
+                        if c.run_summary]
+            status = ("PASS" if verdicts and all(v == "PASS" for v in verdicts)
+                      else ("FAIL" if any(v == "FAIL" for v in verdicts)
+                            else "not run"))
+            cc = st.columns(_ROW_COLS, vertical_alignment="center")
+            meta = " · ".join(x for x in (proj.client, proj.location,
+                                          proj.engineer) if x)
+            cc[0].markdown(
+                f"<div class='rnr-row-title'>{_html.escape(proj.name)}</div>"
+                + (f"<div class='rnr-row-meta'>{_html.escape(meta)}</div>"
+                   if meta else ""), unsafe_allow_html=True)
+            cc[1].write(proj.project_no or "—")
+            cc[2].write(proj.so_no or "—")
+            cc[3].write(proj.revision or "—")
+            cc[4].write(len(proj.systems))
+            cc[5].write(n_cfg)
+            cc[6].markdown(ui.pill(status), unsafe_allow_html=True)
+            ac = cc[7].columns(2)
+            if ac[0].button("Open", key=f"open_{proj.id}", width="stretch",
+                            type="primary"):
+                goto("project", project_id=proj.id)
+            if ac[1].button("🗑", key=f"delp_{proj.id}", width="stretch",
+                            help="Delete project"):
+                ss[f"confirm_delp_{proj.id}"] = True
+            if ss.get(f"confirm_delp_{proj.id}"):
+                st.warning(f"Permanently delete project '{proj.name}' and "
+                           f"all its systems / configurations / results?")
+                wc = st.columns(2)
+                if wc[0].button("Yes, delete project", key=f"delpy_{proj.id}",
+                                type="primary"):
+                    PSTORE.delete_project(proj.id)
+                    ss[f"confirm_delp_{proj.id}"] = False
+                    st.rerun()
+                if wc[1].button("Cancel", key=f"delpn_{proj.id}"):
+                    ss[f"confirm_delp_{proj.id}"] = False
+                    st.rerun()
+            st.divider()
 
     if n_pages > 1:
         pc = st.columns([1, 1, 3, 1, 1])
@@ -4058,44 +4061,47 @@ is_admin = ss.user.get("role") == "admin"
 with st.sidebar:
     if os.path.exists(B.LOGO_PATH):
         st.image(B.LOGO_PATH, width="stretch")
-    st.markdown(f"<div style='font-weight:800;font-size:1.02rem;margin-top:2px'>"
-                f"{B.PRODUCT}</div>"
-                f"<div class='rnr-muted' style='font-size:.8rem'>{B.TAGLINE}"
-                f"</div>", unsafe_allow_html=True)
+    ui.sidebar_brand(B.PRODUCT, B.TAGLINE)
     st.divider()
-    if st.button("🏠  Dashboard", width="stretch"):
+
+    # highlight the current section so the nav doubles as a "you are here"
+    nav_section = ("masters" if ss.view == "masters" else
+                  "user_access" if ss.view == "user_access" else "dashboard")
+    if st.button("🏠  Dashboard", width="stretch",
+                type="primary" if nav_section == "dashboard" else "secondary"):
         goto("dashboard")
     if is_admin:
-        if st.button("📚  Section masters", width="stretch"):
+        if st.button("📚  Section masters", width="stretch",
+                    type="primary" if nav_section == "masters"
+                    else "secondary"):
             goto("masters")
-        if st.button("👤  User access", width="stretch"):
+        if st.button("👤  User access", width="stretch",
+                    type="primary" if nav_section == "user_access"
+                    else "secondary"):
             goto("user_access")
-    st.divider()
     ui.theme_toggle()
     if ss.project_id and ss.view in ("project", "configure", "view_config"):
-        st.divider()
-        st.caption("Current project")
         try:
-            st.info(PSTORE.load(ss.project_id).name)
+            ui.sidebar_chip("Current project", PSTORE.load(ss.project_id).name)
         except Exception:
             pass
+
     st.divider()
-    role_badge = "Admin" if is_admin else "User"
-    st.markdown(f"<div style='font-weight:700'>{ss.user.get('name') or ss.user['username']}"
-                f"</div><div class='rnr-muted' style='font-size:.8rem'>"
-                f"{role_badge} · @{ss.user['username']}</div>",
-                unsafe_allow_html=True)
+    ui.sidebar_profile(ss.user.get("name") or ss.user["username"],
+                       ss.user["username"], is_admin)
     if st.button("🚪  Log out", width="stretch"):
         ss.user = None
         ss.view = "dashboard"
         for k in ("project_id", "system_id", "config_id", "edit_cfg"):
             ss[k] = None
         st.rerun()
-    st.divider()
-    st.caption("OpenSees 2nd-order · semi-rigid")
-    st.caption("Units: N, mm, MPa")
-    st.caption(f"© {B.COMPANY} · {B.WEBSITE}")
-    st.caption(f"v{B.VERSION} · {B.BUILD_DATE}")
+    ui.sidebar_footer([
+        "OpenSees 2nd-order · semi-rigid",
+        "Units: N, mm, MPa",
+        f"© {B.COMPANY} · "
+        f"<a href='https://{B.WEBSITE}' target='_blank'>{B.WEBSITE}</a>",
+        f"v{B.VERSION} · {B.BUILD_DATE}",
+    ])
 
 _VIEWS = {
     "dashboard": render_dashboard,
